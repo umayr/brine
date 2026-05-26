@@ -1,0 +1,74 @@
+{{if .Changes}}
+<div class="bg-base-100 rounded-box shadow-sm">
+  <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+    <div class="flex items-center gap-2">
+      <h2 class="font-semibold">Plan</h2>
+      <span class="text-xs text-base-content/40 font-mono">{{len .Changes}} change{{if ne (len .Changes) 1}}s{{end}}</span>
+    </div>
+    <button onclick="this.closest('.bg-base-100').remove()" class="btn btn-ghost btn-xs">
+      <i data-lucide="x" class="w-3.5 h-3.5"></i>
+    </button>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="table table-sm">
+      <thead>
+        <tr class="text-base-content/50">
+          <th>Kind</th>
+          <th>Service</th>
+          <th>Changes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Changes}}
+        <tr class="{{if eq .Kind "noop"}}opacity-50{{end}}">
+          <td>
+            {{if eq .Kind "create"}}
+            <span class="badge badge-success badge-sm gap-1 font-mono">
+              <i data-lucide="plus" class="w-3 h-3"></i>create
+            </span>
+            {{else if eq .Kind "recreate"}}
+            <span class="badge badge-warning badge-sm gap-1 font-mono">
+              <i data-lucide="refresh-cw" class="w-3 h-3"></i>recreate
+            </span>
+            {{else if eq .Kind "remove"}}
+            <span class="badge badge-error badge-sm gap-1 font-mono">
+              <i data-lucide="minus" class="w-3 h-3"></i>remove
+            </span>
+            {{else if eq .Kind "noop"}}
+            <span class="badge badge-ghost badge-sm font-mono">noop</span>
+            {{else}}
+            <span class="badge badge-ghost badge-sm font-mono">{{.Kind}}</span>
+            {{end}}
+          </td>
+          <td class="font-mono text-sm font-medium">{{.Service}}</td>
+          <td class="text-xs font-mono">
+            {{range .Diffs}}
+            <div class="flex items-center gap-1.5 text-base-content/70">
+              <span class="text-base-content/40 w-16 shrink-0">{{.Field}}</span>
+              {{if .Before}}<span class="text-error/80 line-through">{{.Before}}</span>{{end}}
+              {{if and .Before .After}}<span class="text-base-content/30">→</span>{{end}}
+              {{if .After}}<span class="text-success/80">{{.After}}</span>{{end}}
+            </div>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="px-5 py-3 border-t border-base-200 font-mono text-xs text-base-content/50 flex gap-4">
+    {{if .Summary.Create}}<span class="text-success">+{{.Summary.Create}} create</span>{{end}}
+    {{if .Summary.Recreate}}<span class="text-warning">~{{.Summary.Recreate}} recreate</span>{{end}}
+    {{if .Summary.Remove}}<span class="text-error">-{{.Summary.Remove}} remove</span>{{end}}
+    {{if .Summary.Noop}}<span>{{.Summary.Noop}} unchanged</span>{{end}}
+  </div>
+</div>
+{{else}}
+<div class="bg-base-100 rounded-box shadow-sm px-5 py-4 flex items-center gap-2">
+  <i data-lucide="check-circle" class="w-4 h-4 text-success"></i>
+  <span class="text-sm">No changes — stack is up to date</span>
+  <button onclick="this.closest('.bg-base-100').remove()" class="btn btn-ghost btn-xs ml-auto">
+    <i data-lucide="x" class="w-3.5 h-3.5"></i>
+  </button>
+</div>
+{{end}}

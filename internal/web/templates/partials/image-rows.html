@@ -1,0 +1,35 @@
+{{range .}}
+<tr class="hover" id="image-{{.ID}}">
+  <td class="font-mono text-xs text-base-content/50">{{.ID}}</td>
+  <td>
+    {{range .Tags}}
+    <span class="badge badge-ghost badge-sm font-mono mr-1">{{.}}</span>
+    {{else}}
+    <span class="font-mono text-xs text-base-content/30">untagged</span>
+    {{end}}
+  </td>
+  <td class="font-mono text-xs text-base-content/60">{{formatBytes .Size}}</td>
+  <td class="font-mono text-xs text-base-content/60">{{.Created.Format "2006-01-02"}}</td>
+  <td class="text-right">
+    <button class="btn btn-ghost btn-xs text-error"
+      onclick="confirmAction('Remove image', 'Remove {{index .Tags 0}}?', () => removeImage('{{.ID}}'))"
+    >Remove</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="5" class="text-center py-12 text-base-content/30 font-mono text-sm">no images found</td></tr>
+{{end}}
+
+<script>
+function removeImage(id) {
+  fetch(`/api/images/${id}`, { method: 'DELETE' })
+    .then(res => {
+      if (res.ok) {
+        document.getElementById('image-' + id)?.remove();
+        showToast('Image removed', 'success');
+      } else {
+        showToast('Remove failed', 'error');
+      }
+    });
+}
+</script>

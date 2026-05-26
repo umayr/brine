@@ -1,0 +1,54 @@
+{{if .}}
+<div class="overflow-x-auto">
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>State</th>
+        <th>Status</th>
+        <th>Ports</th>
+        <th class="text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{range .}}
+      <tr class="hover" id="sc-{{.ID}}">
+        <td>
+          <a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a>
+        </td>
+        <td>
+          {{if eq .State "running"}}
+          <span class="badge badge-success badge-sm">running</span>
+          {{else if eq .State "exited"}}
+          <span class="badge badge-ghost badge-sm">exited</span>
+          {{else}}
+          <span class="badge badge-sm">{{.State}}</span>
+          {{end}}
+        </td>
+        <td class="text-xs text-base-content/60">{{.Status}}</td>
+        <td class="text-xs font-mono text-base-content/60">{{range .Ports}}{{.}} {{end}}</td>
+        <td class="text-right">
+          <div class="flex gap-1 justify-end">
+            {{if eq .State "running"}}
+            <button class="btn btn-ghost btn-xs"
+              hx-post="/web/containers/{{.ID}}/stop"
+              hx-target="#sc-{{.ID}}"
+              hx-swap="outerHTML"
+            >Stop</button>
+            {{else}}
+            <button class="btn btn-ghost btn-xs"
+              hx-post="/web/containers/{{.ID}}/start"
+              hx-target="#sc-{{.ID}}"
+              hx-swap="outerHTML"
+            >Start</button>
+            {{end}}
+          </div>
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<div class="px-5 py-8 text-center text-base-content/40">No containers in this stack.</div>
+{{end}}

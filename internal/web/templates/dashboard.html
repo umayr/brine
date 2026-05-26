@@ -1,0 +1,129 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Dashboard — Brine{{end}}
+{{define "header"}}Dashboard{{end}}
+
+{{define "content"}}
+<div class="space-y-6">
+
+  <!-- Stats row -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+    <div class="stat bg-base-100 rounded-box shadow-sm">
+      <div class="stat-figure text-primary">
+        <i data-lucide="layers" class="w-8 h-8"></i>
+      </div>
+      <div class="stat-title">Stacks</div>
+      <div class="stat-value text-primary">{{.Stats.Stacks}}</div>
+      <div class="stat-desc"><a href="/stacks" class="link link-hover">View all →</a></div>
+    </div>
+
+    <div class="stat bg-base-100 rounded-box shadow-sm">
+      <div class="stat-figure text-success">
+        <i data-lucide="box" class="w-8 h-8"></i>
+      </div>
+      <div class="stat-title">Containers</div>
+      <div class="stat-value">
+        <span class="text-success">{{.Stats.Running}}</span>
+        <span class="text-2xl font-normal text-base-content/30"> / {{.Stats.Containers}}</span>
+      </div>
+      <div class="stat-desc">running / total</div>
+    </div>
+
+    <div class="stat bg-base-100 rounded-box shadow-sm">
+      <div class="stat-figure text-base-content/40">
+        <i data-lucide="image" class="w-8 h-8"></i>
+      </div>
+      <div class="stat-title">Images</div>
+      <div class="stat-value">{{.Stats.Images}}</div>
+      <div class="stat-desc"><a href="/images" class="link link-hover">View all →</a></div>
+    </div>
+  </div>
+
+  <!-- Recent stacks -->
+  <div class="bg-base-100 rounded-box shadow-sm">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+      <h2 class="font-semibold">Stacks</h2>
+      <a href="/stacks/new" class="btn btn-primary btn-sm gap-1.5">
+        <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        New stack
+      </a>
+    </div>
+    {{if .Stacks}}
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr class="text-base-content/50">
+            <th>Name</th>
+            <th>Engine</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Stacks}}
+          <tr class="hover">
+            <td>
+              <div class="flex items-center gap-2">
+                <a href="/stacks/{{.Name}}" class="link link-hover font-mono font-medium text-sm">{{.Name}}</a>
+                {{if .Git}}<span class="badge badge-ghost badge-xs gap-1"><i data-lucide="git-branch" class="w-2.5 h-2.5"></i>git</span>{{end}}
+              </div>
+            </td>
+            <td><span class="badge badge-ghost badge-sm font-mono">{{.Engine}}</span></td>
+            <td class="font-mono text-xs text-base-content/50">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
+            <td class="text-right">
+              <a href="/stacks/{{.Name}}" class="btn btn-ghost btn-xs gap-1">
+                View <i data-lucide="arrow-right" class="w-3 h-3"></i>
+              </a>
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="py-14 text-center">
+      <i data-lucide="layers" class="w-10 h-10 mx-auto mb-3 text-base-content/20"></i>
+      <p class="text-base-content/50 text-sm mb-4">No stacks yet.</p>
+      <a href="/stacks/new" class="btn btn-primary btn-sm">Create your first stack</a>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Running containers -->
+  <div class="bg-base-100 rounded-box shadow-sm">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+      <h2 class="font-semibold">Running containers</h2>
+      <a href="/containers" class="btn btn-ghost btn-sm">View all</a>
+    </div>
+    {{if .Containers}}
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <thead>
+          <tr class="text-base-content/50">
+            <th>Name</th>
+            <th>Image</th>
+            <th>Status</th>
+            <th>Stack</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Containers}}
+          {{if eq .State "running"}}
+          <tr class="hover">
+            <td><a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a></td>
+            <td class="text-base-content/60 text-xs font-mono">{{.Image}}</td>
+            <td><span class="badge badge-success badge-sm gap-1"><i data-lucide="circle" class="w-2 h-2 fill-current"></i>running</span></td>
+            <td class="text-xs">{{if .Stack}}<a href="/stacks/{{.Stack}}" class="link link-hover text-base-content/70">{{.Stack}}</a>{{else}}<span class="text-base-content/30">—</span>{{end}}</td>
+          </tr>
+          {{end}}
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="py-10 text-center text-base-content/40 text-sm">No running containers.</div>
+    {{end}}
+  </div>
+
+</div>
+{{end}}

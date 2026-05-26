@@ -1,0 +1,115 @@
+{{template "layout.html" .}}
+
+{{define "title"}}{{.Container.Name}} — Brine{{end}}
+{{define "header"}}
+<div class="flex items-center gap-2 text-base-content/60">
+  <a href="/containers" class="hover:text-base-content transition-colors">Containers</a>
+  <span class="text-base-content/30">/</span>
+  <span class="font-mono text-base-content">{{.Container.Name}}</span>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="space-y-4">
+
+  <!-- Meta + actions -->
+  <div class="bg-base-100 rounded-box shadow-sm p-5">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-4 mb-5">
+      <div>
+        <div class="field-label mb-1">ID</div>
+        <div class="font-mono text-xs text-base-content/80">{{.Container.ID}}</div>
+      </div>
+      <div>
+        <div class="field-label mb-1">Image</div>
+        <div class="font-mono text-xs text-base-content/80 truncate">{{.Container.Image}}</div>
+      </div>
+      <div>
+        <div class="field-label mb-1">State</div>
+        <div id="container-state">
+          {{template "container-state-badge" .Container}}
+        </div>
+      </div>
+      {{if .Container.Stack}}
+      <div>
+        <div class="field-label mb-1">Stack</div>
+        <div><a href="/stacks/{{.Container.Stack}}" class="link link-hover font-mono text-sm">{{.Container.Stack}}</a></div>
+      </div>
+      {{end}}
+    </div>
+
+    <div class="flex gap-2">
+      <button class="btn btn-success btn-sm gap-1.5"
+        hx-post="/web/containers/{{.Container.ID}}/start"
+        hx-target="#container-state"
+        hx-swap="innerHTML"
+      >
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
+        Start
+      </button>
+      <button class="btn btn-warning btn-sm gap-1.5"
+        hx-post="/web/containers/{{.Container.ID}}/stop"
+        hx-target="#container-state"
+        hx-swap="innerHTML"
+      >
+        <i data-lucide="square" class="w-3.5 h-3.5"></i>
+        Stop
+      </button>
+      <button class="btn btn-ghost btn-sm gap-1.5"
+        hx-post="/web/containers/{{.Container.ID}}/restart"
+        hx-target="#container-state"
+        hx-swap="innerHTML"
+      >
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        Restart
+      </button>
+    </div>
+  </div>
+
+  <!-- Logs -->
+  <div class="rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
+    <div class="terminal-header flex items-center justify-between px-4 py-2">
+      <span class="font-mono text-xs">logs — {{.Container.Name}}</span>
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <span class="text-xs text-gray-500">follow</span>
+          <input type="checkbox" class="toggle toggle-xs toggle-success" id="follow-toggle" checked>
+        </label>
+        <button onclick="clearLogs()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">clear</button>
+      </div>
+    </div>
+    <div
+      id="log-container"
+      class="terminal h-[32rem] overflow-y-auto"
+      hx-ext="sse"
+      sse-connect="/web/containers/{{.Container.ID}}/logs"
+      sse-swap="message"
+      hx-swap="beforeend"
+    ></div>
+  </div>
+
+</div>
+
+<script>
+function clearLogs() {
+  document.getElementById('log-container').innerHTML = '';
+}
+const logContainer = document.getElementById('log-container');
+const followToggle = document.getElementById('follow-toggle');
+const observer = new MutationObserver(() => {
+  if (followToggle.checked) logContainer.scrollTop = logContainer.scrollHeight;
+});
+observer.observe(logContainer, { childList: true });
+</script>
+{{end}}
+
+{{define "container-state-badge"}}
+{{if eq .State "running"}}
+<span class="badge badge-success badge-sm font-mono">running</span>
+{{else if eq .State "exited"}}
+<span class="badge badge-ghost badge-sm font-mono">exited</span>
+{{else if eq .State "paused"}}
+<span class="badge badge-warning badge-sm font-mono">paused</span>
+{{else}}
+<span class="badge badge-sm font-mono">{{.State}}</span>
+{{end}}
+{{end}}

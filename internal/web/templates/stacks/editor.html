@@ -1,0 +1,278 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Edit {{.Stack.Name}} — Brine{{end}}
+{{define "header"}}
+<div class="flex items-center gap-2 text-base-content/60">
+  <a href="/stacks" class="hover:text-base-content transition-colors">Stacks</a>
+  <span class="text-base-content/30">/</span>
+  <a href="/stacks/{{.Stack.Name}}" class="hover:text-base-content transition-colors font-mono">{{.Stack.Name}}</a>
+  <span class="text-base-content/30">/</span>
+  <span class="text-base-content">Edit</span>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="flex gap-4 h-full">
+
+  <!-- Editor panel -->
+  <div class="flex-1 min-w-0">
+
+    <!-- File tabs + editor -->
+    <div class="bg-base-100 rounded-box shadow-sm overflow-hidden">
+
+      <!-- Tab strip -->
+      <div class="flex items-center bg-base-200/60 border-b border-base-300 px-2 pt-2 gap-1 overflow-x-auto">
+        {{range .Files}}
+        <a href="/stacks/{{$.Stack.Name}}/edit?file={{.}}"
+          class="px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors
+            {{if eq . $.ActiveFile}}
+              bg-base-100 text-base-content font-semibold border border-b-base-100 border-base-300
+            {{else}}
+              text-base-content/50 hover:text-base-content hover:bg-base-100/50
+            {{end}}"
+        >
+          {{if eq . $.Stack.Entrypoint}}<span class="w-1 h-1 rounded-full bg-primary inline-block mr-1 mb-0.5"></span>{{end}}{{.}}
+        </a>
+        {{end}}
+        <button
+          class="ml-0.5 px-2 py-1.5 text-base-content/30 hover:text-base-content rounded-t-md transition-colors"
+          onclick="document.getElementById('new-file-modal').showModal()"
+          title="Add file"
+        ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
+      </div>
+
+      <!-- Editor form -->
+      <form
+        id="editor-form"
+        hx-put="/web/stacks/{{.Stack.Name}}"
+        hx-target="#edit-result"
+        hx-swap="innerHTML"
+        class="p-4 space-y-3"
+      >
+        <input type="hidden" name="active_file" value="{{.ActiveFile}}">
+        <textarea
+          id="pkl-editor"
+          name="pkl_content"
+          class="textarea textarea-bordered font-mono text-sm resize-y w-full"
+          style="min-height: 30rem;"
+          required
+        >{{.PklContent}}</textarea>
+
+        <div class="flex items-center gap-2 flex-wrap">
+          <button type="submit" class="btn btn-primary btn-sm gap-1.5">
+            <i data-lucide="save" class="w-3.5 h-3.5"></i>
+            Save
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm"
+            hx-post="/web/stacks/{{.Stack.Name}}/validate"
+            hx-target="#edit-result"
+            hx-swap="innerHTML"
+            hx-include="[name=pkl_content],[name=active_file]"
+          >Validate</button>
+          <button type="button" id="fmt-btn" class="btn btn-ghost btn-sm"
+            hx-post="/web/stacks/{{.Stack.Name}}/fmt"
+            hx-swap="none"
+            hx-include="[name=pkl_content],[name=active_file]"
+          >Format</button>
+
+          <div class="ml-auto flex items-center gap-2">
+            {{if ne .ActiveFile .Stack.Entrypoint}}
+            <button type="button" class="btn btn-ghost btn-xs text-error gap-1"
+              hx-delete="/web/stacks/{{.Stack.Name}}/files/{{.ActiveFile}}"
+              hx-target="#edit-result"
+              hx-swap="innerHTML"
+              onclick="return confirm('Delete {{.ActiveFile}}?')"
+            >
+              <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              Delete file
+            </button>
+            {{else}}
+            <span class="text-xs text-base-content/40 flex items-center gap-1">
+              <i data-lucide="star" class="w-3 h-3 text-primary fill-primary"></i>
+              entrypoint
+            </span>
+            {{end}}
+            <a href="/stacks/{{.Stack.Name}}" class="btn btn-ghost btn-sm">Cancel</a>
+          </div>
+        </div>
+
+        {{if ne .ActiveFile .Stack.Entrypoint}}
+        <div class="flex items-center gap-2 pt-1 border-t border-base-200">
+          <button type="button" class="btn btn-ghost btn-xs gap-1 text-base-content/50"
+            hx-post="/web/stacks/{{.Stack.Name}}/entrypoint"
+            hx-vals='{"filename":"{{.ActiveFile}}"}'
+            hx-target="#edit-result"
+            hx-swap="innerHTML"
+          >
+            <i data-lucide="star" class="w-3 h-3"></i>
+            Set as entrypoint
+          </button>
+        </div>
+        {{end}}
+
+        <div id="edit-result"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Recipe sidebar -->
+  <div class="w-64 shrink-0">
+    <div class="bg-base-100 rounded-box shadow-sm sticky top-4">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
+        <h3 class="text-sm font-semibold">Recipes</h3>
+        <a href="/recipes/new" class="btn btn-ghost btn-xs" title="New recipe">
+          <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+        </a>
+      </div>
+
+      <div class="divide-y divide-base-200 max-h-[calc(100vh-12rem)] overflow-y-auto">
+        {{if .Recipes}}
+        {{range $cat, $recipes := .Recipes}}
+        <div>
+          <div class="px-4 py-2 text-xs font-semibold text-base-content/40 uppercase tracking-wider">{{$cat}}</div>
+          {{range $recipes}}
+          <div class="px-4 py-2.5 hover:bg-base-200/50 group cursor-default">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-medium truncate">{{.Name}}</div>
+                {{if .Description}}<div class="text-xs text-base-content/40 truncate mt-0.5">{{.Description}}</div>{{end}}
+              </div>
+              <button
+                class="btn btn-ghost btn-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                onclick="insertRecipe('{{.Slug}}')"
+                title="Insert at cursor"
+              >
+                <i data-lucide="corner-down-left" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          {{end}}
+        </div>
+        {{end}}
+        {{else}}
+        <div class="px-4 py-8 text-center">
+          <i data-lucide="book-open" class="w-6 h-6 mx-auto mb-2 text-base-content/20"></i>
+          <p class="text-xs text-base-content/40">No recipes yet.</p>
+          <a href="/recipes/new" class="link link-hover text-xs mt-1 inline-block">Create one</a>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- New file modal -->
+<dialog id="new-file-modal" class="modal">
+  <div class="modal-box max-w-sm">
+    <h3 class="font-bold text-lg mb-4">Add file</h3>
+    <form
+      hx-post="/web/stacks/{{.Stack.Name}}/files"
+      hx-target="#edit-result"
+      hx-swap="innerHTML"
+      class="space-y-4"
+    >
+      <div class="form-control">
+        <label class="label"><span class="label-text">Filename</span></label>
+        <input type="text" name="filename" class="input input-bordered font-mono"
+          placeholder="shared.pkl" pattern="[a-zA-Z0-9_-]+\.pkl" required />
+        <label class="label"><span class="label-text-alt text-base-content/40">Must end in .pkl</span></label>
+      </div>
+      <div class="modal-action">
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('new-file-modal').close()">Cancel</button>
+        <button type="submit" class="btn btn-primary" onclick="document.getElementById('new-file-modal').close()">Create</button>
+      </div>
+    </form>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script type="module">
+import { EditorView, basicSetup } from 'https://esm.sh/codemirror@6';
+import { EditorState } from 'https://esm.sh/@codemirror/state@6';
+import { pkl } from 'https://esm.sh/codemirror-lang-pkl';
+import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
+
+const editorTheme = EditorView.theme({
+  '.cm-scroller': { fontFamily: "'JetBrains Mono', ui-monospace, monospace", minHeight: '28rem' },
+  '.cm-content': { minHeight: '28rem' },
+});
+
+const ta = document.getElementById('pkl-editor');
+const view = new EditorView({
+  state: EditorState.create({
+    doc: ta.value,
+    extensions: [
+      basicSetup,
+      pkl(),
+      oneDark,
+      editorTheme,
+      EditorView.lineWrapping,
+      EditorView.updateListener.of(v => {
+        if (v.docChanged) ta.value = v.state.doc.toString();
+      }),
+    ],
+  }),
+  parent: ta.parentElement,
+});
+ta.style.display = 'none';
+window._pklView = view;
+</script>
+
+<script>
+const recipeCache = {};
+
+async function insertRecipe(slug) {
+  let body = recipeCache[slug];
+  if (!body) {
+    const res = await fetch('/api/recipes/' + slug);
+    if (!res.ok) { showToast('Failed to load recipe', 'error'); return; }
+    const data = await res.json();
+    body = data.body;
+    recipeCache[slug] = body;
+  }
+  if (window._pklView) {
+    const state = window._pklView.state;
+    const pos = state.selection.main.head;
+    const prefix = (pos > 0 && state.sliceDoc(pos - 1, pos) !== '\n') ? '\n' : '';
+    window._pklView.dispatch({
+      changes: { from: pos, insert: prefix + body + '\n' },
+      selection: { anchor: pos + prefix.length + body.length + 1 },
+    });
+    window._pklView.focus();
+  } else {
+    const ta = document.getElementById('pkl-editor');
+    const start = ta.selectionStart;
+    const before = ta.value.substring(0, start);
+    const after  = ta.value.substring(ta.selectionEnd);
+    const prefix = (start > 0 && ta.value[start - 1] !== '\n') ? '\n' : '';
+    ta.value = before + prefix + body + '\n' + after;
+    ta.selectionStart = ta.selectionEnd = start + prefix.length + body.length + 1;
+    ta.focus();
+  }
+}
+
+// Ctrl+S / Cmd+S to save.
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    htmx.trigger(document.getElementById('editor-form'), 'submit');
+  }
+});
+
+// Format button: on success update CM view (and keep textarea in sync); on error show in result area.
+document.getElementById('fmt-btn').addEventListener('htmx:afterRequest', function(e) {
+  if (e.detail.successful) {
+    const text = e.detail.xhr.responseText;
+    document.getElementById('pkl-editor').value = text;
+    if (window._pklView) {
+      window._pklView.dispatch({
+        changes: { from: 0, to: window._pklView.state.doc.length, insert: text },
+      });
+    }
+  } else {
+    document.getElementById('edit-result').innerHTML = e.detail.xhr.responseText;
+  }
+});
+</script>
+{{end}}

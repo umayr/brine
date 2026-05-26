@@ -1,0 +1,36 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Containers — Brine{{end}}
+{{define "header"}}Containers{{end}}
+
+{{define "content"}}
+<div class="bg-base-100 rounded-box shadow-sm">
+  <div class="overflow-x-auto">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Image</th>
+          <th>State</th>
+          <th>Status</th>
+          <th>Stack</th>
+          <th>Ports</th>
+          <th class="text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody
+        id="containers-body"
+        hx-get="/web/containers"
+        hx-trigger="load, every 5s"
+        hx-swap="innerHTML"
+      >
+        <tr>
+          <td colspan="7" class="text-center py-8 text-base-content/40">
+            <span class="loading loading-spinner loading-sm"></span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

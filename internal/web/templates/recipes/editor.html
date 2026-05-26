@@ -1,0 +1,117 @@
+{{template "layout.html" .}}
+
+{{define "title"}}{{if .Recipe}}Edit {{.Recipe.Name}}{{else}}New Recipe{{end}} — Brine{{end}}
+
+{{define "header"}}
+<div class="flex items-center gap-2">
+  <a href="/recipes" class="text-base-content/50 hover:text-base-content">Recipes</a>
+  <span class="text-base-content/30">/</span>
+  <span>{{if .Recipe}}{{.Recipe.Name}}{{else}}New{{end}}</span>
+</div>
+{{end}}
+
+{{define "content"}}
+<script type="module">
+import { EditorView, basicSetup } from 'https://esm.sh/codemirror@6';
+import { EditorState } from 'https://esm.sh/@codemirror/state@6';
+import { pkl } from 'https://esm.sh/codemirror-lang-pkl';
+import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
+
+document.addEventListener('DOMContentLoaded', () => {
+  const ta = document.getElementById('recipe-body');
+  if (!ta) return;
+  const view = new EditorView({
+    state: EditorState.create({
+      doc: ta.value,
+      extensions: [
+        basicSetup,
+        pkl(),
+        oneDark,
+        EditorView.theme({
+          '.cm-scroller': { fontFamily: "'JetBrains Mono', ui-monospace, monospace", minHeight: '18rem' },
+          '.cm-content': { minHeight: '18rem' },
+        }),
+        EditorView.lineWrapping,
+        EditorView.updateListener.of(v => {
+          if (v.docChanged) ta.value = v.state.doc.toString();
+        }),
+      ],
+    }),
+    parent: ta.parentElement,
+  });
+  ta.style.display = 'none';
+});
+</script>
+<div class="max-w-3xl mx-auto space-y-5">
+  <div class="bg-base-100 rounded-box shadow-sm p-6">
+    <form
+      {{if .Recipe}}
+        hx-put="/web/recipes/{{.Recipe.Slug}}"
+      {{else}}
+        hx-post="/web/recipes"
+      {{end}}
+      hx-target="#recipe-result"
+      hx-swap="innerHTML"
+      class="space-y-5"
+    >
+      <div class="grid grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label"><span class="label-text">Name</span></label>
+          <input type="text" name="name" class="input input-bordered"
+            value="{{if .Recipe}}{{.Recipe.Name}}{{end}}"
+            placeholder="Simple Web Service" required />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">Category</span></label>
+          <input type="text" name="category" class="input input-bordered"
+            value="{{if .Recipe}}{{.Recipe.Category}}{{end}}"
+            placeholder="Web, Database, Patterns..." />
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label"><span class="label-text">Description</span></label>
+        <input type="text" name="description" class="input input-bordered"
+          value="{{if .Recipe}}{{.Recipe.Description}}{{end}}"
+          placeholder="Short description of what this recipe does" />
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text">Pkl body</span>
+          <span class="label-text-alt text-base-content/50">Fragment to insert into a stack</span>
+        </label>
+        <textarea
+          id="recipe-body"
+          name="body"
+          class="textarea textarea-bordered font-mono text-sm h-72 resize-y"
+          placeholder='["web"] {
+  image = "nginx:alpine"
+  ports = List("8080:80")
+}'
+          required
+        >{{if .Recipe}}{{.Recipe.Body}}{{end}}</textarea>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button type="submit" class="btn btn-primary">
+          {{if .Recipe}}Save{{else}}Create recipe{{end}}
+        </button>
+        {{if .Recipe}}
+        <button type="button" class="btn btn-ghost btn-sm text-error"
+          hx-delete="/web/recipes/{{.Recipe.Slug}}"
+          hx-target="body"
+          onclick="return confirm('Delete recipe {{.Recipe.Name}}?')"
+        >
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          Delete
+        </button>
+        {{end}}
+        <a href="/recipes" class="btn btn-ghost ml-auto">Cancel</a>
+      </div>
+
+      <div id="recipe-result"></div>
+    </form>
+  </div>
+</div>
+{{end}}

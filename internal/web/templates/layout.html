@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{block "title" .}}Brine{{end}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="/static/theme.js" defer></script>
+  <style>
+    /* Violet/purple primary — Heroku-style */
+    [data-theme="night"] {
+      --p:  oklch(0.62 0.22 288);
+      --pf: oklch(0.52 0.22 288);
+      --pc: oklch(1 0 0);
+    }
+
+    /* JetBrains Mono for all monospaced content */
+    .font-mono, code, pre, kbd, textarea.font-mono, input.font-mono {
+      font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+    }
+
+    /* Terminal panels */
+    .terminal {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 0.75rem;
+      line-height: 1.65;
+    }
+    .terminal-header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      color: #8b949e;
+    }
+    .terminal .log-line {
+      display: block;
+      white-space: pre-wrap;
+      word-break: break-all;
+      padding: 0 1rem;
+    }
+    .terminal .log-line:first-child { padding-top: 0.75rem; }
+    .terminal .log-line:last-child  { padding-bottom: 0.75rem; }
+    .terminal .log-line:hover { background: rgba(255,255,255,0.03); }
+    .terminal::-webkit-scrollbar { width: 6px; }
+    .terminal::-webkit-scrollbar-track { background: transparent; }
+    .terminal::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+
+    /* Field label — used for key-value metadata */
+    .field-label {
+      font-size: 0.6875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: oklch(var(--bc) / 0.38);
+      font-weight: 600;
+    }
+
+    /* Sidebar nav active: left border accent instead of bg highlight */
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      transition: all 0.15s;
+      border-left: 2px solid transparent;
+      color: oklch(var(--bc) / 0.45);
+    }
+    .nav-item:hover {
+      background: oklch(var(--b2));
+      color: oklch(var(--bc));
+    }
+    .nav-item.active {
+      border-left-color: oklch(var(--p));
+      background: oklch(var(--p) / 0.08);
+      color: oklch(var(--bc));
+      font-weight: 500;
+    }
+    .nav-item.active svg, .nav-item.active i {
+      color: oklch(var(--p));
+    }
+  </style>
+</head>
+<body class="bg-base-200 min-h-screen">
+
+<div class="flex min-h-screen">
+
+  <!-- Sidebar -->
+  <aside class="w-52 bg-base-100 border-r border-base-300 flex flex-col shrink-0">
+    <div class="px-5 py-5 border-b border-base-300">
+      <a href="/" class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: oklch(0.62 0.22 288);">
+          <i data-lucide="layers" class="w-4 h-4 text-white"></i>
+        </div>
+        <span class="font-semibold text-base tracking-tight">brine</span>
+      </a>
+    </div>
+
+    <nav class="flex-1 py-4 px-3 space-y-0.5">
+      <a href="/" class="nav-item {{if eq .Page "dashboard"}}active{{end}}">
+        <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i>
+        Dashboard
+      </a>
+      <a href="/stacks" class="nav-item {{if eq .Page "stacks"}}active{{end}}">
+        <i data-lucide="layers" class="w-4 h-4 shrink-0"></i>
+        Stacks
+      </a>
+      <a href="/containers" class="nav-item {{if eq .Page "containers"}}active{{end}}">
+        <i data-lucide="box" class="w-4 h-4 shrink-0"></i>
+        Containers
+      </a>
+      <a href="/images" class="nav-item {{if eq .Page "images"}}active{{end}}">
+        <i data-lucide="image" class="w-4 h-4 shrink-0"></i>
+        Images
+      </a>
+      <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}">
+        <i data-lucide="book-open" class="w-4 h-4 shrink-0"></i>
+        Recipes
+      </a>
+    </nav>
+
+    <div class="px-3 py-3 border-t border-base-300">
+      <button id="theme-toggle" onclick="toggleTheme()" class="nav-item w-full text-xs">
+        <i id="icon-moon" data-lucide="moon" class="w-3.5 h-3.5 shrink-0"></i>
+        <i id="icon-sun"  data-lucide="sun"  class="w-3.5 h-3.5 shrink-0 hidden"></i>
+        <span id="theme-label">Dark mode</span>
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="flex-1 flex flex-col min-h-screen overflow-hidden">
+    <header class="bg-base-100 border-b border-base-300 px-6 py-3.5 flex items-center justify-between shrink-0">
+      <div class="text-sm text-base-content/70">{{block "header" .}}Brine{{end}}</div>
+      <div class="flex items-center gap-2">{{block "header-actions" .}}{{end}}</div>
+    </header>
+
+    <main class="flex-1 p-6 overflow-auto">
+      {{block "content" .}}{{end}}
+    </main>
+  </div>
+</div>
+
+<div id="toasts" class="toast toast-top toast-end z-50"></div>
+
+<dialog id="confirm-modal" class="modal">
+  <div class="modal-box max-w-sm">
+    <h3 class="font-semibold text-base mb-1" id="modal-title">Confirm</h3>
+    <p class="text-sm text-base-content/60 mb-4" id="modal-message"></p>
+    <div class="flex justify-end gap-2">
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('confirm-modal').close()">Cancel</button>
+      <button class="btn btn-error btn-sm" id="modal-confirm-btn">Confirm</button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+  document.addEventListener('DOMContentLoaded', () => lucide.createIcons());
+  document.addEventListener('htmx:afterSettle',  () => lucide.createIcons());
+
+  function showToast(msg, type = 'info') {
+    const div = document.createElement('div');
+    div.className = `alert alert-${type} shadow-lg max-w-sm text-sm`;
+    div.innerHTML = `<span>${msg}</span>`;
+    document.getElementById('toasts').appendChild(div);
+    setTimeout(() => div.remove(), 4000);
+  }
+
+  function confirmAction(title, message, onConfirm) {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-message').textContent = message;
+    const btn = document.getElementById('modal-confirm-btn');
+    btn.onclick = () => { document.getElementById('confirm-modal').close(); onConfirm(); };
+    document.getElementById('confirm-modal').showModal();
+  }
+
+  document.addEventListener('htmx:responseError', (e) => {
+    showToast('Request failed — ' + e.detail.xhr.status, 'error');
+  });
+</script>
+</body>
+</html>

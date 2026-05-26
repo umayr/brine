@@ -1,0 +1,424 @@
+{{template "layout.html" .}}
+
+{{define "title"}}{{.Stack.Name}} — Brine{{end}}
+{{define "header"}}
+<div class="flex items-center gap-2 text-base-content/60">
+  <a href="/stacks" class="hover:text-base-content transition-colors">Stacks</a>
+  <span class="text-base-content/30">/</span>
+  <span class="font-mono text-base-content">{{.Stack.Name}}</span>
+  {{if .Stack.Git}}<span class="badge badge-ghost badge-sm gap-1 font-normal"><i data-lucide="git-branch" class="w-3 h-3"></i>git</span>{{end}}
+</div>
+{{end}}
+
+{{define "header-actions"}}
+{{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
+<a href="/stacks/{{.Stack.Name}}/edit" class="btn btn-ghost btn-sm gap-1.5">
+  <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+  Edit
+</a>
+{{end}}
+{{end}}
+
+{{define "content"}}
+<div class="space-y-4">
+
+  <!-- Action bar -->
+  <div class="bg-base-100 rounded-box shadow-sm px-4 py-3 flex flex-wrap items-center gap-1.5">
+    <!-- Primary action -->
+    <button class="btn btn-primary btn-sm gap-1.5"
+      onclick="runAction('up', '{{.Stack.Name}}')"
+    >
+      <i data-lucide="play" class="w-3.5 h-3.5"></i>
+      Deploy
+    </button>
+
+    <!-- Lifecycle -->
+    <div class="flex items-center gap-1 border-l border-base-300 pl-1.5 ml-0.5">
+      <button class="btn btn-ghost btn-sm gap-1.5" title="Stop containers and remove them"
+        onclick="runAction('down', '{{.Stack.Name}}')"
+      >
+        <i data-lucide="square" class="w-3.5 h-3.5"></i>
+        Down
+      </button>
+      <button class="btn btn-ghost btn-sm gap-1.5" title="Pause containers"
+        onclick="runAction('stop', '{{.Stack.Name}}')"
+      >
+        <i data-lucide="pause" class="w-3.5 h-3.5"></i>
+        Stop
+      </button>
+      <button class="btn btn-ghost btn-sm gap-1.5" title="Start stopped containers"
+        onclick="runAction('start', '{{.Stack.Name}}')"
+      >
+        <i data-lucide="play" class="w-3.5 h-3.5"></i>
+        Start
+      </button>
+      <button class="btn btn-ghost btn-sm gap-1.5"
+        onclick="runAction('restart', '{{.Stack.Name}}')"
+      >
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+        Restart
+      </button>
+    </div>
+
+    <!-- Plan -->
+    <div class="border-l border-base-300 pl-1.5 ml-0.5">
+      <button class="btn btn-ghost btn-sm gap-1.5"
+        hx-get="/web/stacks/{{.Stack.Name}}/plan"
+        hx-target="#plan-result"
+        hx-swap="innerHTML"
+      >
+        <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
+        Plan
+      </button>
+    </div>
+
+    <!-- Danger zone -->
+    <div class="flex items-center gap-1.5 ml-auto">
+      <button class="btn btn-sm btn-outline btn-error gap-1.5"
+        onclick="confirmAction('Teardown stack', 'This will remove all containers, images, volumes, and networks for {{.Stack.Name}}. Are you sure?', () => runAction('teardown', '{{.Stack.Name}}'))"
+      >
+        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+        Teardown
+      </button>
+      <button class="btn btn-sm btn-error gap-1.5"
+        onclick="confirmAction('Delete stack', 'Remove {{.Stack.Name}} from brine? Running containers will not be stopped.', () => deleteStack('{{.Stack.Name}}'))"
+      >
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+        Delete
+      </button>
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div class="bg-base-100 rounded-box shadow-sm divide-x divide-base-200 flex">
+    <div class="flex-1 px-5 py-4">
+      <div class="field-label mb-1">Engine</div>
+      <div class="font-mono text-sm">{{.Stack.Engine}}</div>
+    </div>
+    <div class="flex-1 px-5 py-4">
+      <div class="field-label mb-1">Created</div>
+      <div class="font-mono text-sm">{{.Stack.CreatedAt.Format "2006-01-02 15:04"}}</div>
+    </div>
+    <div class="flex-1 px-5 py-4">
+      <div class="field-label mb-1">Last updated</div>
+      <div class="font-mono text-sm">{{.Stack.UpdatedAt.Format "2006-01-02 15:04"}}</div>
+    </div>
+    <div class="flex-1 px-5 py-4">
+      <div class="field-label mb-1">Entrypoint</div>
+      <div class="font-mono text-sm">{{.Stack.Entrypoint}}</div>
+    </div>
+  </div>
+
+  <!-- Plan result (populated on demand) -->
+  <div id="plan-result"></div>
+
+  <!-- Action output terminal -->
+  <div id="action-output" class="hidden rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
+    <div class="terminal-header flex items-center justify-between px-4 py-2">
+      <span id="action-title" class="font-mono text-xs">output</span>
+      <button onclick="document.getElementById('action-output').classList.add('hidden')"
+        class="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+      </button>
+    </div>
+    <div id="action-log" class="terminal h-64 overflow-y-auto whitespace-pre-wrap"></div>
+  </div>
+
+  <!-- Containers in this stack -->
+  <div class="bg-base-100 rounded-box shadow-sm">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+      <h2 class="font-semibold">Containers</h2>
+      <button
+        hx-get="/web/stacks/{{.Stack.Name}}/containers"
+        hx-target="#stack-containers"
+        hx-swap="innerHTML"
+        class="btn btn-ghost btn-xs gap-1.5"
+      >
+        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+        Refresh
+      </button>
+    </div>
+    <div id="stack-containers"
+      hx-get="/web/stacks/{{.Stack.Name}}/containers"
+      hx-trigger="load, every 5s"
+      hx-swap="innerHTML"
+    >
+      <div class="px-5 py-6 text-center text-base-content/40">
+        <span class="loading loading-spinner loading-sm"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Git source panel (shown only for git-backed stacks) -->
+  {{if .Stack.Git}}
+  <div class="bg-base-100 rounded-box shadow-sm">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+      <div class="flex items-center gap-2">
+        <i data-lucide="git-branch" class="w-4 h-4 text-base-content/50"></i>
+        <h2 class="font-semibold">Git source</h2>
+        {{if .Stack.Git.ReadOnly}}
+        <span class="badge badge-warning badge-sm">read-only</span>
+        {{end}}
+        {{if .Stack.Git.AutoDeploy}}
+        <span class="badge badge-primary badge-sm">auto-deploy</span>
+        {{end}}
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="btn btn-ghost btn-xs gap-1.5"
+          hx-post="/web/stacks/{{.Stack.Name}}/git/pull"
+          hx-target="#git-result"
+          hx-swap="innerHTML"
+          hx-indicator="#git-spinner"
+        >
+          <span id="git-spinner" class="htmx-indicator loading loading-spinner loading-xs"></span>
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+          Pull latest
+        </button>
+        {{if not .Stack.Git.ReadOnly}}
+        <button class="btn btn-ghost btn-xs gap-1.5"
+          onclick="document.getElementById('push-modal').showModal()"
+        >
+          <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+          Push changes
+        </button>
+        {{end}}
+      </div>
+    </div>
+    <div class="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
+      <div>
+        <div class="field-label mb-1">URL</div>
+        <div class="font-mono text-xs truncate text-base-content/80">{{.Stack.Git.URL}}</div>
+      </div>
+      <div>
+        <div class="field-label mb-1">Branch</div>
+        <div class="font-mono text-sm">{{.Stack.Git.Branch}}</div>
+      </div>
+      {{if .Stack.Git.Folder}}
+      <div>
+        <div class="field-label mb-1">Folder</div>
+        <div class="font-mono text-sm">{{.Stack.Git.Folder}}</div>
+      </div>
+      {{end}}
+      {{if .Stack.Git.AutoDeploy}}
+      <div>
+        <div class="field-label mb-1">Poll interval</div>
+        <div class="font-mono text-sm">{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}</div>
+      </div>
+      {{end}}
+      {{if .Stack.Git.LastCommit}}
+      <div>
+        <div class="field-label mb-1">Last commit</div>
+        <div class="font-mono text-xs text-base-content/70">{{.Stack.Git.LastCommit}}</div>
+      </div>
+      {{end}}
+      {{if .Stack.Git.LastSyncAt}}
+      <div>
+        <div class="field-label mb-1">Last synced</div>
+        <div class="font-mono text-xs text-base-content/70">{{.Stack.Git.LastSyncAt.Format "2006-01-02 15:04:05"}}</div>
+      </div>
+      {{end}}
+    </div>
+    {{if .Stack.Git.SyncError}}
+    <div class="px-5 pb-4">
+      <div class="alert alert-error alert-sm text-xs">
+        <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+        {{.Stack.Git.SyncError}}
+      </div>
+    </div>
+    {{end}}
+    <div id="git-result" class="px-5 pb-4"></div>
+
+    <!-- Git settings form -->
+    <div class="border-t border-base-200 px-5 py-4">
+      <details class="group">
+        <summary class="text-xs text-base-content/50 cursor-pointer hover:text-base-content list-none flex items-center gap-1">
+          <i data-lucide="settings" class="w-3 h-3"></i>
+          Settings
+          <i data-lucide="chevron-down" class="w-3 h-3 group-open:rotate-180 transition-transform"></i>
+        </summary>
+        <form
+          hx-put="/web/stacks/{{.Stack.Name}}/git"
+          hx-target="#git-result"
+          hx-swap="innerHTML"
+          class="mt-4 grid grid-cols-2 gap-4"
+        >
+          <div class="form-control">
+            <label class="label"><span class="label-text text-xs">Branch</span></label>
+            <input type="text" name="git_branch" class="input input-bordered input-sm font-mono"
+              value="{{.Stack.Git.Branch}}" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text text-xs">Folder</span></label>
+            <input type="text" name="git_folder" class="input input-bordered input-sm font-mono"
+              value="{{.Stack.Git.Folder}}" placeholder="optional" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text text-xs">Poll interval</span></label>
+            <input type="text" name="git_poll_interval" class="input input-bordered input-sm font-mono"
+              value="{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}"
+              placeholder="5m" />
+          </div>
+          <div class="col-span-2 space-y-2">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="git_read_only" class="checkbox checkbox-warning checkbox-sm"
+                {{if .Stack.Git.ReadOnly}}checked{{end}} />
+              <span class="label-text text-xs">Read-only — disable editor and push</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" name="git_auto_deploy" class="checkbox checkbox-primary checkbox-sm"
+                {{if .Stack.Git.AutoDeploy}}checked{{end}} />
+              <span class="label-text text-xs">Auto-deploy on new commits</span>
+            </label>
+          </div>
+          <div class="col-span-2">
+            <button type="submit" class="btn btn-sm btn-primary">Save settings</button>
+          </div>
+        </form>
+      </details>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- PKL source -->
+  <div class="rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
+    <div class="terminal-header flex items-center justify-between px-2 py-1.5">
+      <div class="flex items-center gap-0.5 overflow-x-auto">
+        {{range .Files}}
+        <button type="button"
+          class="pk-tab px-3 py-1 text-xs font-mono rounded transition-colors whitespace-nowrap"
+          data-file="{{.}}"
+          onclick="pkSwitchTab(this)"
+        >{{if eq . $.Stack.Entrypoint}}<span class="w-1.5 h-1.5 rounded-full bg-primary/70 inline-block mr-1 mb-0.5"></span>{{end}}{{.}}</button>
+        {{end}}
+      </div>
+      {{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
+      <a href="/stacks/{{.Stack.Name}}/edit" class="shrink-0 text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1 ml-2">
+        <i data-lucide="pencil" class="w-3 h-3"></i> edit
+      </a>
+      {{end}}
+    </div>
+    {{range .Files}}
+    <pre class="pk-panel terminal p-4 overflow-x-auto language-pkl {{if ne . $.ActiveFile}}hidden{{end}}" data-file="{{.}}" style="min-height: 4rem;"><code class="language-pkl">{{index $.FileContents .}}</code></pre>
+    {{end}}
+  </div>
+
+  <script>
+  function pkSwitchTab(btn) {
+    const file = btn.dataset.file;
+    document.querySelectorAll('.pk-tab').forEach(t => {
+      const active = t.dataset.file === file;
+      t.style.background = active ? 'rgba(255,255,255,0.06)' : '';
+      t.style.color = active ? '#c9d1d9' : '#6e7681';
+    });
+    document.querySelectorAll('.pk-panel').forEach(p => {
+      p.classList.toggle('hidden', p.dataset.file !== file);
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    const active = document.querySelector('.pk-tab[data-file="{{.ActiveFile}}"]');
+    if (active) pkSwitchTab(active);
+  });
+  </script>
+
+</div>
+
+<!-- Push modal -->
+<dialog id="push-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Push changes</h3>
+    <p class="text-sm text-base-content/60 mt-1 mb-4">Commit all local edits and push to <span class="font-mono">{{if .Stack.Git}}{{.Stack.Git.Branch}}{{end}}</span>.</p>
+    <div class="form-control mb-4">
+      <label class="label"><span class="label-text">Commit message</span></label>
+      <input type="text" id="push-message" class="input input-bordered"
+        value="chore: update stack via brine" />
+    </div>
+    <div class="modal-action">
+      <button class="btn btn-ghost" onclick="document.getElementById('push-modal').close()">Cancel</button>
+      <button class="btn btn-primary" onclick="doPush('{{.Stack.Name}}')">Push</button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+function deleteStack(name) {
+  fetch(`/api/stacks/${name}`, { method: 'DELETE' })
+    .then(res => {
+      if (res.ok) { window.location.href = '/stacks'; }
+      else { showToast('Delete failed', 'error'); }
+    });
+}
+
+function doPush(name) {
+  document.getElementById('push-modal').close();
+  const message = document.getElementById('push-message').value || 'chore: update stack via brine';
+  runAction('git/push', name, 'POST', JSON.stringify({message}), 'application/json');
+}
+
+// Override runAction to optionally accept body + content-type.
+const _runAction = runAction;
+function runAction(action, name, method, body, contentType) {
+  const output = document.getElementById('action-output');
+  const log = document.getElementById('action-log');
+  const title = document.getElementById('action-title');
+
+  output.classList.remove('hidden');
+  log.textContent = '';
+  title.textContent = action.charAt(0).toUpperCase() + action.slice(1).replace('/', ' ') + 'ing ' + name + '...';
+
+  fetch(`/api/stacks/${name}/${action}`, {
+    method: method || 'POST',
+    body: body,
+    headers: contentType ? {'Content-Type': contentType} : {},
+  })
+    .then(res => {
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      function read() {
+        reader.read().then(({done, value}) => {
+          if (done) { title.textContent = action + ' complete'; return; }
+          log.textContent += decoder.decode(value);
+          log.scrollTop = log.scrollHeight;
+          read();
+        });
+      }
+      read();
+    })
+    .catch(err => { log.textContent += '\nerror: ' + err; });
+}
+</script>
+
+<style>
+/* PKL token colors — GitHub Dark palette on top of existing terminal background */
+.token.comment    { color: #8b949e; font-style: italic; }
+.token.keyword    { color: #ff7b72; }
+.token.string     { color: #a5d6ff; }
+.token.number,
+.token.boolean    { color: #79c0ff; }
+.token.class-name { color: #ffa657; }
+.token.annotation { color: #d2a8ff; }
+.token.punctuation{ color: #6e7681; }
+.token.operator   { color: #ff7b72; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.js"></script>
+<script>
+Prism.languages.pkl = {
+  comment: [
+    { pattern: /\/\*[\s\S]*?\*\//, greedy: true },
+    { pattern: /\/\/.*/, greedy: true }
+  ],
+  string: [
+    { pattern: /"""[\s\S]*?"""/, greedy: true },
+    { pattern: /"(?:[^"\\]|\\.)*"/, greedy: true }
+  ],
+  annotation: { pattern: /@[a-zA-Z]\w*/ },
+  keyword: /\b(?:amends|module|class|extends|import|let|function|external|local|abstract|hidden|fixed|const|typealias|new|as|is|if|else|for|in|when|this|null|true|false|unknown|nothing|open|override)\b/,
+  'class-name': /\b[A-Z][a-zA-Z0-9_]*\b/,
+  boolean: /\b(?:true|false)\b/,
+  number: /\b0x[\da-fA-F]+\b|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/,
+  punctuation: /[{}[\](),.:<>?!|&]/,
+  operator: /=|->|\.\.\./
+};
+Prism.highlightAll();
+</script>
+{{end}}
