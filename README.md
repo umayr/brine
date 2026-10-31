@@ -29,7 +29,7 @@ it talks to the container engine directly for container and image views.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.2.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
+- A `dill` binary (v0.3.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -56,7 +56,7 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
-The image bundles Brine, Dill (v0.2.0), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.3.0), and Pkl (0.31.1):
 
 ```sh
 docker build -t brine .
@@ -81,7 +81,7 @@ docker run -d --name brine \
   brine --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.2.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.3.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
@@ -171,7 +171,7 @@ Stack and recipe paths are validated; directories are `0700` and files `0600`.
 Stacks amend the published Dill schema:
 
 ```pkl
-amends "package://pkg.ushd.ca/dill@0.2.0#/dill.pkl"
+amends "package://pkg.ushd.ca/dill@0.3.0#/dill.pkl"
 
 config {
   name = "my-app"

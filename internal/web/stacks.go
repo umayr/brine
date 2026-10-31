@@ -41,7 +41,7 @@ func defaultStackPkl(engine string) string {
 	if engine == "" {
 		engine = "docker"
 	}
-	return fmt.Sprintf(`amends "package://pkg.ushd.ca/dill@0.2.0#/dill.pkl"
+	return fmt.Sprintf(`amends "package://pkg.ushd.ca/dill@0.3.0#/dill.pkl"
 
 config {
   name = "my-app"
