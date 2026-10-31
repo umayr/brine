@@ -22,8 +22,9 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o /out/brine ./cmd/brine
 
 # --- runtime ----------------------------------------------------------------
-# Debian (glibc) so the prebuilt Dill and Pkl binaries run as shipped.
-FROM debian:bookworm-slim
+# Debian trixie (glibc 2.41) is required by the amd64 Dill release binaries,
+# which need GLIBC_2.38.
+FROM debian:trixie-slim
 ARG TARGETARCH
 ARG DILL_VERSION=0.2.0
 ARG PKL_VERSION=0.31.1
