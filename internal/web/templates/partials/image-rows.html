@@ -12,7 +12,7 @@
   <td class="font-mono text-xs text-base-content/60">{{.Created.Format "2006-01-02"}}</td>
   <td class="text-right">
     <button class="btn btn-ghost btn-xs text-error"
-      onclick="confirmAction('Remove image', 'Remove {{index .Tags 0}}?', () => removeImage('{{.ID}}'))"
+      onclick="confirmAction('Remove image', 'Remove {{if .Tags}}{{index .Tags 0}}{{else}}{{.ID}}{{end}}?', () => removeImage('{{.ID}}'))"
     >Remove</button>
   </td>
 </tr>
@@ -22,7 +22,7 @@
 
 <script>
 function removeImage(id) {
-  fetch(`/api/images/${id}`, { method: 'DELETE' })
+  fetch(`/api/images/${id}`, { method: 'DELETE', headers: brineHeaders() })
     .then(res => {
       if (res.ok) {
         document.getElementById('image-' + id)?.remove();

@@ -1,22 +1,28 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/engine"
 	gitpkg "github.com/umayr/brine/internal/git"
+	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/pkl"
 	"github.com/umayr/brine/internal/store"
 )
 
 type stackHandler struct {
-	agent agent.Agent
-	store store.StackStore
-	git   *gitpkg.Runner
+	agent         agent.Agent
+	store         store.StackStore
+	git           *gitpkg.Runner
+	runtimeEngine string
+	deployTimeout time.Duration
 }
 
 type stackResponse struct {
@@ -46,7 +52,6 @@ func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 
 type createRequest struct {
 	Name       string `json:"name"`
-	Engine     string `json:"engine"`
 	PklContent string `json:"pkl_content"`
 }
 
@@ -60,12 +65,13 @@ func (h *stackHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and pkl_content are required")
 		return
 	}
-	if req.Engine == "" {
-		req.Engine = "docker"
-	}
-	stack, err := h.store.Create(req.Name, req.Engine, req.PklContent)
+	stack, err := h.store.Create(req.Name, pkl.WithStackName(req.PklContent, req.Name))
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already exists") {
+			status = http.StatusConflict
+		}
+		writeError(w, status, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, stack)
@@ -92,6 +98,30 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	stack, err := h.store.Get(name)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var req struct {
+		RemoveContainers bool `json:"remove_containers"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	if req.RemoveContainers {
+		ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+		defer cancel()
+		var out bytes.Buffer
+		if err := h.agent.Dill().Down(ctx, stack.PklPath, &out); err != nil {
+			msg := strings.TrimSpace(out.String())
+			if msg == "" {
+				msg = err.Error()
+			}
+			writeError(w, http.StatusBadGateway, "stop/remove containers: "+msg)
+			return
+		}
+	}
+
 	if err := h.store.Delete(name); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -106,13 +136,16 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Up(r.Context(), stack.PklPath, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "up", h.agent.Dill().Up(ctx, stack.PklPath, fw))
 }
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
@@ -122,12 +155,15 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Down(r.Context(), stack.PklPath, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "down", h.agent.Dill().Down(ctx, stack.PklPath, fw))
 }
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
@@ -137,12 +173,15 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Stop(r.Context(), stack.PklPath, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "stop", h.agent.Dill().Stop(ctx, stack.PklPath, fw))
 }
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
@@ -152,12 +191,15 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Start(r.Context(), stack.PklPath, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "start", h.agent.Dill().Start(ctx, stack.PklPath, fw))
 }
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
@@ -167,12 +209,15 @@ func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Restart(r.Context(), stack.PklPath, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "restart", h.agent.Dill().Restart(ctx, stack.PklPath, fw))
 }
 
 type teardownRequest struct {
@@ -188,12 +233,15 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if !h.ensureRuntimeEngine(w, stack) {
+		return
+	}
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.agent.Dill().Teardown(r.Context(), stack.PklPath, req.Force, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
-	}
+	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, req.Force, fw))
 }
 
 func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +249,9 @@ func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if !h.ensureRuntimeEngine(w, stack) {
 		return
 	}
 	result, err := h.agent.Dill().Plan(r.Context(), stack.PklPath)
@@ -313,7 +364,6 @@ func (h *stackHandler) setEntrypoint(w http.ResponseWriter, r *http.Request) {
 func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name       string          `json:"name"`
-		Engine     string          `json:"engine"`
 		Git        store.GitSource `json:"git"`
 		Entrypoint string          `json:"entrypoint"` // filename within folder, default compose.pkl
 	}
@@ -324,9 +374,6 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 	if req.Name == "" || req.Git.URL == "" {
 		writeError(w, http.StatusBadRequest, "name and git.url are required")
 		return
-	}
-	if req.Engine == "" {
-		req.Engine = "docker"
 	}
 	if req.Git.Branch == "" {
 		req.Git.Branch = "main"
@@ -347,7 +394,7 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stack, err := h.store.CreateFromGit(req.Name, req.Engine, &req.Git, req.Entrypoint)
+	stack, err := h.store.CreateFromGit(req.Name, &req.Git, req.Entrypoint)
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -383,7 +430,8 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repoDir, _ := h.store.RepoDir(name)
-	ctx := r.Context()
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
@@ -419,13 +467,46 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	}
 
 	repoDir, _ := h.store.RepoDir(name)
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.git.Push(r.Context(), repoDir, body.Message, fw); err != nil {
-		fmt.Fprintf(fw, "\nerror: %s\n", err)
+	if err := h.git.Push(ctx, repoDir, body.Message, fw); err != nil {
+		writeActionStatus(fw, "git push", err)
+		return
 	}
+	writeActionStatus(fw, "git push", nil)
+}
+
+func writeActionStatus(w http.ResponseWriter, action string, err error) {
+	if err != nil {
+		fmt.Fprintf(w, "\n[brine:error] %s failed: %s\n", action, err)
+		return
+	}
+	fmt.Fprintf(w, "\n[brine:done] %s complete\n", action)
+}
+
+func (h *stackHandler) engine() string {
+	if h.runtimeEngine == "" {
+		return "docker"
+	}
+	return h.runtimeEngine
+}
+
+func (h *stackHandler) ensureRuntimeEngine(w http.ResponseWriter, stack *store.Stack) bool {
+	content, err := h.store.ReadPkl(stack.Name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return false
+	}
+	declared := pkl.DeclaredEngine(content)
+	if declared == "" || declared == h.engine() {
+		return true
+	}
+	writeError(w, http.StatusConflict, fmt.Sprintf("stack declares %s but Brine is running against %s; update config.engine before running lifecycle actions", declared, h.engine()))
+	return false
 }
 
 // gitUpdateSource updates the git source configuration (branch, folder, auto_deploy, etc.).

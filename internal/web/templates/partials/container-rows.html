@@ -2,7 +2,7 @@
 <tr class="hover" id="container-{{.ID}}">
   <td>
     <a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a>
-    <div class="font-mono text-xs text-base-content/30 mt-0.5">{{.ID}}</div>
+    <div class="font-mono text-xs text-base-content/30 mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
   </td>
   <td class="font-mono text-xs text-base-content/60">{{.Image}}</td>
   <td>

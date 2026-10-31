@@ -1,10 +1,10 @@
 {{template "layout.html" .}}
 
-{{define "title"}}{{if .Recipe}}Edit {{.Recipe.Name}}{{else}}New Recipe{{end}} — Brine{{end}}
+{{define "title"}}{{if .Recipe}}Edit {{.Recipe.Name}}{{else}}New Snippet{{end}} — Brine{{end}}
 
 {{define "header"}}
 <div class="flex items-center gap-2">
-  <a href="/recipes" class="text-base-content/50 hover:text-base-content">Recipes</a>
+  <a href="/recipes" class="text-base-content/50 hover:text-base-content">Snippets</a>
   <span class="text-base-content/30">/</span>
   <span>{{if .Recipe}}{{.Recipe.Name}}{{else}}New{{end}}</span>
 </div>
@@ -12,34 +12,12 @@
 
 {{define "content"}}
 <script type="module">
-import { EditorView, basicSetup } from 'https://esm.sh/codemirror@6';
-import { EditorState } from 'https://esm.sh/@codemirror/state@6';
-import { pkl } from 'https://esm.sh/codemirror-lang-pkl';
-import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
+import { createBrinePklEditor } from '/static/vendor/editor.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('recipe-body');
   if (!ta) return;
-  const view = new EditorView({
-    state: EditorState.create({
-      doc: ta.value,
-      extensions: [
-        basicSetup,
-        pkl(),
-        oneDark,
-        EditorView.theme({
-          '.cm-scroller': { fontFamily: "'JetBrains Mono', ui-monospace, monospace", minHeight: '18rem' },
-          '.cm-content': { minHeight: '18rem' },
-        }),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of(v => {
-          if (v.docChanged) ta.value = v.state.doc.toString();
-        }),
-      ],
-    }),
-    parent: ta.parentElement,
-  });
-  ta.style.display = 'none';
+  createBrinePklEditor(ta, { minHeight: '18rem' });
 });
 </script>
 <div class="max-w-3xl mx-auto space-y-5">
@@ -73,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <label class="label"><span class="label-text">Description</span></label>
         <input type="text" name="description" class="input input-bordered"
           value="{{if .Recipe}}{{.Recipe.Description}}{{end}}"
-          placeholder="Short description of what this recipe does" />
+          placeholder="Short description of what this snippet does" />
       </div>
 
       <div class="form-control">
@@ -95,13 +73,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       <div class="flex items-center gap-3">
         <button type="submit" class="btn btn-primary">
-          {{if .Recipe}}Save{{else}}Create recipe{{end}}
+          {{if .Recipe}}Save{{else}}Create snippet{{end}}
         </button>
         {{if .Recipe}}
         <button type="button" class="btn btn-ghost btn-sm text-error"
           hx-delete="/web/recipes/{{.Recipe.Slug}}"
           hx-target="body"
-          onclick="return confirm('Delete recipe {{.Recipe.Name}}?')"
+          onclick="return confirm('Delete snippet {{.Recipe.Name}}?')"
         >
           <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
           Delete

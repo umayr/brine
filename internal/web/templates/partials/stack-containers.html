@@ -15,6 +15,7 @@
       <tr class="hover" id="sc-{{.ID}}">
         <td>
           <a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a>
+          <div class="font-mono text-xs text-base-content/30 mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
         </td>
         <td>
           {{if eq .State "running"}}

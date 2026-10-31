@@ -14,10 +14,10 @@
 
   <!-- Meta + actions -->
   <div class="bg-base-100 rounded-box shadow-sm p-5">
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-8 gap-y-4 mb-5">
+    <div class="grid grid-cols-2 lg:grid-cols-6 gap-x-8 gap-y-4 mb-5">
       <div>
         <div class="field-label mb-1">ID</div>
-        <div class="font-mono text-xs text-base-content/80">{{.Container.ID}}</div>
+        <div class="font-mono text-xs text-base-content/80" title="{{.Container.ID}}">{{shortID .Container.ID}}</div>
       </div>
       <div>
         <div class="field-label mb-1">Image</div>
@@ -29,12 +29,20 @@
           {{template "container-state-badge" .Container}}
         </div>
       </div>
+      <div>
+        <div class="field-label mb-1">Status</div>
+        <div class="font-mono text-xs text-base-content/70">{{.Container.Status}}</div>
+      </div>
       {{if .Container.Stack}}
       <div>
         <div class="field-label mb-1">Stack</div>
         <div><a href="/stacks/{{.Container.Stack}}" class="link link-hover font-mono text-sm">{{.Container.Stack}}</a></div>
       </div>
       {{end}}
+      <div>
+        <div class="field-label mb-1">Labels</div>
+        <div class="font-mono text-xs text-base-content/70">{{len .Container.Labels}}</div>
+      </div>
     </div>
 
     <div class="flex gap-2">
@@ -65,25 +73,74 @@
     </div>
   </div>
 
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-base-100 rounded-box shadow-sm">
+      <div class="px-5 py-4 border-b border-base-200 flex items-center justify-between">
+        <h2 class="font-semibold">Ports</h2>
+        <span class="badge badge-ghost badge-sm font-mono">{{len .Container.Ports}}</span>
+      </div>
+      <div class="px-5 py-4">
+        {{if .Container.Ports}}
+        <div class="space-y-2">
+          {{range .Container.Ports}}
+          <div class="font-mono text-xs rounded bg-base-200/70 px-3 py-2 break-all">{{.}}</div>
+          {{end}}
+        </div>
+        {{else}}
+        <div class="text-sm text-base-content/40">No published ports.</div>
+        {{end}}
+      </div>
+    </div>
+
+    <div class="bg-base-100 rounded-box shadow-sm">
+      <div class="px-5 py-4 border-b border-base-200 flex items-center justify-between">
+        <h2 class="font-semibold">Labels</h2>
+        <span class="badge badge-ghost badge-sm font-mono">{{len .Container.Labels}}</span>
+      </div>
+      <div class="px-5 py-4 max-h-56 overflow-y-auto">
+        {{if .Container.Labels}}
+        <div class="space-y-2">
+          {{range $key, $value := .Container.Labels}}
+          <div class="grid grid-cols-[12rem_1fr] gap-3 font-mono text-xs">
+            <div class="text-base-content/45 truncate" title="{{$key}}">{{$key}}</div>
+            <div class="text-base-content/80 break-all">{{$value}}</div>
+          </div>
+          {{end}}
+        </div>
+        {{else}}
+        <div class="text-sm text-base-content/40">No labels.</div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
   <!-- Logs -->
   <div class="rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
-      <span class="font-mono text-xs">logs — {{.Container.Name}}</span>
+      <div class="flex items-center gap-2">
+        <span class="font-mono text-xs">logs — {{.Container.Name}}</span>
+        <span id="log-status" class="badge badge-ghost badge-xs font-mono">connecting</span>
+      </div>
       <div class="flex items-center gap-3">
+        <label class="flex items-center gap-1.5 cursor-pointer">
+          <span class="text-xs text-gray-500">tail</span>
+          <select id="tail-select" class="select select-bordered select-xs font-mono">
+            <option value="100" selected>100</option>
+            <option value="500">500</option>
+            <option value="1000">1000</option>
+          </select>
+        </label>
         <label class="flex items-center gap-1.5 cursor-pointer">
           <span class="text-xs text-gray-500">follow</span>
           <input type="checkbox" class="toggle toggle-xs toggle-success" id="follow-toggle" checked>
         </label>
+        <button onclick="restartLogs()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">reload</button>
         <button onclick="clearLogs()" class="text-xs text-gray-500 hover:text-gray-300 transition-colors">clear</button>
       </div>
     </div>
     <div
       id="log-container"
       class="terminal h-[32rem] overflow-y-auto"
-      hx-ext="sse"
-      sse-connect="/web/containers/{{.Container.ID}}/logs"
-      sse-swap="message"
-      hx-swap="beforeend"
     ></div>
   </div>
 
@@ -95,10 +152,56 @@ function clearLogs() {
 }
 const logContainer = document.getElementById('log-container');
 const followToggle = document.getElementById('follow-toggle');
+const tailSelect = document.getElementById('tail-select');
+const logStatus = document.getElementById('log-status');
+let logSource = null;
+
+function setLogStatus(text, cls) {
+  logStatus.textContent = text;
+  logStatus.className = 'badge badge-xs font-mono ' + cls;
+}
+
+function appendLog(html) {
+  logContainer.insertAdjacentHTML('beforeend', html);
+  if (followToggle.checked) logContainer.scrollTop = logContainer.scrollHeight;
+}
+
+function connectLogs() {
+  if (logSource) logSource.close();
+  setLogStatus('connecting', 'badge-warning');
+  const tail = encodeURIComponent(tailSelect.value || '100');
+  logSource = new EventSource('/web/containers/{{.Container.ID}}/logs?tail=' + tail);
+  logSource.onopen = () => setLogStatus('live', 'badge-success');
+  logSource.onmessage = (event) => appendLog(event.data);
+  logSource.addEventListener('done', (event) => {
+    appendLog(event.data);
+    setLogStatus('ended', 'badge-ghost');
+    logSource.close();
+  });
+  logSource.onerror = () => setLogStatus('reconnecting', 'badge-warning');
+}
+
+function restartLogs() {
+  clearLogs();
+  connectLogs();
+}
+
+followToggle.addEventListener('change', () => {
+  if (followToggle.checked) {
+    logContainer.scrollTop = logContainer.scrollHeight;
+    if (!logSource || logSource.readyState === EventSource.CLOSED) connectLogs();
+  } else if (logSource) {
+    logSource.close();
+    setLogStatus('paused', 'badge-ghost');
+  }
+});
+tailSelect.addEventListener('change', restartLogs);
+
 const observer = new MutationObserver(() => {
   if (followToggle.checked) logContainer.scrollTop = logContainer.scrollHeight;
 });
 observer.observe(logContainer, { childList: true });
+connectLogs();
 </script>
 {{end}}
 

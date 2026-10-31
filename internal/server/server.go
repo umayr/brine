@@ -11,8 +11,10 @@ import (
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
+	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/web"
 )
@@ -29,22 +31,35 @@ type Server struct {
 }
 
 // New wires up all dependencies and returns a ready-to-run server.
-func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner) *Server {
+func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, authn *auth.Authenticator) *Server {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CleanPath)
-	r.Use(middleware.Timeout(60 * time.Second))
+
+	// Authentication guards every route except the login page, static assets,
+	// and the health endpoint.
+	r.Use(authn.Middleware)
+
+	// Login/logout are public paths handled before the authentication check.
+	r.Get("/login", authn.HandleLogin)
+	r.Post("/login", authn.HandleLogin)
+	r.Post("/logout", authn.HandleLogout)
+
+	timeouts := httpx.Timeouts{
+		Default:   cfg.RequestTimeout,
+		Lifecycle: cfg.DeployTimeout + time.Minute,
+	}
 
 	// API routes
-	api.Mount(r, ag, st, rs, gr)
+	api.Mount(r, ag, st, rs, gr, cfg.Engine, timeouts, cfg.DeployTimeout)
 
 	// Web / HTMX routes
-	h := web.New(ag, st, rs, gr, cfg.Engine, cfg.Dev)
-	web.Mount(r, h)
+	h := web.New(ag, st, rs, gr, cfg.Engine, cfg.Dev, authn, cfg.DeployTimeout)
+	web.Mount(r, h, timeouts)
 
-	syncer := git.NewSyncer(st, gr, ag.Dill())
+	syncer := git.NewSyncer(st, gr, ag.Dill(), cfg.DeployTimeout)
 
 	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r}
 }

@@ -20,8 +20,11 @@ type FSStore struct {
 // NewFSStore creates an FSStore rooted at dataDir, creating the stacks
 // subdirectory if it does not already exist.
 func NewFSStore(dataDir string) (*FSStore, error) {
+	if err := mkdirPrivate(dataDir); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
+	}
 	stacksDir := filepath.Join(dataDir, "stacks")
-	if err := os.MkdirAll(stacksDir, 0755); err != nil {
+	if err := mkdirPrivate(stacksDir); err != nil {
 		return nil, fmt.Errorf("create stacks dir: %w", err)
 	}
 	return &FSStore{dataDir: dataDir}, nil
@@ -62,6 +65,9 @@ func entrypointOrDefault(ep string) string {
 }
 
 func (s *FSStore) readMeta(name string) (*Stack, error) {
+	if err := ValidateStackName(name); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(s.metaPath(name))
 	if err != nil {
 		return nil, err
@@ -70,6 +76,18 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 	if err := json.Unmarshal(data, &stack); err != nil {
 		return nil, fmt.Errorf("parse meta: %w", err)
 	}
+	stack.Name = name
+	if err := validateFilename(entrypointOrDefault(stack.Entrypoint)); err != nil {
+		return nil, fmt.Errorf("stack %q metadata: %w", name, err)
+	}
+	if stack.Git != nil {
+		if err := validateFolder(stack.Git.Folder); err != nil {
+			return nil, fmt.Errorf("stack %q metadata: %w", name, err)
+		}
+	}
+	// Recompute the entrypoint path from the current data directory so that a
+	// moved data dir (or a containerised brine) does not keep stale absolute paths.
+	stack.PklPath = filepath.Join(s.filesDir(name, stack.Git), entrypointOrDefault(stack.Entrypoint))
 	return &stack, nil
 }
 
@@ -78,7 +96,7 @@ func (s *FSStore) writeMeta(stack *Stack) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.metaPath(stack.Name), data, 0644)
+	return writeFilePrivate(s.metaPath(stack.Name), data)
 }
 
 func (s *FSStore) List() ([]*Stack, error) {
@@ -93,6 +111,9 @@ func (s *FSStore) List() ([]*Stack, error) {
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
+		}
+		if ValidateStackName(entry.Name()) != nil {
+			continue // ignore directories that are not valid stack names
 		}
 		stack, err := s.readMeta(entry.Name())
 		if err != nil {
@@ -114,22 +135,24 @@ func (s *FSStore) Get(name string) (*Stack, error) {
 	return stack, nil
 }
 
-func (s *FSStore) Create(name, eng, pklContent string) (*Stack, error) {
+func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
+	if err := ValidateStackName(name); err != nil {
+		return nil, err
+	}
 	dir := s.stackDir(name)
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("stack %q already exists", name)
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := mkdirPrivate(dir); err != nil {
 		return nil, fmt.Errorf("create stack dir: %w", err)
 	}
-	if err := os.WriteFile(s.pklPath(name), []byte(pklContent), 0644); err != nil {
+	if err := writeFilePrivate(s.pklPath(name), []byte(pklContent)); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("write pkl: %w", err)
 	}
 	now := time.Now()
 	stack := &Stack{
 		Name:       name,
-		Engine:     eng,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		PklPath:    s.pklPath(name),
@@ -143,6 +166,9 @@ func (s *FSStore) Create(name, eng, pklContent string) (*Stack, error) {
 }
 
 func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
+	if err := ValidateStackName(name); err != nil {
+		return nil, err
+	}
 	stack, err := s.readMeta(name)
 	if err != nil {
 		return nil, fmt.Errorf("stack %q not found", name)
@@ -152,7 +178,7 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 	}
 	ep := entrypointOrDefault(stack.Entrypoint)
 	epPath := filepath.Join(s.filesDir(name, stack.Git), ep)
-	if err := os.WriteFile(epPath, []byte(pklContent), 0644); err != nil {
+	if err := writeFilePrivate(epPath, []byte(pklContent)); err != nil {
 		return nil, fmt.Errorf("write pkl: %w", err)
 	}
 	stack.UpdatedAt = time.Now()
@@ -163,6 +189,9 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 }
 
 func (s *FSStore) Delete(name string) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
 	if _, err := s.readMeta(name); err != nil {
 		return fmt.Errorf("stack %q not found", name)
 	}
@@ -170,6 +199,9 @@ func (s *FSStore) Delete(name string) error {
 }
 
 func (s *FSStore) ReadPkl(name string) (string, error) {
+	if err := ValidateStackName(name); err != nil {
+		return "", err
+	}
 	stack, err := s.readMeta(name)
 	if err != nil {
 		return "", fmt.Errorf("stack %q not found", name)
@@ -184,6 +216,9 @@ func (s *FSStore) ReadPkl(name string) (string, error) {
 
 // Files returns all .pkl filenames within the stack's files directory.
 func (s *FSStore) Files(name string) ([]string, error) {
+	if err := ValidateStackName(name); err != nil {
+		return nil, err
+	}
 	stack, err := s.readMeta(name)
 	if err != nil {
 		return nil, fmt.Errorf("stack %q not found", name)
@@ -207,6 +242,9 @@ func (s *FSStore) Files(name string) ([]string, error) {
 
 // ReadFile returns the content of a specific .pkl file within a stack.
 func (s *FSStore) ReadFile(name, filename string) (string, error) {
+	if err := ValidateStackName(name); err != nil {
+		return "", err
+	}
 	if err := validateFilename(filename); err != nil {
 		return "", err
 	}
@@ -223,6 +261,9 @@ func (s *FSStore) ReadFile(name, filename string) (string, error) {
 
 // WriteFile creates or overwrites a .pkl file within a stack.
 func (s *FSStore) WriteFile(name, filename, content string) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
 	if err := validateFilename(filename); err != nil {
 		return err
 	}
@@ -233,7 +274,7 @@ func (s *FSStore) WriteFile(name, filename, content string) error {
 	if stack.Git != nil && stack.Git.ReadOnly {
 		return fmt.Errorf("stack %q is read-only (git-backed)", name)
 	}
-	if err := os.WriteFile(filepath.Join(s.filesDir(name, stack.Git), filename), []byte(content), 0644); err != nil {
+	if err := writeFilePrivate(filepath.Join(s.filesDir(name, stack.Git), filename), []byte(content)); err != nil {
 		return fmt.Errorf("write file %q: %w", filename, err)
 	}
 	stack.UpdatedAt = time.Now()
@@ -242,6 +283,9 @@ func (s *FSStore) WriteFile(name, filename, content string) error {
 
 // DeleteFile removes a .pkl file from a stack. Returns an error if it is the entrypoint or read-only.
 func (s *FSStore) DeleteFile(name, filename string) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
 	if err := validateFilename(filename); err != nil {
 		return err
 	}
@@ -260,6 +304,9 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 
 // SetEntrypoint changes the entrypoint file for a stack.
 func (s *FSStore) SetEntrypoint(name, filename string) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
 	if err := validateFilename(filename); err != nil {
 		return err
 	}
@@ -282,17 +329,29 @@ func (s *FSStore) SetEntrypoint(name, filename string) error {
 
 // CreateFromGit registers a new git-backed stack. The repo must already
 // be cloned at {stackDir}/repo/ by the caller.
-func (s *FSStore) CreateFromGit(name, eng string, src *GitSource, entrypoint string) (*Stack, error) {
+func (s *FSStore) CreateFromGit(name string, src *GitSource, entrypoint string) (*Stack, error) {
+	if err := ValidateStackName(name); err != nil {
+		return nil, err
+	}
+	if src == nil {
+		return nil, fmt.Errorf("git source is required")
+	}
+	if err := validateFolder(src.Folder); err != nil {
+		return nil, err
+	}
+	if entrypoint == "" {
+		entrypoint = "compose.pkl"
+	}
+	if err := validateFilename(entrypoint); err != nil {
+		return nil, err
+	}
 	// Check meta.json rather than the directory — the repo clone may have
 	// already created the parent stack dir via MkdirAll.
 	if _, err := os.Stat(s.metaPath(name)); err == nil {
 		return nil, fmt.Errorf("stack %q already exists", name)
 	}
-	if err := os.MkdirAll(s.stackDir(name), 0755); err != nil {
+	if err := mkdirPrivate(s.stackDir(name)); err != nil {
 		return nil, fmt.Errorf("create stack dir: %w", err)
-	}
-	if entrypoint == "" {
-		entrypoint = "compose.pkl"
 	}
 	filesDir := s.filesDir(name, src)
 	pklPath := filepath.Join(filesDir, entrypoint)
@@ -304,7 +363,6 @@ func (s *FSStore) CreateFromGit(name, eng string, src *GitSource, entrypoint str
 	now := time.Now()
 	stack := &Stack{
 		Name:       name,
-		Engine:     eng,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		PklPath:    pklPath,
@@ -320,6 +378,9 @@ func (s *FSStore) CreateFromGit(name, eng string, src *GitSource, entrypoint str
 
 // UpdateGitStatus records the result of the most recent git pull.
 func (s *FSStore) UpdateGitStatus(name, commit, syncErr string, syncTime time.Time) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
 	stack, err := s.readMeta(name)
 	if err != nil {
 		return fmt.Errorf("stack %q not found", name)
@@ -335,6 +396,15 @@ func (s *FSStore) UpdateGitStatus(name, commit, syncErr string, syncTime time.Ti
 
 // UpdateGitSource updates the mutable configuration fields of a git-backed stack.
 func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
+	if err := ValidateStackName(name); err != nil {
+		return err
+	}
+	if src == nil {
+		return fmt.Errorf("git source is required")
+	}
+	if err := validateFolder(src.Folder); err != nil {
+		return err
+	}
 	stack, err := s.readMeta(name)
 	if err != nil {
 		return fmt.Errorf("stack %q not found", name)
@@ -354,22 +424,8 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 // RepoDir returns the absolute path of the git clone directory for a stack.
 // This path is valid even before the stack is registered (e.g. during git clone).
 func (s *FSStore) RepoDir(name string) (string, error) {
-	if name == "" {
-		return "", fmt.Errorf("stack name is required")
+	if err := ValidateStackName(name); err != nil {
+		return "", err
 	}
 	return s.repoDir(name), nil
-}
-
-// validateFilename ensures a filename is a safe .pkl filename with no path separators.
-func validateFilename(filename string) error {
-	if filename == "" {
-		return fmt.Errorf("filename cannot be empty")
-	}
-	if !strings.HasSuffix(filename, ".pkl") {
-		return fmt.Errorf("filename must end in .pkl")
-	}
-	if strings.ContainsAny(filename, "/\\") {
-		return fmt.Errorf("filename must not contain path separators")
-	}
-	return nil
 }

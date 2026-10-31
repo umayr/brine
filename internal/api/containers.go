@@ -3,7 +3,6 @@ package api
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 
@@ -89,9 +88,8 @@ func (h *containerHandler) logs(w http.ResponseWriter, r *http.Request) {
 
 	flusher, canFlush := w.(http.Flusher)
 
-	// Docker multiplexes stdout/stderr with an 8-byte header per frame.
-	// Use a simple line scanner to emit lines as SSE events.
-	scanner := bufio.NewScanner(stripDockerHeader(rc))
+	// The engine adapter has already demultiplexed stdout/stderr.
+	scanner := bufio.NewScanner(rc)
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Fprintf(w, "data: %s\n\n", line)
@@ -103,27 +101,4 @@ func (h *containerHandler) logs(w http.ResponseWriter, r *http.Request) {
 	if canFlush {
 		flusher.Flush()
 	}
-}
-
-// stripDockerHeader returns an io.Reader that strips the 8-byte Docker stream
-// multiplexing header from each log frame, yielding clean log text.
-func stripDockerHeader(r io.Reader) io.Reader {
-	pr, pw := io.Pipe()
-	go func() {
-		header := make([]byte, 8)
-		for {
-			_, err := io.ReadFull(r, header)
-			if err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-			// header[4:8] is the big-endian frame size.
-			size := int64(header[4])<<24 | int64(header[5])<<16 | int64(header[6])<<8 | int64(header[7])
-			if _, err := io.CopyN(pw, r, size); err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-		}
-	}()
-	return pr
 }

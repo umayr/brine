@@ -18,7 +18,6 @@
       <thead>
         <tr class="text-base-content/50">
           <th>Name</th>
-          <th>Engine</th>
           <th>Source</th>
           <th>Updated</th>
           <th class="text-right">Actions</th>
@@ -35,7 +34,6 @@
               {{end}}
             </div>
           </td>
-          <td><span class="badge badge-ghost badge-sm font-mono">{{.Engine}}</span></td>
           <td>
             {{if .Git}}
             <span class="badge badge-outline badge-sm gap-1 font-normal">
@@ -51,7 +49,7 @@
           <td class="text-right" onclick="event.stopPropagation()">
             <div class="flex gap-1 justify-end">
               <button class="btn btn-ghost btn-xs gap-1"
-                onclick="deployStack('{{.Name}}')"
+                onclick="deployStack('{{.Name}}', this)"
               >
                 <i data-lucide="play" class="w-3 h-3"></i>
                 Deploy
@@ -63,7 +61,7 @@
               </a>
               {{end}}
               <button class="btn btn-ghost btn-xs gap-1 text-error"
-                onclick="confirmAction('Delete stack', 'Remove {{.Name}} from brine? Running containers will not be stopped.', () => deleteStack('{{.Name}}'))"
+                onclick="confirmAction('Delete stack', 'Remove {{.Name}} from Brine?', (remove) => deleteStack('{{.Name}}', remove), {checkbox: 'Stop and remove its containers first', checked: true})"
               >
                 <i data-lucide="trash-2" class="w-3 h-3"></i>
                 Delete
@@ -88,34 +86,54 @@
 </div>
 
 <script>
-function deployStack(name) {
+async function deployStack(name, btn) {
   showToast('Deploying ' + name + '…', 'info');
-  fetch(`/api/stacks/${name}/up`, { method: 'POST' })
-    .then(async res => {
-      const reader = res.body.getReader();
-      while (true) {
-        const { done } = await reader.read();
-        if (done) break;
-      }
-      if (res.ok) {
-        showToast('Deploy complete: ' + name, 'success');
-      } else {
-        showToast('Deploy failed: ' + name, 'error');
-      }
-    })
-    .catch(() => showToast('Deploy failed', 'error'));
+  btn.disabled = true;
+  const original = btn.innerHTML;
+  btn.innerHTML = '<span class="loading loading-spinner loading-xs"></span> Deploying';
+  try {
+    const res = await fetch(`/api/stacks/${name}/up`, { method: 'POST', headers: brineHeaders() });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sawError = false;
+    let sawDone = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      if (chunk.includes('[brine:error]')) sawError = true;
+      if (chunk.includes('[brine:done]')) sawDone = true;
+    }
+    if (sawError || !sawDone) {
+      showToast('Deploy failed: ' + name, 'error');
+    } else {
+      showToast('Deploy complete: ' + name, 'success');
+    }
+  } catch {
+    showToast('Deploy failed', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    lucide.createIcons();
+  }
 }
 
-function deleteStack(name) {
-  fetch(`/api/stacks/${name}`, { method: 'DELETE' })
-    .then(res => {
-      if (res.ok) {
-        document.getElementById('stack-row-' + name)?.remove();
-        showToast('Stack deleted', 'success');
-      } else {
-        showToast('Delete failed', 'error');
-      }
-    });
+async function deleteStack(name, removeContainers) {
+  const res = await fetch(`/api/stacks/${name}`, {
+    method: 'DELETE',
+    headers: brineHeaders({'Content-Type': 'application/json'}),
+    body: JSON.stringify({ remove_containers: !!removeContainers }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { msg = JSON.parse(text).error || text; } catch {}
+    showToast('Delete failed: ' + msg.slice(0, 300), 'error');
+    return;
+  }
+  document.getElementById('stack-row-' + name)?.remove();
+  showToast(removeContainers ? 'Stack and containers removed' : 'Stack deleted', 'success');
 }
 </script>
 {{end}}

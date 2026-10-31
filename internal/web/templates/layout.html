@@ -3,33 +3,114 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{.CSRF}}">
   <title>{{block "title" .}}Brine{{end}}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4/dist/full.min.css" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
-  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <link href="/static/vendor/app.css" rel="stylesheet">
+  <script src="/static/vendor/htmx.min.js"></script>
+  <script src="/static/vendor/htmx-sse.js"></script>
+  <script src="/static/vendor/lucide.min.js"></script>
   <script src="/static/theme.js" defer></script>
   <style>
     /* Violet/purple primary — Heroku-style */
     [data-theme="night"] {
-      --p:  oklch(0.62 0.22 288);
-      --pf: oklch(0.52 0.22 288);
-      --pc: oklch(1 0 0);
+      --p:  62% 0.22 288;
+      --pf: 52% 0.22 288;
+      --pc: 100% 0 0;
+      --b1: 20.5% 0.018 255;
+      --b2: 16% 0.016 255;
+      --b3: 25.5% 0.018 255;
+      --bc: 93% 0.01 255;
+      --rounded-box: 0.5rem;
+      --rounded-btn: 0.375rem;
+    }
+
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .bg-base-100.rounded-box.shadow-sm {
+      border: 1px solid oklch(var(--b3) / 0.75);
+      box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 10px 30px rgba(0,0,0,0.16);
+    }
+
+    .btn {
+      min-height: 2.25rem;
+      height: 2.25rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .btn-xs {
+      min-height: 1.75rem;
+      height: 1.75rem;
+    }
+
+    .btn-sm {
+      min-height: 2rem;
+      height: 2rem;
+    }
+
+    .input, .select, .textarea {
+      border-radius: 0.375rem;
+      border-color: oklch(var(--b3));
+    }
+
+    .table :where(th, td) {
+      border-bottom-color: oklch(var(--b3) / 0.72);
+    }
+
+    .badge {
+      border-radius: 999px;
+      font-weight: 600;
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+      line-height: 1.15;
+    }
+
+    .badge-xs {
+      padding-left: 0.425rem;
+      padding-right: 0.425rem;
+    }
+
+    .badge-sm {
+      padding-left: 0.55rem;
+      padding-right: 0.55rem;
+    }
+
+    .runtime-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      height: 2rem;
+      padding: 0 0.65rem;
+      border: 1px solid oklch(var(--b3) / 0.9);
+      border-radius: 999px;
+      background: oklch(var(--b2) / 0.55);
+      color: oklch(var(--bc) / 0.76);
+      font-size: 0.75rem;
+      white-space: nowrap;
+    }
+
+    .runtime-pill .runtime-dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: oklch(var(--p));
+      box-shadow: 0 0 0 3px oklch(var(--p) / 0.12);
     }
 
     /* JetBrains Mono for all monospaced content */
     .font-mono, code, pre, kbd, textarea.font-mono, input.font-mono {
-      font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
+      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
     }
 
     /* Terminal panels */
     .terminal {
       background: #0d1117;
       color: #c9d1d9;
-      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
       font-size: 0.75rem;
       line-height: 1.65;
     }
@@ -120,8 +201,8 @@
         Images
       </a>
       <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}">
-        <i data-lucide="book-open" class="w-4 h-4 shrink-0"></i>
-        Recipes
+        <i data-lucide="braces" class="w-4 h-4 shrink-0"></i>
+        Snippets
       </a>
     </nav>
 
@@ -138,7 +219,23 @@
   <div class="flex-1 flex flex-col min-h-screen overflow-hidden">
     <header class="bg-base-100 border-b border-base-300 px-6 py-3.5 flex items-center justify-between shrink-0">
       <div class="text-sm text-base-content/70">{{block "header" .}}Brine{{end}}</div>
-      <div class="flex items-center gap-2">{{block "header-actions" .}}{{end}}</div>
+      <div class="flex items-center gap-2">
+        <div class="runtime-pill" title="Runtime selected when Brine started">
+          <span class="runtime-dot"></span>
+          <span class="text-base-content/45">Runtime</span>
+          <span class="font-mono font-semibold text-base-content">{{.RuntimeEngine}}</span>
+        </div>
+        {{block "header-actions" .}}{{end}}
+        {{if .AuthEnabled}}
+        <form method="post" action="/logout" class="inline-flex">
+          <input type="hidden" name="_csrf" value="{{.CSRF}}">
+          <button type="submit" class="btn btn-ghost btn-sm gap-1.5" title="Sign out">
+            <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+            <span class="text-xs text-base-content/70">{{.User}}</span>
+          </button>
+        </form>
+        {{end}}
+      </div>
     </header>
 
     <main class="flex-1 p-6 overflow-auto">
@@ -153,6 +250,12 @@
   <div class="modal-box max-w-sm">
     <h3 class="font-semibold text-base mb-1" id="modal-title">Confirm</h3>
     <p class="text-sm text-base-content/60 mb-4" id="modal-message"></p>
+    <div id="modal-checkbox-wrap" class="form-control mb-4 hidden">
+      <label class="label cursor-pointer justify-start gap-2 p-0">
+        <input type="checkbox" id="modal-checkbox" class="checkbox checkbox-sm checkbox-error" checked>
+        <span class="label-text text-sm" id="modal-checkbox-label"></span>
+      </label>
+    </div>
     <div class="flex justify-end gap-2">
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('confirm-modal').close()">Cancel</button>
       <button class="btn btn-error btn-sm" id="modal-confirm-btn">Confirm</button>
@@ -165,19 +268,50 @@
   document.addEventListener('DOMContentLoaded', () => lucide.createIcons());
   document.addEventListener('htmx:afterSettle',  () => lucide.createIcons());
 
+  // Attach the CSRF token to every HTMX request and expose a helper for fetch().
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.content : '';
+  }
+  function brineHeaders(extra) {
+    const headers = Object.assign({}, extra || {});
+    const token = csrfToken();
+    if (token) headers['X-CSRF-Token'] = token;
+    return headers;
+  }
+  document.addEventListener('htmx:configRequest', (e) => {
+    const token = csrfToken();
+    if (token) e.detail.headers['X-CSRF-Token'] = token;
+  });
+
   function showToast(msg, type = 'info') {
     const div = document.createElement('div');
     div.className = `alert alert-${type} shadow-lg max-w-sm text-sm`;
-    div.innerHTML = `<span>${msg}</span>`;
+    const span = document.createElement('span');
+    span.textContent = msg; // never interpret server output as HTML
+    div.appendChild(span);
     document.getElementById('toasts').appendChild(div);
     setTimeout(() => div.remove(), 4000);
   }
 
-  function confirmAction(title, message, onConfirm) {
+  function confirmAction(title, message, onConfirm, opts = {}) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-message').textContent = message;
+    const wrap = document.getElementById('modal-checkbox-wrap');
+    const cb = document.getElementById('modal-checkbox');
+    if (opts.checkbox) {
+      document.getElementById('modal-checkbox-label').textContent = opts.checkbox;
+      cb.checked = opts.checked !== false;
+      wrap.classList.remove('hidden');
+    } else {
+      wrap.classList.add('hidden');
+    }
     const btn = document.getElementById('modal-confirm-btn');
-    btn.onclick = () => { document.getElementById('confirm-modal').close(); onConfirm(); };
+    btn.onclick = () => {
+      const checked = opts.checkbox ? cb.checked : false;
+      document.getElementById('confirm-modal').close();
+      onConfirm(checked);
+    };
     document.getElementById('confirm-modal').showModal();
   }
 

@@ -11,8 +11,8 @@ import (
 )
 
 func (h *Handler) containerList(w http.ResponseWriter, r *http.Request) {
-	h.render(w, r, "containers/index.html", map[string]interface{}{
-		"Page": "containers",
+	h.render(w, r, "containers/index.html", &containerListData{
+		pageData: pageData{Page: "containers"},
 	})
 }
 
@@ -23,9 +23,9 @@ func (h *Handler) containerDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Container not found", http.StatusNotFound)
 		return
 	}
-	h.render(w, r, "containers/detail.html", map[string]interface{}{
-		"Page":      "containers",
-		"Container": c,
+	h.render(w, r, "containers/detail.html", &containerDetailData{
+		pageData:  pageData{Page: "containers"},
+		Container: c,
 	})
 }
 
@@ -102,7 +102,8 @@ func (h *Handler) containerLogsSSE(w http.ResponseWriter, r *http.Request) {
 
 	flusher, canFlush := w.(http.Flusher)
 
-	scanner := bufio.NewScanner(stripMuxHeader(rc))
+	scanner := bufio.NewScanner(rc)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		// Each SSE message is a <div> appended to the log container

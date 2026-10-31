@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/engine"
+	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/pkl"
 	"github.com/umayr/brine/internal/store"
 )
 
@@ -18,21 +20,39 @@ func (h *Handler) stackList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.render(w, r, "stacks/index.html", map[string]interface{}{
-		"Page":   "stacks",
-		"Stacks": stacks,
+	h.render(w, r, "stacks/index.html", &stackListData{
+		pageData: pageData{Page: "stacks"},
+		Stacks:   stacks,
 	})
 }
 
 func (h *Handler) stackNew(w http.ResponseWriter, r *http.Request) {
 	byCategory, _ := h.recipes.ListByCategory()
-	h.render(w, r, "stacks/new.html", map[string]interface{}{
-		"Page":          "stacks",
-		"DefaultEngine": h.engine,
-		"DefaultPkl":    "",
-		"Source":        r.URL.Query().Get("source"), // "local" | "git" | "gitops"
-		"Recipes":       byCategory,
+	h.render(w, r, "stacks/new.html", &stackNewData{
+		pageData:           pageData{Page: "stacks"},
+		DefaultPkl:         defaultStackPkl(h.engine),
+		Source:             r.URL.Query().Get("source"), // "local" | "git" | "gitops"
+		Snippets:           byCategory,
+		SnippetCompletions: h.snippetCompletions(),
 	})
+}
+
+func defaultStackPkl(engine string) string {
+	if engine == "" {
+		engine = "docker"
+	}
+	return fmt.Sprintf(`amends "package://pkg.ushd.ca/dill@0.2.0#/dill.pkl"
+
+config {
+  name = "my-app"
+  engine = "%s"
+  services {
+    ["web"] {
+      image = "nginx:alpine"
+      ports = List("8080:80")
+    }
+  }
+}`, engine)
 }
 
 func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
@@ -55,12 +75,13 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 		fileContents[f] = content
 	}
 
-	h.render(w, r, "stacks/detail.html", map[string]interface{}{
-		"Page":         "stacks",
-		"Stack":        stack,
-		"Files":        files,
-		"ActiveFile":   activeFile,
-		"FileContents": fileContents,
+	h.render(w, r, "stacks/detail.html", &stackDetailData{
+		pageData:        pageData{Page: "stacks"},
+		Stack:           stack,
+		Files:           files,
+		ActiveFile:      activeFile,
+		FileContents:    fileContents,
+		EngineAlignment: h.engineAlignmentFor(stack, fileContents),
 	})
 }
 
@@ -85,15 +106,48 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 	content, _ := h.store.ReadFile(name, activeFile)
 	files, _ := h.store.Files(name)
 	byCategory, _ := h.recipes.ListByCategory()
+	entrypoint := stack.Entrypoint
+	if entrypoint == "" {
+		entrypoint = "compose.pkl"
+	}
+	fileContents := map[string]string{activeFile: content}
+	if activeFile != entrypoint {
+		if entrypointContent, err := h.store.ReadFile(name, entrypoint); err == nil {
+			fileContents[entrypoint] = entrypointContent
+		}
+	}
 
-	h.render(w, r, "stacks/editor.html", map[string]interface{}{
-		"Page":       "stacks",
-		"Stack":      stack,
-		"ActiveFile": activeFile,
-		"PklContent": content,
-		"Files":      files,
-		"Recipes":    byCategory,
+	h.render(w, r, "stacks/editor.html", &stackEditorData{
+		pageData:           pageData{Page: "stacks"},
+		Stack:              stack,
+		ActiveFile:         activeFile,
+		PklContent:         content,
+		Files:              files,
+		Snippets:           byCategory,
+		SnippetCompletions: h.snippetCompletions(),
+		EngineAlignment:    h.engineAlignmentFor(stack, fileContents),
 	})
+}
+
+func (h *Handler) snippetCompletions() []map[string]string {
+	items, err := h.recipes.List()
+	if err != nil {
+		return nil
+	}
+	completions := make([]map[string]string, 0, len(items))
+	for _, item := range items {
+		full, err := h.recipes.Get(item.Slug)
+		if err != nil {
+			continue
+		}
+		completions = append(completions, map[string]string{
+			"name":        full.Name,
+			"category":    full.Category,
+			"description": full.Description,
+			"body":        full.Body,
+		})
+	}
+	return completions
 }
 
 // --- HTMX partials ---
@@ -104,10 +158,6 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.FormValue("name")
-	eng := r.FormValue("engine")
-	if eng == "" {
-		eng = h.engine
-	}
 
 	// Multi-file form sends filename[] + filecontent[]; fall back to legacy pkl_content.
 	filenames := r.Form["filename"]
@@ -125,7 +175,9 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.store.Create(name, eng, entrypointContent); err != nil {
+	entrypointContent = pkl.WithStackName(entrypointContent, name)
+
+	if _, err := h.store.Create(name, entrypointContent); err != nil {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
@@ -164,7 +216,8 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.renderAlert(w, "success", "Saved")
+	w.Header().Set("HX-Redirect", "/stacks/"+name)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +278,16 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderAlert(w, "error", "Stack not found")
+		return
+	}
+	content, _ := h.store.ReadPkl(name)
+	entrypoint := stack.Entrypoint
+	if entrypoint == "" {
+		entrypoint = "compose.pkl"
+	}
+	alignment := h.engineAlignmentFor(stack, map[string]string{entrypoint: content})
+	if alignment.Blocked {
+		h.renderAlert(w, "warning", alignment.Warning+" Update config.engine before planning or deploying.")
 		return
 	}
 	result, err := h.agent.Dill().Plan(r.Context(), stack.PklPath)
@@ -336,7 +399,6 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := r.FormValue("name")
-	eng := r.FormValue("engine")
 	gitURL := r.FormValue("git_url")
 	branch := r.FormValue("git_branch")
 	folder := r.FormValue("git_folder")
@@ -348,9 +410,6 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 	if name == "" || gitURL == "" {
 		h.renderAlert(w, "error", "Name and Git URL are required")
 		return
-	}
-	if eng == "" {
-		eng = h.engine
 	}
 	if branch == "" {
 		branch = "main"
@@ -370,7 +429,7 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", "git clone failed: "+err.Error())
 		return
 	}
-	if _, err := h.store.CreateFromGit(name, eng, src, entrypoint); err != nil {
+	if _, err := h.store.CreateFromGit(name, src, entrypoint); err != nil {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
@@ -387,12 +446,14 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	repoDir, _ := h.store.RepoDir(name)
-	changed, err := h.git.Pull(r.Context(), repoDir)
+	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
+	defer cancel()
+	changed, err := h.git.Pull(ctx, repoDir)
 	if err != nil {
 		h.renderAlert(w, "error", "git pull: "+err.Error())
 		return
 	}
-	commit, _ := h.git.ShortRef(r.Context(), repoDir)
+	commit, _ := h.git.ShortRef(ctx, repoDir)
 	_ = h.store.UpdateGitStatus(name, commit, "", timeNow())
 	if changed {
 		h.renderAlert(w, "success", fmt.Sprintf("Pulled — now at %s", commit))

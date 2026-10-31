@@ -13,16 +13,16 @@ func (h *Handler) recipeList(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.render(w, r, "recipes/index.html", map[string]interface{}{
-		"Page":       "recipes",
-		"ByCategory": byCategory,
+	h.render(w, r, "recipes/index.html", &recipeListData{
+		pageData:   pageData{Page: "recipes"},
+		ByCategory: byCategory,
 	})
 }
 
 func (h *Handler) recipeNew(w http.ResponseWriter, r *http.Request) {
-	h.render(w, r, "recipes/editor.html", map[string]interface{}{
-		"Page":   "recipes",
-		"Recipe": nil,
+	h.render(w, r, "recipes/editor.html", &recipeEditorData{
+		pageData: pageData{Page: "recipes"},
+		Recipe:   nil,
 	})
 }
 
@@ -33,9 +33,9 @@ func (h *Handler) recipeEditor(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Recipe not found", http.StatusNotFound)
 		return
 	}
-	h.render(w, r, "recipes/editor.html", map[string]interface{}{
-		"Page":   "recipes",
-		"Recipe": recipe,
+	h.render(w, r, "recipes/editor.html", &recipeEditorData{
+		pageData: pageData{Page: "recipes"},
+		Recipe:   recipe,
 	})
 }
 

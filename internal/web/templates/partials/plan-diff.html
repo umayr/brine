@@ -1,62 +1,77 @@
 {{if .Changes}}
 <div class="bg-base-100 rounded-box shadow-sm">
   <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-3">
       <h2 class="font-semibold">Plan</h2>
-      <span class="text-xs text-base-content/40 font-mono">{{len .Changes}} change{{if ne (len .Changes) 1}}s{{end}}</span>
+      <span class="text-xs text-base-content/40 font-mono">{{.ChangeCount}} change{{if ne .ChangeCount 1}}s{{end}}</span>
+      <div class="hidden md:flex items-center gap-2 font-mono text-xs">
+        {{if .Summary.Create}}<span class="badge badge-success badge-sm">+{{.Summary.Create}} create</span>{{end}}
+        {{if .Summary.Recreate}}<span class="badge badge-warning badge-sm">~{{.Summary.Recreate}} recreate</span>{{end}}
+        {{if .Summary.Remove}}<span class="badge badge-error badge-sm">-{{.Summary.Remove}} remove</span>{{end}}
+        {{if .Summary.Noop}}<span class="badge badge-ghost badge-sm">{{.Summary.Noop}} unchanged</span>{{end}}
+      </div>
     </div>
     <button onclick="this.closest('.bg-base-100').remove()" class="btn btn-ghost btn-xs">
       <i data-lucide="x" class="w-3.5 h-3.5"></i>
     </button>
   </div>
-  <div class="overflow-x-auto">
-    <table class="table table-sm">
-      <thead>
-        <tr class="text-base-content/50">
-          <th>Kind</th>
-          <th>Service</th>
-          <th>Changes</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Changes}}
-        <tr class="{{if eq .Kind "noop"}}opacity-50{{end}}">
-          <td>
-            {{if eq .Kind "create"}}
-            <span class="badge badge-success badge-sm gap-1 font-mono">
-              <i data-lucide="plus" class="w-3 h-3"></i>create
-            </span>
-            {{else if eq .Kind "recreate"}}
-            <span class="badge badge-warning badge-sm gap-1 font-mono">
-              <i data-lucide="refresh-cw" class="w-3 h-3"></i>recreate
-            </span>
-            {{else if eq .Kind "remove"}}
-            <span class="badge badge-error badge-sm gap-1 font-mono">
-              <i data-lucide="minus" class="w-3 h-3"></i>remove
-            </span>
-            {{else if eq .Kind "noop"}}
-            <span class="badge badge-ghost badge-sm font-mono">noop</span>
-            {{else}}
-            <span class="badge badge-ghost badge-sm font-mono">{{.Kind}}</span>
-            {{end}}
-          </td>
-          <td class="font-mono text-sm font-medium">{{.Service}}</td>
-          <td class="text-xs font-mono">
-            {{range .Diffs}}
-            <div class="flex items-center gap-1.5 text-base-content/70">
-              <span class="text-base-content/40 w-16 shrink-0">{{.Field}}</span>
-              {{if .Before}}<span class="text-error/80 line-through">{{.Before}}</span>{{end}}
-              {{if and .Before .After}}<span class="text-base-content/30">→</span>{{end}}
-              {{if .After}}<span class="text-success/80">{{.After}}</span>{{end}}
-            </div>
-            {{end}}
-          </td>
-        </tr>
+
+  <div class="divide-y divide-base-200">
+    {{range .Changes}}
+    <div class="grid grid-cols-1 lg:grid-cols-[13rem_1fr] gap-4 px-5 py-4 {{if eq .Kind "noop"}}opacity-55{{end}}">
+      <div class="flex lg:block items-center gap-3 min-w-0">
+        {{if eq .Kind "create"}}
+        <span class="badge badge-success badge-sm gap-1 font-mono">
+          <i data-lucide="plus" class="w-3 h-3"></i>create
+        </span>
+        {{else if eq .Kind "recreate"}}
+        <span class="badge badge-warning badge-sm gap-1 font-mono">
+          <i data-lucide="refresh-cw" class="w-3 h-3"></i>recreate
+        </span>
+        {{else if eq .Kind "remove"}}
+        <span class="badge badge-error badge-sm gap-1 font-mono">
+          <i data-lucide="minus" class="w-3 h-3"></i>remove
+        </span>
+        {{else if eq .Kind "noop"}}
+        <span class="badge badge-ghost badge-sm font-mono">noop</span>
+        {{else}}
+        <span class="badge badge-ghost badge-sm font-mono">{{.Kind}}</span>
         {{end}}
-      </tbody>
-    </table>
+        <div class="font-mono text-sm font-semibold mt-0 lg:mt-2 truncate">{{.Service}}</div>
+      </div>
+
+      <div class="min-w-0">
+        {{if .Diffs}}
+        <div class="space-y-3">
+          {{range .Diffs}}
+          <div class="grid grid-cols-1 xl:grid-cols-[8rem_1fr] gap-2">
+            <div class="field-label pt-0.5">{{.Field}}</div>
+            <div class="min-w-0 font-mono text-xs space-y-1.5">
+              {{if .Before}}
+              <div class="grid grid-cols-[1.5rem_1fr] gap-2 text-error/90">
+                <span class="select-none">-</span>
+                <span class="break-all rounded bg-error/10 px-2 py-1">{{.Before}}</span>
+              </div>
+              {{end}}
+              {{if .After}}
+              <div class="grid grid-cols-[1.5rem_1fr] gap-2 text-success/90">
+                <span class="select-none">+</span>
+                <span class="break-all rounded bg-success/10 px-2 py-1">{{.After}}</span>
+              </div>
+              {{end}}
+            </div>
+          </div>
+          {{end}}
+        </div>
+        {{else}}
+        <div class="text-sm text-base-content/45">No configuration changes.</div>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
   </div>
-  <div class="px-5 py-3 border-t border-base-200 font-mono text-xs text-base-content/50 flex gap-4">
+
+  <div class="md:hidden px-5 py-3 border-t border-base-200 font-mono text-xs text-base-content/50 flex gap-2 flex-wrap">
     {{if .Summary.Create}}<span class="text-success">+{{.Summary.Create}} create</span>{{end}}
     {{if .Summary.Recreate}}<span class="text-warning">~{{.Summary.Recreate}} recreate</span>{{end}}
     {{if .Summary.Remove}}<span class="text-error">-{{.Summary.Remove}} remove</span>{{end}}

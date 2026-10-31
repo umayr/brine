@@ -26,7 +26,10 @@ func NewFSRecipeStore(dataDir string) (*FSRecipeStore, error) {
 	if _, err := os.Stat(recipesDir); os.IsNotExist(err) {
 		isNew = true
 	}
-	if err := os.MkdirAll(recipesDir, 0755); err != nil {
+	if err := mkdirPrivate(dataDir); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+	if err := mkdirPrivate(recipesDir); err != nil {
 		return nil, fmt.Errorf("create recipes dir: %w", err)
 	}
 	rs := &FSRecipeStore{dataDir: dataDir}
@@ -58,6 +61,9 @@ type recipeMeta struct {
 }
 
 func (s *FSRecipeStore) readMeta(slug string) (*recipeMeta, error) {
+	if err := validateRecipeSlug(slug); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(s.metaPath(slug))
 	if err != nil {
 		return nil, err
@@ -74,7 +80,7 @@ func (s *FSRecipeStore) writeMeta(m *recipeMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(s.metaPath(m.Slug), data, 0644)
+	return writeFilePrivate(s.metaPath(m.Slug), data)
 }
 
 func (s *FSRecipeStore) List() ([]*Recipe, error) {
@@ -89,6 +95,9 @@ func (s *FSRecipeStore) List() ([]*Recipe, error) {
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
+		}
+		if validateRecipeSlug(entry.Name()) != nil {
+			continue // ignore directories that are not valid recipe slugs
 		}
 		m, err := s.readMeta(entry.Name())
 		if err != nil {
@@ -150,14 +159,17 @@ func (s *FSRecipeStore) Create(name, category, description, body string) (*Recip
 	if slug == "" {
 		return nil, fmt.Errorf("invalid recipe name %q", name)
 	}
+	if err := validateRecipeSlug(slug); err != nil {
+		return nil, err
+	}
 	dir := s.recipeDir(slug)
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("recipe %q already exists", slug)
 	}
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := mkdirPrivate(dir); err != nil {
 		return nil, fmt.Errorf("create recipe dir: %w", err)
 	}
-	if err := os.WriteFile(s.bodyPath(slug), []byte(body), 0644); err != nil {
+	if err := writeFilePrivate(s.bodyPath(slug), []byte(body)); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("write recipe body: %w", err)
 	}
@@ -190,7 +202,7 @@ func (s *FSRecipeStore) Update(slug, body string) (*Recipe, error) {
 	if err != nil {
 		return nil, fmt.Errorf("recipe %q not found", slug)
 	}
-	if err := os.WriteFile(s.bodyPath(slug), []byte(body), 0644); err != nil {
+	if err := writeFilePrivate(s.bodyPath(slug), []byte(body)); err != nil {
 		return nil, fmt.Errorf("write recipe body: %w", err)
 	}
 	m.UpdatedAt = time.Now()

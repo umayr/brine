@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/umayr/brine/internal/dill"
@@ -16,14 +17,19 @@ const minCheckInterval = 30 * time.Second
 // Syncer watches all GitOps-enabled stacks and triggers dill up when
 // upstream commits arrive.
 type Syncer struct {
-	store store.StackStore
-	git   *Runner
-	dill  *dill.Runner
+	store    store.StackStore
+	git      *Runner
+	dill     *dill.Runner
+	timeout  time.Duration
+	inFlight sync.Map
 }
 
 // NewSyncer creates a Syncer.
-func NewSyncer(st store.StackStore, git *Runner, dill *dill.Runner) *Syncer {
-	return &Syncer{store: st, git: git, dill: dill}
+func NewSyncer(st store.StackStore, git *Runner, dill *dill.Runner, timeout time.Duration) *Syncer {
+	if timeout <= 0 {
+		timeout = 30 * time.Minute
+	}
+	return &Syncer{store: st, git: git, dill: dill, timeout: timeout}
 }
 
 // Run starts the background sync loop. It blocks until ctx is cancelled.
@@ -61,6 +67,11 @@ func (s *Syncer) syncAll(ctx context.Context) {
 }
 
 func (s *Syncer) sync(ctx context.Context, name string) {
+	if _, loaded := s.inFlight.LoadOrStore(name, struct{}{}); loaded {
+		return // a sync for this stack is already running
+	}
+	defer s.inFlight.Delete(name)
+
 	stack, err := s.store.Get(name)
 	if err != nil {
 		return
@@ -81,7 +92,10 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 		}
 	}
 
-	changed, err := s.git.Pull(ctx, repoDir)
+	syncCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+
+	changed, err := s.git.Pull(syncCtx, repoDir)
 	if err != nil {
 		syncTime := time.Now()
 		_ = s.store.UpdateGitStatus(name, "", err.Error(), syncTime)
@@ -95,7 +109,7 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 
 	if changed {
 		log.Printf("git syncer: %s updated to %s, deploying", name, commit)
-		if err := s.dill.Up(ctx, stack.PklPath, io.Discard); err != nil {
+		if err := s.dill.Up(syncCtx, stack.PklPath, io.Discard); err != nil {
 			log.Printf("git syncer: dill up %s: %v", name, err)
 		}
 	}
