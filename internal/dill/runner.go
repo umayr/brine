@@ -9,12 +9,33 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Runner shells out to the dill binary for stack lifecycle operations.
 // Stack configuration and parsing remain dill's responsibility.
 type Runner struct {
 	Binary string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
+
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// lockPath serialises lifecycle operations on the same stack so that a
+// GitOps sync cannot run concurrently with a deploy triggered from the UI.
+func (r *Runner) lockPath(path string) func() {
+	r.mu.Lock()
+	if r.locks == nil {
+		r.locks = make(map[string]*sync.Mutex)
+	}
+	m := r.locks[path]
+	if m == nil {
+		m = &sync.Mutex{}
+		r.locks[path] = m
+	}
+	r.mu.Unlock()
+	m.Lock()
+	return m.Unlock
 }
 
 // New returns a Runner using the given binary path.
@@ -60,6 +81,16 @@ type PlanResult struct {
 	Summary PlanSummary  `json:"summary"`
 }
 
+// ChangeCount returns the number of services that would actually change.
+// Noop services are excluded so the UI does not report "2 changes" for an
+// unchanged stack.
+func (p *PlanResult) ChangeCount() int {
+	if p == nil {
+		return 0
+	}
+	return p.Summary.Create + p.Summary.Recreate + p.Summary.Remove
+}
+
 // run executes the dill binary with the given arguments, streaming combined
 // stdout+stderr to w. Returns an error if the process exits non-zero.
 func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
@@ -84,32 +115,38 @@ func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	return r.run(ctx, w, "-f", pklPath, "up")
 }
 
 // Down stops and removes all containers in the stack.
 func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	return r.run(ctx, w, "-f", pklPath, "down")
 }
 
 // Stop stops running containers without removing them.
 func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	return r.run(ctx, w, "-f", pklPath, "stop")
 }
 
 // Start starts previously stopped containers.
 func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	return r.run(ctx, w, "-f", pklPath, "start")
 }
 
 // Restart stops then starts all containers.
 func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	return r.run(ctx, w, "-f", pklPath, "restart")
 }
 
 // Teardown removes containers, images, volumes, and the stack network.
 // Pass force=true to force-remove images referenced by other containers.
 func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
+	defer r.lockPath(pklPath)()
 	args := []string{"-f", pklPath, "teardown"}
 	if force {
 		args = append(args, "--force")

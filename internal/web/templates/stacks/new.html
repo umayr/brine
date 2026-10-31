@@ -25,7 +25,7 @@
   <div id="form-local">
     <form hx-post="/web/stacks" hx-target="#local-result" hx-swap="innerHTML">
 
-      <!-- Name + engine bar -->
+      <!-- Name + runtime bar -->
       <div class="bg-base-100 rounded-box shadow-sm p-4 mb-4">
         <div class="grid grid-cols-2 gap-4">
           <div class="form-control">
@@ -33,12 +33,19 @@
             <input type="text" name="name" class="input input-bordered font-mono"
               placeholder="my-app" required pattern="[a-zA-Z0-9_-]+" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text">Engine</span></label>
-            <select name="engine" class="select select-bordered">
-              <option value="docker" {{if eq .DefaultEngine "docker"}}selected{{end}}>Docker</option>
-              <option value="podman" {{if eq .DefaultEngine "podman"}}selected{{end}}>Podman</option>
-            </select>
+          <div class="rounded-lg border border-base-300 bg-base-200/40 px-4 py-3">
+            <div class="field-label mb-1">Runtime engine</div>
+            <div class="flex items-center gap-2">
+              <span class="badge badge-ghost badge-sm font-mono">{{.RuntimeEngine}}</span>
+              <span class="text-xs text-base-content/45">selected when Brine started</span>
+            </div>
+          </div>
+        </div>
+        <div id="local-engine-warning" class="alert alert-warning mt-4 hidden items-start">
+          <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5"></i>
+          <div>
+            <div class="font-semibold">Engine mismatch</div>
+            <div class="text-sm" id="local-engine-warning-text"></div>
           </div>
         </div>
       </div>
@@ -78,7 +85,7 @@
                 <textarea name="filecontent"
                   class="textarea textarea-bordered font-mono text-sm w-full resize-y"
                   style="min-height: 24rem;"
-                  placeholder='amends "package://pkg.ushd.ca/dill@0.1.1#/dill.pkl"
+                  placeholder='amends "package://pkg.ushd.ca/dill@0.2.0#/dill.pkl"
 
 config {
   name   = "my-app"
@@ -106,21 +113,21 @@ config {
           </div>
         </div>
 
-        <!-- Recipe sidebar -->
+        <!-- Snippet sidebar -->
         <div class="w-64 shrink-0">
           <div class="bg-base-100 rounded-box shadow-sm sticky top-4">
             <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
-              <h3 class="text-sm font-semibold">Recipes</h3>
-              <a href="/recipes/new" class="btn btn-ghost btn-xs" title="New recipe">
+              <h3 class="text-sm font-semibold">Snippets</h3>
+              <a href="/recipes/new" class="btn btn-ghost btn-xs" title="New snippet">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               </a>
             </div>
             <div class="divide-y divide-base-200 max-h-[calc(100vh-16rem)] overflow-y-auto">
-              {{if .Recipes}}
-              {{range $cat, $recipes := .Recipes}}
+              {{if .Snippets}}
+              {{range $cat, $snippets := .Snippets}}
               <div>
                 <div class="px-4 py-2 text-xs font-semibold text-base-content/40 uppercase tracking-wider">{{$cat}}</div>
-                {{range $recipes}}
+                {{range $snippets}}
                 <div class="px-4 py-2.5 hover:bg-base-200/50 group cursor-default">
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
@@ -130,7 +137,7 @@ config {
                     <button
                       type="button"
                       class="btn btn-ghost btn-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onclick="nfInsertRecipe('{{.Slug}}')"
+                      onclick="nfInsertSnippet('{{.Slug}}')"
                       title="Insert at cursor"
                     >
                       <i data-lucide="corner-down-left" class="w-3.5 h-3.5"></i>
@@ -142,8 +149,8 @@ config {
               {{end}}
               {{else}}
               <div class="px-4 py-8 text-center">
-                <i data-lucide="book-open" class="w-6 h-6 mx-auto mb-2 text-base-content/20"></i>
-                <p class="text-xs text-base-content/40">No recipes yet.</p>
+                <i data-lucide="braces" class="w-6 h-6 mx-auto mb-2 text-base-content/20"></i>
+                <p class="text-xs text-base-content/40">No snippets yet.</p>
                 <a href="/recipes/new" class="link link-hover text-xs mt-1 inline-block">Create one</a>
               </div>
               {{end}}
@@ -166,12 +173,12 @@ config {
             <input type="text" name="name" class="input input-bordered font-mono"
               placeholder="my-app" required pattern="[a-zA-Z0-9_-]+" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text">Engine</span></label>
-            <select name="engine" class="select select-bordered">
-              <option value="docker" {{if eq .DefaultEngine "docker"}}selected{{end}}>Docker</option>
-              <option value="podman" {{if eq .DefaultEngine "podman"}}selected{{end}}>Podman</option>
-            </select>
+          <div class="rounded-lg border border-base-300 bg-base-200/40 px-4 py-3">
+            <div class="field-label mb-1">Runtime engine</div>
+            <div class="flex items-center gap-2">
+              <span class="badge badge-ghost badge-sm font-mono">{{.RuntimeEngine}}</span>
+              <span class="text-xs text-base-content/45">selected when Brine started</span>
+            </div>
           </div>
         </div>
 
@@ -242,35 +249,14 @@ config {
   </div>
 
 <script type="module">
-import { EditorView, basicSetup } from 'https://esm.sh/codemirror@6';
-import { EditorState } from 'https://esm.sh/@codemirror/state@6';
-import { pkl } from 'https://esm.sh/codemirror-lang-pkl';
-import { oneDark } from 'https://esm.sh/@codemirror/theme-one-dark@6';
-
-const editorTheme = EditorView.theme({
-  '.cm-scroller': { fontFamily: "'JetBrains Mono', ui-monospace, monospace", minHeight: '22rem' },
-  '.cm-content': { minHeight: '22rem' },
-});
+import { createBrinePklEditor } from '/static/vendor/editor.js';
 
 function attachPklEditor(textarea) {
-  const view = new EditorView({
-    state: EditorState.create({
-      doc: textarea.value,
-      extensions: [
-        basicSetup,
-        pkl(),
-        oneDark,
-        editorTheme,
-        EditorView.lineWrapping,
-        EditorView.updateListener.of(v => {
-          if (v.docChanged) textarea.value = v.state.doc.toString();
-        }),
-      ],
-    }),
-    parent: textarea.parentElement,
+  const view = createBrinePklEditor(textarea, {
+    minHeight: '24rem',
+    snippets: {{toJSON .SnippetCompletions}},
   });
-  textarea.style.display = 'none';
-  // Store on panel so nfInsertRecipe can find it.
+  // Store on panel so nfInsertSnippet can find it.
   const panel = textarea.closest('.nf-panel');
   if (panel) panel._cmView = view;
   return view;
@@ -281,6 +267,7 @@ window.attachPklEditor = attachPklEditor;
 document.addEventListener('DOMContentLoaded', () => {
   const initial = document.querySelector('.nf-panel[data-idx="0"] textarea[name="filecontent"]');
   if (initial) attachPklEditor(initial);
+  bindLocalEngineWarning();
 });
 </script>
 
@@ -297,6 +284,85 @@ function setSource(src) {
 // ── Multi-file UI ────────────────────────────────────────────────────
 let nfCount = 1;
 let nfActive = 0;
+
+function stripPklComments(src) {
+  let out = '';
+  let inLineComment = false;
+  let inBlockComment = false;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (inLineComment) {
+      if (ch === '\n') {
+        inLineComment = false;
+        out += ch;
+      }
+      continue;
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inString) {
+      out += ch;
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    out += ch;
+  }
+  return out;
+}
+
+function declaredPklEngine(src) {
+  const match = stripPklComments(src).match(/\bengine\s*=\s*"(docker|podman)"/m);
+  return match ? match[1] : '';
+}
+
+function bindLocalEngineWarning() {
+  const form = document.querySelector('#form-local form');
+  if (!form) return;
+  const warning = document.getElementById('local-engine-warning');
+  const warningText = document.getElementById('local-engine-warning-text');
+  const compose = form.querySelector('.nf-panel[data-idx="0"] textarea[name="filecontent"]');
+  const runtimeEngine = '{{.RuntimeEngine}}';
+  if (!warning || !warningText || !compose) return;
+
+  const update = () => {
+    const declared = declaredPklEngine(compose.value);
+    if (declared && declared !== runtimeEngine) {
+      warningText.textContent = `This Pkl declares ${declared}, but Brine is running against ${runtimeEngine}. Update config.engine before deploying.`;
+      warning.classList.remove('hidden');
+    } else {
+      warning.classList.add('hidden');
+    }
+  };
+
+  compose.addEventListener('input', update);
+  update();
+}
 
 function nfSwitchTab(idx) {
   nfActive = idx;
@@ -371,15 +437,15 @@ function nfRemoveFile(idx, e) {
   if (nfActive === idx) nfSwitchTab(0);
 }
 
-const recipeCache = {};
-async function nfInsertRecipe(slug) {
-  let body = recipeCache[slug];
+const snippetCache = {};
+async function nfInsertSnippet(slug) {
+  let body = snippetCache[slug];
   if (!body) {
     const res = await fetch('/api/recipes/' + slug);
-    if (!res.ok) { showToast('Failed to load recipe', 'error'); return; }
+    if (!res.ok) { showToast('Failed to load snippet', 'error'); return; }
     const data = await res.json();
     body = data.body;
-    recipeCache[slug] = body;
+    snippetCache[slug] = body;
   }
   const panel = document.querySelector(`.nf-panel[data-idx="${nfActive}"]`);
   if (!panel) return;
@@ -406,5 +472,41 @@ async function nfInsertRecipe(slug) {
     ta.focus();
   }
 }
+
+// Keep the starter Pkl's config.name in sync with the stack name field until
+// the user edits the name themselves. The server enforces the same rule.
+(function () {
+  const nameInput = document.querySelector('#form-local input[name="name"]');
+  if (!nameInput) return;
+  let last = '';
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  nameInput.addEventListener('input', () => {
+    const panel = document.querySelector('.nf-panel[data-idx="0"]');
+    if (!panel) return;
+    const view = panel._cmView;
+    const ta = panel.querySelector('textarea[name="filecontent"]');
+    const current = view ? view.state.doc.toString() : (ta ? ta.value : '');
+    if (!current) return;
+
+    const safe = nameInput.value.trim().replace(/[^A-Za-z0-9_-]/g, '');
+    const defRe = /name\s*=\s*"my-app"/;
+    const lastRe = last ? new RegExp('name\\s*=\\s*"' + escapeRe(last) + '"') : null;
+    const re = (lastRe && lastRe.test(current)) ? lastRe : (defRe.test(current) ? defRe : null);
+    if (!re) return;
+
+    const next = current.replace(re, (m) => {
+      const eq = m.indexOf('=');
+      return m.slice(0, eq).trimEnd() + ' = "' + safe + '"';
+    });
+    if (next === current) return;
+    if (view) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } });
+    } else if (ta) {
+      ta.value = next;
+    }
+    last = safe;
+  });
+})();
 </script>
 {{end}}

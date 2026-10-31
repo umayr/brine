@@ -25,8 +25,9 @@
   <!-- Action bar -->
   <div class="bg-base-100 rounded-box shadow-sm px-4 py-3 flex flex-wrap items-center gap-1.5">
     <!-- Primary action -->
-    <button class="btn btn-primary btn-sm gap-1.5"
+    <button class="btn btn-primary btn-sm gap-1.5" data-stack-action
       onclick="runAction('up', '{{.Stack.Name}}')"
+      {{if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
       <i data-lucide="play" class="w-3.5 h-3.5"></i>
       Deploy
@@ -34,26 +35,30 @@
 
     <!-- Lifecycle -->
     <div class="flex items-center gap-1 border-l border-base-300 pl-1.5 ml-0.5">
-      <button class="btn btn-ghost btn-sm gap-1.5" title="Stop containers and remove them"
-        onclick="runAction('down', '{{.Stack.Name}}')"
+      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Stop containers and remove them"
+        onclick="confirmAction('Run down', 'Stop and remove containers for {{.Stack.Name}}?', () => runAction('down', '{{.Stack.Name}}'))"
+        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="square" class="w-3.5 h-3.5"></i>
         Down
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5" title="Pause containers"
+      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Pause containers"
         onclick="runAction('stop', '{{.Stack.Name}}')"
+        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="pause" class="w-3.5 h-3.5"></i>
         Stop
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5" title="Start stopped containers"
+      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Start stopped containers"
         onclick="runAction('start', '{{.Stack.Name}}')"
+        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="play" class="w-3.5 h-3.5"></i>
         Start
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5"
+      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action
         onclick="runAction('restart', '{{.Stack.Name}}')"
+        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
         Restart
@@ -66,6 +71,7 @@
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
+        {{if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
         Plan
@@ -74,14 +80,15 @@
 
     <!-- Danger zone -->
     <div class="flex items-center gap-1.5 ml-auto">
-      <button class="btn btn-sm btn-outline btn-error gap-1.5"
-        onclick="confirmAction('Teardown stack', 'This will remove all containers, images, volumes, and networks for {{.Stack.Name}}. Are you sure?', () => runAction('teardown', '{{.Stack.Name}}'))"
+      <div id="action-status" class="hidden badge badge-ghost badge-sm font-mono mr-1">idle</div>
+      <button class="btn btn-sm btn-outline btn-error gap-1.5" data-stack-action
+        onclick="confirmStackName('Teardown stack', 'This removes containers, images, volumes, and networks for {{.Stack.Name}}.', '{{.Stack.Name}}', () => runAction('teardown', '{{.Stack.Name}}'))"
       >
         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
         Teardown
       </button>
-      <button class="btn btn-sm btn-error gap-1.5"
-        onclick="confirmAction('Delete stack', 'Remove {{.Stack.Name}} from brine? Running containers will not be stopped.', () => deleteStack('{{.Stack.Name}}'))"
+      <button class="btn btn-sm btn-error gap-1.5" data-stack-action
+        onclick="confirmStackName('Delete stack', 'Remove {{.Stack.Name}} from Brine? Its containers will be stopped and removed.', '{{.Stack.Name}}', () => deleteStack('{{.Stack.Name}}', true))"
       >
         <i data-lucide="x" class="w-3.5 h-3.5"></i>
         Delete
@@ -89,11 +96,25 @@
     </div>
   </div>
 
+  {{if .EngineAlignment.HasWarning}}
+  <div class="alert alert-warning rounded-box shadow-sm items-start">
+    <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5"></i>
+    <div>
+      <div class="font-semibold">Engine mismatch</div>
+      <div class="text-sm">{{.EngineAlignment.Warning}} Lifecycle actions are disabled until the file matches the runtime engine.</div>
+    </div>
+  </div>
+  {{end}}
+
   <!-- Meta -->
   <div class="bg-base-100 rounded-box shadow-sm divide-x divide-base-200 flex">
     <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Engine</div>
-      <div class="font-mono text-sm">{{.Stack.Engine}}</div>
+      <div class="field-label mb-1">Runtime engine</div>
+      <div class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</div>
+    </div>
+    <div class="flex-1 px-5 py-4">
+      <div class="field-label mb-1">Pkl engine</div>
+      <div class="font-mono text-sm">{{if .EngineAlignment.DeclaredEngine}}{{.EngineAlignment.DeclaredEngine}}{{else}}not declared{{end}}</div>
     </div>
     <div class="flex-1 px-5 py-4">
       <div class="field-label mb-1">Created</div>
@@ -133,6 +154,7 @@
         hx-target="#stack-containers"
         hx-swap="innerHTML"
         class="btn btn-ghost btn-xs gap-1.5"
+        id="stack-containers-refresh"
       >
         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
         Refresh
@@ -341,12 +363,29 @@
 </dialog>
 
 <script>
-function deleteStack(name) {
-  fetch(`/api/stacks/${name}`, { method: 'DELETE' })
-    .then(res => {
-      if (res.ok) { window.location.href = '/stacks'; }
-      else { showToast('Delete failed', 'error'); }
-    });
+async function deleteStack(name, removeContainers) {
+  const res = await fetch(`/api/stacks/${name}`, {
+    method: 'DELETE',
+    headers: brineHeaders({'Content-Type': 'application/json'}),
+    body: JSON.stringify({ remove_containers: !!removeContainers }),
+  });
+  if (res.ok) {
+    window.location.href = '/stacks';
+    return;
+  }
+  const text = await res.text();
+  let msg = text;
+  try { msg = JSON.parse(text).error || text; } catch {}
+  showToast('Delete failed: ' + msg.slice(0, 300), 'error');
+}
+
+function confirmStackName(title, message, name, onConfirm) {
+  const typed = window.prompt(`${title}\n\n${message}\n\nType "${name}" to continue.`);
+  if (typed === name) {
+    onConfirm();
+  } else if (typed !== null) {
+    showToast('Confirmation did not match the stack name', 'warning');
+  }
 }
 
 function doPush(name) {
@@ -355,36 +394,86 @@ function doPush(name) {
   runAction('git/push', name, 'POST', JSON.stringify({message}), 'application/json');
 }
 
-// Override runAction to optionally accept body + content-type.
-const _runAction = runAction;
-function runAction(action, name, method, body, contentType) {
+async function runAction(action, name, method, body, contentType) {
   const output = document.getElementById('action-output');
   const log = document.getElementById('action-log');
   const title = document.getElementById('action-title');
+  const status = document.getElementById('action-status');
+  const buttons = document.querySelectorAll('[data-stack-action]');
+  const started = Date.now();
 
   output.classList.remove('hidden');
   log.textContent = '';
-  title.textContent = action.charAt(0).toUpperCase() + action.slice(1).replace('/', ' ') + 'ing ' + name + '...';
+  title.textContent = actionLabel(action) + ' ' + name + '...';
+  status.textContent = 'running';
+  status.className = 'badge badge-info badge-sm font-mono mr-1';
+  status.classList.remove('hidden');
+  buttons.forEach(btn => btn.disabled = true);
 
-  fetch(`/api/stacks/${name}/${action}`, {
-    method: method || 'POST',
-    body: body,
-    headers: contentType ? {'Content-Type': contentType} : {},
-  })
-    .then(res => {
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      function read() {
-        reader.read().then(({done, value}) => {
-          if (done) { title.textContent = action + ' complete'; return; }
-          log.textContent += decoder.decode(value);
-          log.scrollTop = log.scrollHeight;
-          read();
-        });
+  try {
+    const res = await fetch(`/api/stacks/${name}/${action}`, {
+      method: method || 'POST',
+      body: body,
+      headers: brineHeaders(contentType ? {'Content-Type': contentType} : {}),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `${res.status} ${res.statusText}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let sawError = false;
+    let sawDone = false;
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, {stream: true});
+      if (chunk.includes('[brine:error]')) sawError = true;
+      if (chunk.includes('[brine:done]')) sawDone = true;
+      log.textContent += chunk;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+    if (sawError || !sawDone) {
+      title.textContent = `${action} failed after ${elapsed}s`;
+      status.textContent = 'failed';
+      status.className = 'badge badge-error badge-sm font-mono mr-1';
+      showToast(`${action} failed`, 'error');
+    } else {
+      title.textContent = `${action} complete in ${elapsed}s`;
+      status.textContent = 'complete';
+      status.className = 'badge badge-success badge-sm font-mono mr-1';
+      showToast(`${action} complete`, 'success');
+      const refresh = document.getElementById('stack-containers-refresh');
+      if (refresh) htmx.trigger(refresh, 'click');
+      if (action === 'teardown') {
+        htmx.trigger(document.getElementById('stack-containers'), 'refresh');
       }
-      read();
-    })
-    .catch(err => { log.textContent += '\nerror: ' + err; });
+    }
+  } catch (err) {
+    log.textContent += '\n[brine:error] ' + err.message + '\n';
+    title.textContent = `${action} failed`;
+    status.textContent = 'failed';
+    status.className = 'badge badge-error badge-sm font-mono mr-1';
+    showToast(`${action} failed`, 'error');
+  } finally {
+    buttons.forEach(btn => btn.disabled = false);
+  }
+}
+
+function actionLabel(action) {
+  switch (action) {
+  case 'up':
+    return 'Deploying';
+  case 'down':
+    return 'Running down';
+  case 'git/push':
+    return 'Pushing';
+  default:
+    return action.charAt(0).toUpperCase() + action.slice(1).replace('/', ' ') + 'ing';
+  }
 }
 </script>
 
@@ -400,7 +489,7 @@ function runAction(action, name, method, body, contentType) {
 .token.punctuation{ color: #6e7681; }
 .token.operator   { color: #ff7b72; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.js"></script>
+<script src="/static/vendor/prism.js"></script>
 <script>
 Prism.languages.pkl = {
   comment: [

@@ -1,12 +1,12 @@
 {{template "layout.html" .}}
 
-{{define "title"}}Recipes — Brine{{end}}
-{{define "header"}}Recipes{{end}}
+{{define "title"}}Snippets — Brine{{end}}
+{{define "header"}}Snippets{{end}}
 
 {{define "header-actions"}}
 <a href="/recipes/new" class="btn btn-primary btn-sm gap-1.5">
   <i data-lucide="plus" class="w-3.5 h-3.5"></i>
-  New recipe
+  New snippet
 </a>
 {{end}}
 
@@ -39,7 +39,7 @@
                 Edit
               </a>
               <button class="btn btn-ghost btn-xs gap-1 text-error"
-                onclick="confirmAction('Delete recipe', 'Remove {{.Name}} from your library?', () => deleteRecipe('{{.Slug}}'))"
+                onclick="confirmAction('Delete snippet', 'Remove {{.Name}} from your library?', () => deleteRecipe('{{.Slug}}'))"
               >
                 <i data-lucide="trash-2" class="w-3 h-3"></i>
                 Delete
@@ -54,11 +54,11 @@
   </div>
   {{else}}
   <div class="py-20 text-center">
-    <i data-lucide="book-open" class="w-12 h-12 mx-auto mb-4 text-base-content/20"></i>
-    <p class="text-base-content/50 mb-5">No recipes yet. Create one to get started.</p>
+    <i data-lucide="braces" class="w-12 h-12 mx-auto mb-4 text-base-content/20"></i>
+    <p class="text-base-content/50 mb-5">No snippets yet. Create one to get started.</p>
     <a href="/recipes/new" class="btn btn-primary gap-1.5">
       <i data-lucide="plus" class="w-4 h-4"></i>
-      New recipe
+      New snippet
     </a>
   </div>
   {{end}}
@@ -66,11 +66,11 @@
 
 <script>
 function deleteRecipe(slug) {
-  fetch(`/web/recipes/${slug}`, { method: 'DELETE' })
+  fetch(`/web/recipes/${slug}`, { method: 'DELETE', headers: brineHeaders() })
     .then(res => {
       if (res.ok) {
         document.getElementById('recipe-' + slug)?.remove();
-        showToast('Recipe deleted', 'success');
+        showToast('Snippet deleted', 'success');
       } else {
         showToast('Delete failed', 'error');
       }

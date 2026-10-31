@@ -7,8 +7,8 @@ import (
 )
 
 func (h *Handler) imageList(w http.ResponseWriter, r *http.Request) {
-	h.render(w, r, "images/index.html", map[string]interface{}{
-		"Page": "images",
+	h.render(w, r, "images/index.html", &imageListData{
+		pageData: pageData{Page: "images"},
 	})
 }
 

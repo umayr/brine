@@ -54,7 +54,6 @@
         <thead>
           <tr class="text-base-content/50">
             <th>Name</th>
-            <th>Engine</th>
             <th>Updated</th>
             <th></th>
           </tr>
@@ -68,7 +67,6 @@
                 {{if .Git}}<span class="badge badge-ghost badge-xs gap-1"><i data-lucide="git-branch" class="w-2.5 h-2.5"></i>git</span>{{end}}
               </div>
             </td>
-            <td><span class="badge badge-ghost badge-sm font-mono">{{.Engine}}</span></td>
             <td class="font-mono text-xs text-base-content/50">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
             <td class="text-right">
               <a href="/stacks/{{.Name}}" class="btn btn-ghost btn-xs gap-1">
@@ -110,7 +108,10 @@
           {{range .Containers}}
           {{if eq .State "running"}}
           <tr class="hover">
-            <td><a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a></td>
+            <td>
+              <a href="/containers/{{.ID}}" class="link link-hover font-mono text-sm">{{.Name}}</a>
+              <div class="font-mono text-xs text-base-content/30 mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
+            </td>
             <td class="text-base-content/60 text-xs font-mono">{{.Image}}</td>
             <td><span class="badge badge-success badge-sm gap-1"><i data-lucide="circle" class="w-2 h-2 fill-current"></i>running</span></td>
             <td class="text-xs">{{if .Stack}}<a href="/stacks/{{.Stack}}" class="link link-hover text-base-content/70">{{.Stack}}</a>{{else}}<span class="text-base-content/30">—</span>{{end}}</td>

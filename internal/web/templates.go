@@ -24,6 +24,23 @@ type templateSet struct {
 var funcMap = template.FuncMap{
 	"formatBytes": formatBytes,
 	"rawJSON":     rawJSON,
+	"shortID":     shortID,
+	"toJSON":      toJSON,
+}
+
+func shortID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
+}
+
+func toJSON(v any) template.JS {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return "null"
+	}
+	return template.JS(data)
 }
 
 // rawJSON converts a json.RawMessage to a display string.
@@ -130,10 +147,24 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, page string, da
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := t.Execute(w, data); err != nil {
+	if err := t.Execute(w, h.withGlobalTemplateData(r, data)); err != nil {
 		// Response already started; log and return
 		fmt.Fprintf(w, "\n<!-- template error: %s -->", err)
 	}
+}
+
+func (h *Handler) withGlobalTemplateData(r *http.Request, data any) any {
+	runtimeEngine := h.engine
+	if runtimeEngine == "" {
+		runtimeEngine = "docker"
+	}
+	if page, ok := data.(runtimePageData); ok {
+		page.setRuntimeEngine(runtimeEngine)
+	}
+	if page, ok := data.(authPageData); ok && h.auth != nil {
+		page.setAuth(h.auth.CSRFFor(r), h.auth.User(r), h.auth.Enabled())
+	}
+	return data
 }
 
 // renderPartial writes an HTML fragment from the partials map.

@@ -16,7 +16,7 @@ func TestFSStore_MultiFile(t *testing.T) {
 	}
 
 	// Create a stack.
-	s, err := st.Create("mystack", "docker", "amends \"dill.pkl\"\n")
+	s, err := st.Create("mystack", "amends \"dill.pkl\"\n")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestFSStore_ReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFSStore: %v", err)
 	}
-	_, err = st.Create("ro", "docker", "content\n")
+	_, err = st.Create("ro", "content\n")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestFSStore_ReadOnly(t *testing.T) {
 	}
 
 	src := &store.GitSource{URL: "https://example.com/repo.git", Branch: "main", ReadOnly: true}
-	if _, err := st.CreateFromGit("ro-git", "docker", src, "compose.pkl"); err != nil {
+	if _, err := st.CreateFromGit("ro-git", src, "compose.pkl"); err != nil {
 		t.Fatalf("CreateFromGit: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestFSStore_ReadPkl_UsesEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFSStore: %v", err)
 	}
-	_, err = st.Create("s", "docker", "original\n")
+	_, err = st.Create("s", "original\n")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}

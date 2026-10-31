@@ -18,7 +18,6 @@ type GitSource struct {
 // Stack represents a dill stack managed by brine.
 type Stack struct {
 	Name       string     `json:"name"`
-	Engine     string     `json:"engine"` // "docker" | "podman"
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 	PklPath    string     `json:"pkl_path"`      // absolute path to entrypoint file
@@ -35,7 +34,7 @@ type StackStore interface {
 	Get(name string) (*Stack, error)
 
 	// Create registers a new stack and writes its .pkl content to disk.
-	Create(name, engine, pklContent string) (*Stack, error)
+	Create(name, pklContent string) (*Stack, error)
 
 	// Update rewrites the entrypoint .pkl content for an existing stack.
 	Update(name, pklContent string) (*Stack, error)
@@ -68,7 +67,7 @@ type StackStore interface {
 	// CreateFromGit registers a new stack whose files live in a cloned Git repo.
 	// The repo must already be cloned at the path returned by RepoDir(name).
 	// entrypoint is the filename within {repoDir}/{src.Folder} to use as the pkl entrypoint.
-	CreateFromGit(name, engine string, src *GitSource, entrypoint string) (*Stack, error)
+	CreateFromGit(name string, src *GitSource, entrypoint string) (*Stack, error)
 
 	// UpdateGitStatus records the result of the most recent git pull/sync.
 	UpdateGitStatus(name, commit, syncErr string, syncTime time.Time) error
