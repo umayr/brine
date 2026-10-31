@@ -1,0 +1,32 @@
+[Unit]
+Description=Brine - web control plane for Dill
+Documentation=https://github.com/umayr/brine
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=brine
+Group=docker
+EnvironmentFile=-/etc/brine/brine.env
+Environment=DILL_PKL_PATH=/usr/local/bin/pkl
+ExecStart=/usr/local/bin/brine --data-dir /var/lib/brine --engine docker --dill /usr/local/bin/dill
+Restart=on-failure
+RestartSec=5s
+StateDirectory=brine
+StateDirectoryMode=0700
+
+# Brine needs the Docker socket plus outbound network for git and registries.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

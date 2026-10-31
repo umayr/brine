@@ -6,7 +6,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -s -w"
 BUILD_TAGS := containers_image_openpgp
 
-.PHONY: all build clean run web help
+.PHONY: all build clean run web test test-race vet docker help
 
 all: build
 
@@ -24,6 +24,24 @@ web:
 ## run: build and run with defaults
 run: build
 	./$(BIN_DIR)/$(BINARY) --dev
+
+## test: run unit tests
+test:
+	go test ./...
+
+## test-race: run unit tests with the race detector
+test-race:
+	go test -race ./...
+
+## vet: run go vet
+vet:
+	go vet ./...
+
+## docker: build the container image
+IMAGE ?= brine
+TAG ?= $(VERSION)
+docker:
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(TAG) .
 
 ## clean: remove the bin/ directory
 clean:
