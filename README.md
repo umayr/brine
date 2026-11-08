@@ -1,5 +1,9 @@
 # Brine
 
+See the [roadmap](ROADMAP.md) for Brine's control-plane boundaries, the shared
+Dill contracts, and phased cross-repository implementation tickets. Planned
+capabilities are explicitly separate from the features documented below.
+
 [![CI](https://github.com/umayr/brine/actions/workflows/ci.yml/badge.svg)](https://github.com/umayr/brine/actions/workflows/ci.yml)
 
 Brine is a small, self-hosted web control plane for [Dill](https://github.com/umayr/dill).
