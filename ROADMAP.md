@@ -73,13 +73,16 @@ Example of the intended binding surface (illustrative fragment; full executable 
 ```pkl
 bindings {
   secrets {
-    ["database-password"] {
+    new {
+      name = "database-password"
       provider = "host-files"
       key = "catalog/password"
     }
   }
 }
 ```
+
+Public declarations and bindings use typed named listings (`new { name = "…" }`), not empty keyed objects. Environment variables and labels remain naturally keyed mappings. The editor must preserve stable names, not use array positions as identities. Reordering declarations is not a request to reorder startup or recreate services: Dill validates duplicate names and references, normalizes indexes, and computes the DAG. Brine displays those findings instead of silently deduplicating entries.
 
 The UI stores a reference, not the password. Typed forms should consume a versioned recipe input contract; do not infer arbitrary Pkl expressions or rewrite user code with regex. Generate a separate binding/amendment module where practical, leave the editor as the fallback, and validate using Dill.
 
