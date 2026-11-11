@@ -32,9 +32,12 @@ const brineHighlight = HighlightStyle.define([
 
 const pklTerms = [
   'amends', 'import', 'config', 'engine', 'services', 'image', 'command',
-  'environment', 'ports', 'volumes', 'depends_on', 'healthcheck', 'resources',
-  'labels', 'pull_policy', 'restart', 'working_dir', 'entrypoint', 'user',
-  'networks', 'secrets', 'List', 'Mapping', 'new',
+  'environment', 'ports', 'volumes', 'dependsOn', 'healthcheck',
+  'labels', 'pullPolicy', 'restart', 'user', 'containerName', 'networkMode',
+  'init', 'capAdd', 'devices', 'cpuset', 'memLimit', 'memReservation', 'cpus',
+  'cpuShares', 'pidsLimit', 'target', 'published', 'protocol', 'hostIp',
+  'type', 'source', 'readOnly', 'externalVolume', 'name',
+  'test', 'interval', 'timeout', 'retries', 'startPeriod', 'List', 'Mapping', 'new',
 ];
 
 const baseCompletions = pklTerms.map(label => ({
