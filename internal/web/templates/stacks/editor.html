@@ -55,6 +55,7 @@
         hx-put="/web/stacks/{{.Stack.Name}}"
         hx-target="#edit-result"
         hx-swap="innerHTML"
+        hx-sync="this:drop"
         class="p-4 space-y-3"
       >
         <input type="hidden" name="active_file" value="{{.ActiveFile}}">
@@ -120,6 +121,7 @@
         </div>
         {{end}}
 
+        <p class="text-xs text-dim">Validate checks this draft with Dill as a configuration, not as a replacement in other files' imports. Save does not deploy.</p>
         <div id="edit-result" class="whitespace-pre-wrap break-words" role="status" aria-live="polite"></div>
       </form>
     </div>
@@ -294,7 +296,10 @@ for (const [id, label] of [['validate-btn', 'Validating'], ['fmt-btn', 'Formatti
     document.getElementById('edit-result').textContent = label + ' draft…';
   });
   button.addEventListener('htmx:beforeOnLoad', event => {
-    if (id === 'validate-btn' && editorTextarea.value !== requestedContent) {
+    // Formatted source is data, not HTMX markup (including out-of-band swaps).
+    if (id === 'fmt-btn') {
+      event.preventDefault();
+    } else if (editorTextarea.value !== requestedContent) {
       event.preventDefault();
       document.getElementById('edit-result').textContent = 'Draft changed during validation. Validate again for current results.';
     }
@@ -308,7 +313,7 @@ for (const [id, label] of [['validate-btn', 'Validating'], ['fmt-btn', 'Formatti
       else if (!event.detail.successful) result.textContent = 'Validation request failed. No validation result is available.';
       return;
     }
-    if (!event.detail.successful) {
+    if (event.detail.xhr.status < 200 || event.detail.xhr.status >= 300) {
       result.textContent = 'Formatting failed: ' + (event.detail.xhr.responseText || 'No details available.');
     } else if (editorTextarea.value !== requestedContent) {
       result.textContent = 'Draft changed during formatting. Formatted output was not applied.';
