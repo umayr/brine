@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -101,7 +102,14 @@ func (h *Handler) containerLogsSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Accel-Buffering", "no")
 
 	flusher, canFlush := w.(http.Flusher)
+	if canFlush {
+		flusher.Flush()
+	}
 
+	streamContainerLogs(w, rc, flusher, canFlush)
+}
+
+func streamContainerLogs(w http.ResponseWriter, rc io.Reader, flusher http.Flusher, canFlush bool) {
 	scanner := bufio.NewScanner(rc)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -112,7 +120,11 @@ func (h *Handler) containerLogsSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-	fmt.Fprintf(w, "event: done\ndata: <div class=\"log-line text-base-content/40\">— stream ended —</div>\n\n")
+	if scanner.Err() != nil {
+		fmt.Fprint(w, "event: stream-error\ndata: Log stream failed. Reload to try again.\n\n")
+	} else {
+		fmt.Fprint(w, "event: done\ndata: Stream ended.\n\n")
+	}
 	if canFlush {
 		flusher.Flush()
 	}

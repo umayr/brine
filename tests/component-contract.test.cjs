@@ -213,3 +213,77 @@ test('built CSS retains every authored component variant for dynamic Go/HTMX fra
     assert.ok(built.includes(selector), `missing ${selector}: rebuild assets and keep the full owned component API`);
   }
 });
+
+test('log filtering is case-insensitive and can restore previously hidden lines', () => {
+  const { filterLogLines } = require('../internal/web/static/ui.js');
+  const lines = [{ textContent: 'Server ERROR' }, { textContent: 'server ready' }];
+  const container = { children: lines };
+  filterLogLines(container, 'error');
+  assert.deepEqual(lines.map(line => line.hidden), [false, true]);
+  const incoming = { textContent: 'another ERROR' };
+  filterLogLines({ children: [incoming] }, 'error');
+  assert.equal(incoming.hidden, false);
+  const nonmatching = { textContent: 'all clear' };
+  filterLogLines({ children: [nonmatching] }, 'error');
+  assert.equal(nonmatching.hidden, true);
+  filterLogLines(container, '');
+  assert.deepEqual(lines.map(line => line.hidden), [false, false]);
+});
+
+test('container log EventSource reports and closes terminal states', () => {
+  const source = read('internal/web/templates/containers/detail.html').match(/<script>([\s\S]*?)<\/script>/)[1];
+  function harness() {
+    const elements = {
+      'log-container': {
+        children: [], scrollHeight: 0,
+        insertAdjacentHTML(_position, html) {
+          this.lastElementChild = { textContent: html };
+          this.children.push(this.lastElementChild);
+        },
+      },
+      'follow-toggle': { checked: true },
+      'tail-select': { value: '100' },
+      'log-status': {},
+      'log-filter': { value: '' },
+    };
+    for (const element of Object.values(elements)) element.addEventListener = () => {};
+    const sources = [];
+    class EventSource {
+      static CLOSED = 2;
+      constructor(url) { this.url = url; this.listeners = {}; this.closed = false; sources.push(this); }
+      addEventListener(name, callback) { this.listeners[name] = callback; }
+      close() { this.closed = true; this.readyState = EventSource.CLOSED; }
+    }
+    vm.runInNewContext(source, {
+      document: { getElementById: id => elements[id] }, EventSource,
+      MutationObserver: class { observe() {} },
+      BrineUI: require('../internal/web/static/ui.js'),
+    });
+    return { status: elements['log-status'], stream: sources[0], elements };
+  }
+  for (const [event, text, css] of [
+    ['done', 'ended', 'ui-status-neutral'],
+    ['stream-error', 'stream failed — reload to retry', 'ui-status-error'],
+  ]) {
+    const { status, stream } = harness();
+    assert.equal(status.textContent, 'connecting');
+    assert.match(stream.url, /tail=100$/);
+    stream.onopen();
+    assert.equal(status.textContent, 'live');
+    assert.match(status.className, /ui-status-running/);
+    stream.listeners[event]({ data: '' });
+    assert.equal(status.textContent, text);
+    assert.ok(status.className.includes(css));
+    assert.equal(stream.closed, true);
+  }
+  const { status, stream } = harness();
+  stream.onopen();
+  stream.onerror();
+  assert.equal(status.textContent, 'reconnecting');
+  assert.match(status.className, /ui-status-queued/);
+  assert.equal(stream.closed, false);
+  const incoming = harness();
+  incoming.elements['log-filter'].value = 'error';
+  incoming.stream.onmessage({ data: 'all clear' });
+  assert.equal(incoming.elements['log-container'].lastElementChild.hidden, true);
+});

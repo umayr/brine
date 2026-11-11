@@ -28,6 +28,13 @@
     return { input, textarea };
   }
 
+  function filterLogLines(container, query) {
+    const needle = query.toLowerCase();
+    for (const line of container.children) {
+      line.hidden = !line.textContent.toLowerCase().includes(needle);
+    }
+  }
+
   function duration(name, fallback) {
     if (!root.document || typeof root.getComputedStyle !== 'function') return fallback;
     const value = root.getComputedStyle(root.document.documentElement).getPropertyValue(name).trim();
@@ -37,7 +44,7 @@
     return Number.isFinite(milliseconds) ? milliseconds : fallback;
   }
 
-  const api = { createStreamStatus, createFileFields, duration };
+  const api = { createStreamStatus, createFileFields, filterLogLines, duration };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.BrineUI = api;
 })(typeof window === 'undefined' ? globalThis : window);

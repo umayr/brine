@@ -122,6 +122,10 @@
         <span id="log-status" class="ui-status ui-status-queued ui-status-xs font-mono">connecting</span>
       </div>
       <div class="flex items-center gap-3">
+        <label class="flex items-center gap-1.5">
+          <span class="text-xs text-muted">filter</span>
+          <input id="log-filter" type="search" class="ui-input ui-input-xs font-mono" placeholder="Filter logs">
+        </label>
         <label class="flex items-center gap-1.5 cursor-pointer">
           <span class="text-xs text-muted">tail</span>
           <select id="tail-select" class="ui-select ui-select-xs font-mono">
@@ -154,6 +158,7 @@ const logContainer = document.getElementById('log-container');
 const followToggle = document.getElementById('follow-toggle');
 const tailSelect = document.getElementById('tail-select');
 const logStatus = document.getElementById('log-status');
+const logFilter = document.getElementById('log-filter');
 let logSource = null;
 
 function setLogStatus(text, cls) {
@@ -163,6 +168,7 @@ function setLogStatus(text, cls) {
 
 function appendLog(html) {
   logContainer.insertAdjacentHTML('beforeend', html);
+  BrineUI.filterLogLines({ children: [logContainer.lastElementChild] }, logFilter.value);
   if (followToggle.checked) logContainer.scrollTop = logContainer.scrollHeight;
 }
 
@@ -173,9 +179,12 @@ function connectLogs() {
   logSource = new EventSource('/web/containers/{{.Container.ID}}/logs?tail=' + tail);
   logSource.onopen = () => setLogStatus('live', 'ui-status-running');
   logSource.onmessage = (event) => appendLog(event.data);
-  logSource.addEventListener('done', (event) => {
-    appendLog(event.data);
+  logSource.addEventListener('done', () => {
     setLogStatus('ended', 'ui-status-neutral');
+    logSource.close();
+  });
+  logSource.addEventListener('stream-error', () => {
+    setLogStatus('stream failed — reload to retry', 'ui-status-error');
     logSource.close();
   });
   logSource.onerror = () => setLogStatus('reconnecting', 'ui-status-queued');
@@ -196,6 +205,7 @@ followToggle.addEventListener('change', () => {
   }
 });
 tailSelect.addEventListener('change', restartLogs);
+logFilter.addEventListener('input', () => BrineUI.filterLogLines(logContainer, logFilter.value));
 
 const observer = new MutationObserver(() => {
   if (followToggle.checked) logContainer.scrollTop = logContainer.scrollHeight;
