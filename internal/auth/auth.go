@@ -491,11 +491,11 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
 <link href="/static/vendor/app.css" rel="stylesheet">
 </head>
 <body class="login-page">
-  <form class="login-card" method="post" action="/login">
-    <div class="login-brand">
-      <div class="login-dot">B</div>
-      <h1>Sign in to Brine</h1>
-    </div>
+  <main class="login-card">
+    <div class="login-brand"><span class="login-dot" aria-hidden="true">B</span><span>Brine / Control plane</span></div>
+    <h1>Welcome back.</h1>
+    <p class="login-intro">Sign in to manage your self-hosted services.</p>
+    <form method="post" action="/login">
     {{if .Error}}<p class="login-error" role="alert">{{.Error}}</p>{{end}}
     <input type="hidden" name="next" value="{{.Next}}">
     <label for="user">Username</label>
@@ -503,8 +503,9 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <button type="submit">Sign in</button>
+    </form>
     <p class="login-hint">First run? Credentials are in <span class="mono">~/.brine/credentials.json</span> (or were printed at startup).</p>
-  </form>
+  </main>
 </body>
 </html>
 `))

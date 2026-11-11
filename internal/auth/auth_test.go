@@ -271,7 +271,7 @@ func TestLoginUsesSharedThemeAndEscapesInput(t *testing.T) {
 		t.Fatalf("failed login status = %d", rec.Code)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{`src="/static/theme.js"`, `href="/static/theme.css"`, `href="/static/vendor/app.css"`, `class="login-card"`, `role="alert"`, `name="next" value="/settings"`, "&lt;script&gt;"} {
+	for _, want := range []string{`src="/static/theme.js"`, `href="/static/theme.css"`, `href="/static/vendor/app.css"`, `class="login-card"`, `<h1>Welcome back.</h1>`, `method="post" action="/login"`, `for="user"`, `autocomplete="username"`, `for="password"`, `autocomplete="current-password"`, `role="alert"`, `name="next" value="/settings"`, "&lt;script&gt;"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("login missing %q", want)
 		}
