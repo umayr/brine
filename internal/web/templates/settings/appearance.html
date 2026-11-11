@@ -1,0 +1,137 @@
+{{template "layout.html" .}}
+
+{{define "title"}}Appearance — Brine{{end}}
+{{define "header"}}Settings / Appearance{{end}}
+{{define "content"}}
+<div class="appearance-page">
+  <div class="index-heading">
+    <div>
+      <span class="section-code">CONTROL PLANE</span>
+      <h1>Appearance</h1>
+      <p class="overview-subtitle">A quieter workspace, tuned to your preference. Changes apply immediately and stay in this browser.</p>
+    </div>
+  </div>
+
+  <nav class="appearance-tabs" aria-label="Settings sections">
+    <a href="/settings" aria-current="page">Appearance</a>
+  </nav>
+
+  <div class="appearance-stack">
+    <noscript><div class="ui-notice ui-notice-info">Appearance controls require JavaScript. No server settings are changed by this page.</div></noscript>
+    <div id="preference-storage-warning" class="ui-notice ui-notice-warning" role="status" hidden>Browser storage is unavailable. Changes work in this tab but will not survive reloading.</div>
+
+    <section class="ui-panel appearance-panel appearance-scheme" aria-labelledby="scheme-heading">
+      <div>
+        <h2 id="scheme-heading">Color scheme</h2>
+        <p id="theme-help" class="text-muted">Follow your system, or choose a light or dark workspace.</p>
+      </div>
+      <div class="ui-field appearance-scheme-control">
+        <label class="ui-label-text" for="theme-select">Theme</label>
+        <select id="theme-select" class="ui-select" aria-describedby="theme-help">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+    </section>
+
+    <fieldset class="ui-panel appearance-panel" aria-describedby="accent-help">
+      <legend class="sr-only">Accent color</legend>
+      <h2>Accent color</h2>
+      <p id="accent-help" class="text-muted">Used for active states, links, focus and primary actions. Status colors keep their meaning.</p>
+      <div class="appearance-accents">
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="sage" checked>
+          <span class="appearance-swatch" style="--swatch: var(--accent-sage)" aria-hidden="true"></span>
+          <span>Sage</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="glacier">
+          <span class="appearance-swatch" style="--swatch: var(--accent-glacier)" aria-hidden="true"></span>
+          <span>Glacier</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="lilac">
+          <span class="appearance-swatch" style="--swatch: var(--accent-lilac)" aria-hidden="true"></span>
+          <span>Lilac</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="sand">
+          <span class="appearance-swatch" style="--swatch: var(--accent-sand)" aria-hidden="true"></span>
+          <span>Sand</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="rose">
+          <span class="appearance-swatch" style="--swatch: var(--accent-rose)" aria-hidden="true"></span>
+          <span>Rose</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+        <label class="appearance-accent">
+          <input class="sr-only" type="radio" name="brine-accent" value="graphite">
+          <span class="appearance-swatch" style="--swatch: var(--accent-graphite)" aria-hidden="true"></span>
+          <span>Graphite</span><span class="appearance-selected" aria-hidden="true">Selected</span>
+        </label>
+      </div>
+    </fieldset>
+
+    <section class="ui-panel appearance-panel" aria-labelledby="preview-heading">
+      <h2 id="preview-heading">Live preview</h2>
+      <p class="text-muted">See your accent alongside fixed semantic symbols, outlines and quiet fills. These status labels are examples, not live observations.</p>
+      <div class="appearance-preview">
+        <div class="appearance-preview-item">
+          <span class="field-label">Primary action</span>
+          <a href="/stacks/new" class="ui-button ui-button-primary"><i data-lucide="plus" class="w-4 h-4" aria-hidden="true"></i>New stack</a>
+        </div>
+        <div class="appearance-preview-item">
+          <span class="field-label">Link / focus</span>
+          <a href="/stacks" class="text-accent">View stacks <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="appearance-preview-item appearance-status-preview">
+          <span class="field-label">Semantic status</span>
+          <div class="appearance-statuses">
+            <span class="ui-status ui-status-success">Ready</span>
+            <span class="ui-status ui-status-running">Running</span>
+            <span class="ui-status ui-status-warning">Review due</span>
+            <span class="ui-status ui-status-error">Failed</span>
+            <span class="ui-status ui-status-unknown">Unknown</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="appearance-columns">
+      <section class="ui-panel appearance-panel" aria-labelledby="density-heading">
+        <h2 id="density-heading">Table density</h2>
+        <div class="ui-field">
+          <label class="ui-label-text" for="density-select">Row spacing</label>
+          <select id="density-select" class="ui-select" aria-describedby="density-help">
+            <option value="comfortable">Comfortable</option>
+            <option value="compact">Compact</option>
+          </select>
+          <p id="density-help" class="ui-label-hint">Compact changes padding, not text size or keyboard targets.</p>
+        </div>
+        <div class="index-table appearance-table">
+          <table class="ui-table">
+            <caption class="sr-only">Table density preview — example data</caption>
+            <thead><tr><th scope="col">Example resource</th><th scope="col">State</th></tr></thead>
+            <tbody>
+              <tr><td>example-web</td><td><span class="ui-status ui-status-success">Ready</span></td></tr>
+              <tr><td>example-worker</td><td><span class="ui-status ui-status-running">Running</span></td></tr>
+              <tr><td>example-cache</td><td><span class="ui-status ui-status-unknown">Unknown</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="ui-panel appearance-panel appearance-preferences" aria-labelledby="preferences-heading">
+        <h2 id="preferences-heading">Browser preferences</h2>
+        <p class="text-muted">Theme, accent and density are saved locally and shared by Brine tabs on this origin. They do not change server configuration or another browser.</p>
+        <p class="text-muted">Tab to a control. Use arrow keys to choose an accent, or Space to select it.</p>
+        <p class="text-muted">Reset restores System theme, Sage accent and Comfortable spacing. Other browser data is left untouched.</p>
+        <button type="button" class="ui-button ui-button-outline" data-reset-appearance><i data-lucide="rotate-ccw" class="w-4 h-4" aria-hidden="true"></i>Reset preferences</button>
+      </section>
+    </div>
+
+    <p id="preference-feedback" class="appearance-feedback text-muted" role="status" aria-live="polite" aria-atomic="true">Changes apply immediately. No server settings are changed.</p>
+  </div>
+</div>
+{{end}}

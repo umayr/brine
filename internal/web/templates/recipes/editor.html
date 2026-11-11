@@ -4,8 +4,8 @@
 
 {{define "header"}}
 <div class="flex items-center gap-2">
-  <a href="/recipes" class="text-base-content/50 hover:text-base-content">Snippets</a>
-  <span class="text-base-content/30">/</span>
+  <a href="/recipes" class="text-muted hover:text-foreground">Snippets</a>
+  <span class="text-dim">/</span>
   <span>{{if .Recipe}}{{.Recipe.Name}}{{else}}New{{end}}</span>
 </div>
 {{end}}
@@ -17,11 +17,11 @@ import { createBrinePklEditor } from '/static/vendor/editor.js';
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('recipe-body');
   if (!ta) return;
-  createBrinePklEditor(ta, { minHeight: '18rem' });
+  createBrinePklEditor(ta, { minHeight: 'var(--editor-snippet-min-height)' });
 });
 </script>
 <div class="max-w-3xl mx-auto space-y-5">
-  <div class="bg-base-100 rounded-box shadow-sm p-6">
+  <div class="ui-panel p-6">
     <form
       {{if .Recipe}}
         hx-put="/web/recipes/{{.Recipe.Slug}}"
@@ -33,36 +33,36 @@ document.addEventListener('DOMContentLoaded', () => {
       class="space-y-5"
     >
       <div class="grid grid-cols-2 gap-4">
-        <div class="form-control">
-          <label class="label"><span class="label-text">Name</span></label>
-          <input type="text" name="name" class="input input-bordered"
+        <div class="ui-field">
+          <label class="ui-label"><span class="ui-label-text">Name</span></label>
+          <input type="text" name="name" class="ui-input "
             value="{{if .Recipe}}{{.Recipe.Name}}{{end}}"
             placeholder="Simple Web Service" required />
         </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Category</span></label>
-          <input type="text" name="category" class="input input-bordered"
+        <div class="ui-field">
+          <label class="ui-label"><span class="ui-label-text">Category</span></label>
+          <input type="text" name="category" class="ui-input "
             value="{{if .Recipe}}{{.Recipe.Category}}{{end}}"
             placeholder="Web, Database, Patterns..." />
         </div>
       </div>
 
-      <div class="form-control">
-        <label class="label"><span class="label-text">Description</span></label>
-        <input type="text" name="description" class="input input-bordered"
+      <div class="ui-field">
+        <label class="ui-label"><span class="ui-label-text">Description</span></label>
+        <input type="text" name="description" class="ui-input "
           value="{{if .Recipe}}{{.Recipe.Description}}{{end}}"
           placeholder="Short description of what this snippet does" />
       </div>
 
-      <div class="form-control">
-        <label class="label">
-          <span class="label-text">Pkl body</span>
-          <span class="label-text-alt text-base-content/50">Fragment to insert into a stack</span>
+      <div class="ui-field">
+        <label class="ui-label">
+          <span class="ui-label-text">Pkl body</span>
+          <span class="ui-label-hint text-muted">Fragment to insert into a stack</span>
         </label>
         <textarea
           id="recipe-body"
           name="body"
-          class="textarea textarea-bordered font-mono text-sm h-72 resize-y"
+          class="ui-textarea font-mono text-sm h-72 resize-y"
           placeholder='["web"] {
   image = "nginx:alpine"
   ports = List("8080:80")
@@ -72,11 +72,11 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
 
       <div class="flex items-center gap-3">
-        <button type="submit" class="btn btn-primary">
+        <button type="submit" class="ui-button ui-button-primary">
           {{if .Recipe}}Save{{else}}Create snippet{{end}}
         </button>
         {{if .Recipe}}
-        <button type="button" class="btn btn-ghost btn-sm text-error"
+        <button type="button" class="ui-button ui-button-ghost ui-button-sm text-error"
           hx-delete="/web/recipes/{{.Recipe.Slug}}"
           hx-target="body"
           onclick="return confirm('Delete snippet {{.Recipe.Name}}?')"
@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
           Delete
         </button>
         {{end}}
-        <a href="/recipes" class="btn btn-ghost ml-auto">Cancel</a>
+        <a href="/recipes" class="ui-button ui-button-ghost ml-auto">Cancel</a>
       </div>
 
       <div id="recipe-result"></div>

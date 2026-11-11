@@ -259,6 +259,31 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 }
 
+func TestLoginUsesSharedThemeAndEscapesInput(t *testing.T) {
+	user := `"><script>alert(1)</script>`
+	a := newTestAuth(t, Config{User: user})
+	form := url.Values{"user": {user}, "password": {"wrong"}, "next": {"/settings"}}
+	req := httptest.NewRequest(http.MethodPost, "/login?next=/settings", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	a.HandleLogin(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("failed login status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`src="/static/theme.js"`, `href="/static/theme.css"`, `href="/static/vendor/app.css"`, `class="login-card"`, `role="alert"`, `name="next" value="/settings"`, "&lt;script&gt;"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("login missing %q", want)
+		}
+	}
+	if strings.Contains(body, "<script>alert(1)</script>") || strings.Contains(body, `value="wrong"`) {
+		t.Error("login must escape user text and never reflect the password")
+	}
+	if strings.Index(body, "/static/theme.css") > strings.Index(body, "/static/vendor/app.css") {
+		t.Error("login theme variables must load before component styles")
+	}
+}
+
 func TestSafeNext(t *testing.T) {
 	cases := map[string]string{
 		"/stacks":             "/stacks",

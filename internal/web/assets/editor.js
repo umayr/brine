@@ -1,7 +1,7 @@
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { defaultKeymap, history, historyKeymap, indentLess, indentMore } from '@codemirror/commands';
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from '@codemirror/autocomplete';
-import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from '@codemirror/language';
+import { bracketMatching, HighlightStyle, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from '@codemirror/language';
 import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 import {
   EditorView,
@@ -18,7 +18,17 @@ import {
   rectangularSelection,
 } from '@codemirror/view';
 import { pkl } from 'codemirror-lang-pkl';
-import { oneDark } from '@codemirror/theme-one-dark';
+import { tags } from '@lezer/highlight';
+
+const brineHighlight = HighlightStyle.define([
+  { tag: tags.comment, color: 'var(--syntax-comment)' },
+  { tag: [tags.keyword, tags.operator], color: 'var(--syntax-keyword)' },
+  { tag: tags.string, color: 'var(--syntax-string)' },
+  { tag: [tags.number, tags.bool, tags.null], color: 'var(--syntax-number)' },
+  { tag: [tags.typeName, tags.className], color: 'var(--syntax-type)' },
+  { tag: tags.annotation, color: 'var(--syntax-annotation)' },
+  { tag: tags.punctuation, color: 'var(--syntax-punctuation)' },
+]);
 
 const pklTerms = [
   'amends', 'import', 'config', 'engine', 'services', 'image', 'command',
@@ -91,46 +101,54 @@ function pklCompletionSource(snippets) {
 
 export function createBrinePklEditor(textarea, options = {}) {
   const snippets = options.snippets || [];
-  const minHeight = options.minHeight || '28rem';
+  const colorTheme = new Compartment();
+  const minHeight = options.minHeight || 'var(--editor-min-height)';
   const theme = EditorView.theme({
     '&': {
-      borderRadius: '0 0 8px 8px',
-      border: '1px solid rgb(48 54 61)',
-      backgroundColor: '#0d1117',
-      fontSize: '13px',
+      borderRadius: '0 0 var(--radius-control) var(--radius-control)',
+      border: 'var(--border-width) solid var(--editor-border)',
+      backgroundColor: 'var(--editor-bg)',
+      color: 'var(--editor-text)',
+      fontSize: 'var(--font-size-base)',
     },
     '.cm-scroller': {
-      fontFamily: "ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace",
+      fontFamily: 'var(--font-family-code)',
       minHeight,
-      lineHeight: '1.65',
+      lineHeight: 'var(--line-height)',
+    },
+    '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': {
+      backgroundColor: 'var(--editor-selection)',
+    },
+    '.cm-cursor, .cm-dropCursor': {
+      borderLeftColor: 'var(--color-accent)',
     },
     '.cm-content': {
       minHeight,
-      padding: '14px 0',
+      padding: 'var(--space-3-5) 0',
     },
     '.cm-gutters': {
-      backgroundColor: '#0d1117',
-      borderRight: '1px solid #30363d',
-      color: '#6e7681',
+      backgroundColor: 'var(--editor-bg)',
+      borderRight: 'var(--border-width) solid var(--editor-border)',
+      color: 'var(--editor-muted)',
     },
     '.cm-activeLine, .cm-activeLineGutter': {
-      backgroundColor: 'rgba(110, 118, 129, 0.14)',
+      backgroundColor: 'var(--editor-active-line)',
     },
     '.cm-tooltip': {
-      border: '1px solid #30363d',
-      backgroundColor: '#161b22',
-      color: '#c9d1d9',
-      borderRadius: '8px',
+      border: 'var(--border-width) solid var(--editor-border)',
+      backgroundColor: 'var(--editor-bg)',
+      color: 'var(--editor-text)',
+      borderRadius: 'var(--radius-panel)',
       overflow: 'hidden',
     },
     '.cm-tooltip-autocomplete ul li[aria-selected]': {
-      backgroundColor: '#1f6feb',
-      color: 'white',
+      backgroundColor: 'var(--color-accent)',
+      color: 'var(--color-accent-contrast)',
     },
     '.cm-brine-snippet': {
-      backgroundColor: 'rgba(46, 160, 67, 0.10)',
-      outline: '1px solid rgba(46, 160, 67, 0.22)',
-      borderRadius: '3px',
+      backgroundColor: 'var(--editor-snippet)',
+      outline: 'var(--border-width) solid var(--editor-selection)',
+      borderRadius: 'var(--radius-sm)',
     },
   });
 
@@ -138,6 +156,7 @@ export function createBrinePklEditor(textarea, options = {}) {
     state: EditorState.create({
       doc: textarea.value,
       extensions: [
+        EditorView.contentAttributes.of({ 'aria-label': textarea.getAttribute('aria-label') || 'Pkl source editor' }),
         lineNumbers(),
         highlightActiveLineGutter(),
         highlightSpecialChars(),
@@ -147,7 +166,7 @@ export function createBrinePklEditor(textarea, options = {}) {
         dropCursor(),
         EditorState.allowMultipleSelections.of(true),
         indentOnInput(),
-        syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+        syntaxHighlighting(brineHighlight),
         bracketMatching(),
         closeBrackets(),
         rectangularSelection(),
@@ -165,7 +184,14 @@ export function createBrinePklEditor(textarea, options = {}) {
           ...completionKeymap,
         ]),
         pkl(),
-        oneDark,
+        colorTheme.of(EditorView.theme({}, { dark: document.documentElement.dataset.theme === 'dark' })),
+        ViewPlugin.fromClass(class {
+          constructor(view) {
+            this.onTheme = event => view.dispatch({ effects: colorTheme.reconfigure(EditorView.theme({}, { dark: event.detail.dark })) });
+            window.addEventListener('brine:theme', this.onTheme);
+          }
+          destroy() { window.removeEventListener('brine:theme', this.onTheme); }
+        }),
         theme,
         EditorView.lineWrapping,
         autocompletion({ override: [pklCompletionSource(snippets)] }),

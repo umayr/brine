@@ -44,6 +44,7 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 
 		// Full-page routes
 		r.Get("/", h.dashboard)
+		r.Get("/settings", h.settingsAppearance)
 		r.Get("/stacks", h.stackList)
 		r.Get("/stacks/new", h.stackNew)
 		r.Get("/stacks/{name}", h.stackDetail)

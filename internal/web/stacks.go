@@ -266,7 +266,7 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		fmt.Fprintf(w, `<div class="alert alert-error mt-3"><pre class="whitespace-pre-wrap font-mono text-sm break-words">%s</pre></div>`, htmlEscape(err.Error()))
+		fmt.Fprintf(w, `<div class="ui-notice ui-notice-error mt-3"><pre class="whitespace-pre-wrap font-mono text-sm break-words">%s</pre></div>`, htmlEscape(err.Error()))
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -492,10 +492,10 @@ func (h *Handler) stackGitUpdateSource(w http.ResponseWriter, r *http.Request) {
 
 func timeNow() time.Time { return time.Now() }
 
-// renderAlert writes a DaisyUI alert fragment for HTMX swap targets.
+// renderAlert writes a Brine notice fragment for HTMX swap targets.
 func (h *Handler) renderAlert(w http.ResponseWriter, alertType, msg string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, `<div class="alert alert-%s mt-3"><pre class="whitespace-pre-wrap font-mono text-sm break-words">%s</pre></div>`,
+	fmt.Fprintf(w, `<div class="ui-notice ui-notice-%s mt-3"><pre class="whitespace-pre-wrap font-mono text-sm break-words">%s</pre></div>`,
 		alertType, htmlEscape(msg))
 }
 

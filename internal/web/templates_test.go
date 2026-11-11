@@ -8,6 +8,7 @@ import (
 
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
+	"github.com/umayr/brine/internal/store"
 )
 
 func TestParseTemplates(t *testing.T) {
@@ -18,6 +19,7 @@ func TestParseTemplates(t *testing.T) {
 
 	wantPages := []string{
 		"dashboard.html",
+		"settings/appearance.html",
 		"stacks/index.html",
 		"stacks/new.html",
 		"stacks/detail.html",
@@ -44,6 +46,40 @@ func TestParseTemplates(t *testing.T) {
 		if _, ok := ts.partials[partial]; !ok {
 			t.Errorf("partial template %q not found", partial)
 		}
+	}
+}
+
+func TestProductionPagesExecute(t *testing.T) {
+	ts, err := parseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack := &store.Stack{Name: "example", Entrypoint: "compose.pkl"}
+	for page, data := range map[string]any{
+		"dashboard.html":           &dashboardData{},
+		"settings/appearance.html": &pageData{Page: "settings"},
+		"stacks/index.html":        &stackListData{Stacks: []*store.Stack{stack}},
+		"stacks/new.html":          &stackNewData{},
+		"stacks/detail.html":       &stackDetailData{Stack: stack, Files: []string{"compose.pkl"}},
+		"stacks/editor.html":       &stackEditorData{Stack: stack, ActiveFile: "compose.pkl"},
+		"containers/index.html":    &containerListData{},
+		"containers/detail.html":   &containerDetailData{Container: &engine.ContainerInfo{ID: "abc", State: "running"}},
+		"images/index.html":        &imageListData{},
+		"recipes/index.html":       &recipeListData{ByCategory: map[string][]*store.Recipe{"test": {{Name: "example", Slug: "example"}}}},
+		"recipes/editor.html":      &recipeEditorData{Recipe: &store.Recipe{Name: "example", Slug: "example"}},
+	} {
+		t.Run(page, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := ts.pages[page].Execute(&out, data); err != nil {
+				t.Fatalf("execute %s: %v", page, err)
+			}
+			body := out.String()
+			for _, want := range []string{"<!DOCTYPE html>", "/static/theme.css", "/static/vendor/app.css", `href="/settings"`} {
+				if !strings.Contains(body, want) {
+					t.Errorf("page missing %q", want)
+				}
+			}
+		})
 	}
 }
 

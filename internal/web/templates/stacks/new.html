@@ -6,15 +6,15 @@
 {{define "content"}}
 
   <!-- Source type selector -->
-  <div class="bg-base-100 rounded-box shadow-sm p-4 mb-4">
+  <div class="ui-panel p-4 mb-4">
     <div class="flex gap-2">
       <button type="button" onclick="setSource('local')"
-        id="tab-local" class="source-tab btn btn-sm btn-primary gap-1.5" data-source="local">
+        id="tab-local" class="source-tab ui-button ui-button-sm ui-button-primary gap-1.5" data-source="local">
         <i data-lucide="file-code" class="w-3.5 h-3.5"></i>
         Local
       </button>
       <button type="button" onclick="setSource('git')"
-        id="tab-git" class="source-tab btn btn-sm btn-ghost gap-1.5" data-source="git">
+        id="tab-git" class="source-tab ui-button ui-button-sm ui-button-ghost gap-1.5" data-source="git">
         <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
         Git
       </button>
@@ -26,23 +26,22 @@
     <form hx-post="/web/stacks" hx-target="#local-result" hx-swap="innerHTML">
 
       <!-- Name + runtime bar -->
-      <div class="bg-base-100 rounded-box shadow-sm p-4 mb-4">
-        <div class="grid grid-cols-2 gap-4">
-          <div class="form-control">
-            <label class="label"><span class="label-text">Stack name</span></label>
-            <input type="text" name="name" class="input input-bordered font-mono"
+      <div class="ui-panel p-4 mb-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="ui-field">
+            <label class="ui-label" for="local-stack-name"><span class="ui-label-text">Stack name</span></label>
+            <input id="local-stack-name" type="text" name="name" class="ui-input font-mono"
               placeholder="my-app" required pattern="[a-zA-Z0-9_-]+" />
           </div>
-          <div class="rounded-lg border border-base-300 bg-base-200/40 px-4 py-3">
+          <div class="rounded-lg border border-line bg-canvas/40 px-4 py-3">
             <div class="field-label mb-1">Runtime engine</div>
             <div class="flex items-center gap-2">
-              <span class="badge badge-ghost badge-sm font-mono">{{.RuntimeEngine}}</span>
-              <span class="text-xs text-base-content/45">selected when Brine started</span>
+              <span class="ui-status ui-status-neutral ui-status-sm font-mono">{{.RuntimeEngine}}</span>
+              <span class="text-xs text-dim">selected when Brine started</span>
             </div>
           </div>
         </div>
-        <div id="local-engine-warning" class="alert alert-warning mt-4 hidden items-start">
-          <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5"></i>
+        <div id="local-engine-warning" class="ui-notice ui-notice-warning mt-4 hidden items-start">
           <div>
             <div class="font-semibold">Engine mismatch</div>
             <div class="text-sm" id="local-engine-warning-text"></div>
@@ -50,41 +49,41 @@
         </div>
       </div>
 
-      <div class="flex gap-4">
+      <div class="editor-layout flex gap-4">
 
         <!-- Editor panel -->
         <div class="flex-1 min-w-0">
-          <div class="bg-base-100 rounded-box shadow-sm overflow-hidden">
+          <div class="ui-panel overflow-hidden">
 
             <!-- Tab strip -->
-            <div class="flex items-center bg-base-200/60 border-b border-base-300 px-2 pt-2 gap-1 overflow-x-auto">
+            <div class="flex items-center bg-canvas/60 border-b border-line px-2 pt-2 gap-1 overflow-x-auto">
               <div id="nf-tabs" class="flex items-center gap-1">
-                <button type="button" class="nf-tab px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors bg-base-100 text-base-content font-semibold border border-b-base-100 border-base-300" data-idx="0" onclick="nfSwitchTab(0)">
-                  <span class="w-1 h-1 rounded-full bg-primary inline-block mr-1 mb-0.5"></span>compose.pkl
+                <button type="button" class="nf-tab px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors bg-panel text-foreground font-semibold border border-b-panel border-line" data-idx="0" onclick="nfSwitchTab(0)">
+                  <span class="w-1 h-1 rounded-full bg-accent inline-block mr-1 mb-0.5"></span>compose.pkl
                 </button>
               </div>
               <button type="button"
-                class="ml-0.5 px-2 py-1.5 text-base-content/30 hover:text-base-content rounded-t-md transition-colors"
+                class="ml-0.5 px-2 py-1.5 text-dim hover:text-foreground rounded-t-md transition-colors"
                 onclick="showNewFileInput()"
                 title="Add file"
               ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
             </div>
 
             <!-- Inline add-file input -->
-            <div id="nf-add-row" class="hidden flex items-center gap-2 px-3 py-2 border-b border-base-300 bg-base-200/60">
-              <input type="text" id="nf-new-name" class="input input-bordered input-xs font-mono w-40"
+            <div id="nf-add-row" class="hidden flex items-center gap-2 px-3 py-2 border-b border-line bg-canvas/60">
+              <input aria-label="New filename" type="text" id="nf-new-name" class="ui-input ui-input-xs font-mono w-40"
                 placeholder="shared.pkl" onkeydown="if(event.key==='Enter'){event.preventDefault();nfConfirmAdd()}" />
-              <button type="button" onclick="nfConfirmAdd()" class="btn btn-primary btn-xs">Add</button>
-              <button type="button" onclick="nfCancelAdd()" class="btn btn-ghost btn-xs">Cancel</button>
+              <button type="button" onclick="nfConfirmAdd()" class="ui-button ui-button-primary ui-button-xs">Add</button>
+              <button type="button" onclick="nfCancelAdd()" class="ui-button ui-button-ghost ui-button-xs">Cancel</button>
             </div>
 
             <!-- File panels -->
             <div id="nf-panels" class="p-4 space-y-3">
               <div class="nf-panel" data-idx="0">
                 <input type="hidden" name="filename" value="compose.pkl" />
-                <textarea name="filecontent"
-                  class="textarea textarea-bordered font-mono text-sm w-full resize-y"
-                  style="min-height: 24rem;"
+                <textarea aria-label="Contents of compose.pkl" name="filecontent"
+                  class="ui-textarea font-mono text-sm w-full resize-y"
+                  style="min-height: var(--editor-new-min-height);"
                   placeholder='amends "package://pkg.ushd.ca/dill@0.4.0#/dill.pkl"
 
 config {
@@ -102,11 +101,11 @@ config {
 
             <!-- Toolbar -->
             <div class="px-4 pb-4 flex items-center gap-2">
-              <button type="submit" class="btn btn-primary btn-sm gap-1.5">
+              <button type="submit" class="ui-button ui-button-primary ui-button-sm gap-1.5">
                 <i data-lucide="layers" class="w-3.5 h-3.5"></i>
                 Create stack
               </button>
-              <a href="/stacks" class="btn btn-ghost btn-sm">Cancel</a>
+              <a href="/stacks" class="ui-button ui-button-ghost ui-button-sm">Cancel</a>
               <div id="local-result" class="ml-2 flex-1"></div>
             </div>
 
@@ -114,29 +113,29 @@ config {
         </div>
 
         <!-- Snippet sidebar -->
-        <div class="w-64 shrink-0">
-          <div class="bg-base-100 rounded-box shadow-sm sticky top-4">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
+        <div class="editor-snippets w-64 shrink-0">
+          <div class="ui-panel sticky top-4">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-line">
               <h3 class="text-sm font-semibold">Snippets</h3>
-              <a href="/recipes/new" class="btn btn-ghost btn-xs" title="New snippet">
+              <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               </a>
             </div>
-            <div class="divide-y divide-base-200 max-h-[calc(100vh-16rem)] overflow-y-auto">
+            <div class="divide-y divide-line max-h-[calc(100vh-16rem)] overflow-y-auto">
               {{if .Snippets}}
               {{range $cat, $snippets := .Snippets}}
               <div>
-                <div class="px-4 py-2 text-xs font-semibold text-base-content/40 uppercase tracking-wider">{{$cat}}</div>
+                <div class="px-4 py-2 text-xs font-semibold text-dim uppercase tracking-wider">{{$cat}}</div>
                 {{range $snippets}}
-                <div class="px-4 py-2.5 hover:bg-base-200/50 group cursor-default">
+                <div class="px-4 py-2.5 hover:bg-canvas/50 group cursor-default">
                   <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
                       <div class="text-sm font-medium truncate">{{.Name}}</div>
-                      {{if .Description}}<div class="text-xs text-base-content/40 truncate mt-0.5">{{.Description}}</div>{{end}}
+                      {{if .Description}}<div class="text-xs text-dim truncate mt-0.5">{{.Description}}</div>{{end}}
                     </div>
                     <button
                       type="button"
-                      class="btn btn-ghost btn-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      class="ui-button ui-button-ghost ui-button-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                       onclick="nfInsertSnippet('{{.Slug}}')"
                       title="Insert at cursor"
                     >
@@ -149,9 +148,9 @@ config {
               {{end}}
               {{else}}
               <div class="px-4 py-8 text-center">
-                <i data-lucide="braces" class="w-6 h-6 mx-auto mb-2 text-base-content/20"></i>
-                <p class="text-xs text-base-content/40">No snippets yet.</p>
-                <a href="/recipes/new" class="link link-hover text-xs mt-1 inline-block">Create one</a>
+                <i data-lucide="braces" class="w-6 h-6 mx-auto mb-2 text-dim"></i>
+                <p class="text-xs text-dim">No snippets yet.</p>
+                <a href="/recipes/new" class="underline-offset-2 hover:underline text-xs mt-1 inline-block">Create one</a>
               </div>
               {{end}}
             </div>
@@ -164,84 +163,84 @@ config {
 
   <!-- ── Git form ──────────────────────────────────────────────────── -->
   <div id="form-git" class="hidden">
-    <div class="bg-base-100 rounded-box shadow-sm p-6">
+    <div class="ui-panel p-6">
       <form hx-post="/web/stacks/git" hx-target="#git-result" hx-swap="innerHTML" class="space-y-5">
 
-        <div class="grid grid-cols-2 gap-4">
-          <div class="form-control">
-            <label class="label"><span class="label-text">Stack name</span></label>
-            <input type="text" name="name" class="input input-bordered font-mono"
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="ui-field">
+            <label class="ui-label" for="git-stack-name"><span class="ui-label-text">Stack name</span></label>
+            <input id="git-stack-name" type="text" name="name" class="ui-input font-mono"
               placeholder="my-app" required pattern="[a-zA-Z0-9_-]+" />
           </div>
-          <div class="rounded-lg border border-base-300 bg-base-200/40 px-4 py-3">
+          <div class="rounded-lg border border-line bg-canvas/40 px-4 py-3">
             <div class="field-label mb-1">Runtime engine</div>
             <div class="flex items-center gap-2">
-              <span class="badge badge-ghost badge-sm font-mono">{{.RuntimeEngine}}</span>
-              <span class="text-xs text-base-content/45">selected when Brine started</span>
+              <span class="ui-status ui-status-neutral ui-status-sm font-mono">{{.RuntimeEngine}}</span>
+              <span class="text-xs text-dim">selected when Brine started</span>
             </div>
           </div>
         </div>
 
-        <div class="form-control">
-          <label class="label"><span class="label-text">Git URL</span></label>
-          <input type="text" name="git_url" class="input input-bordered font-mono"
+        <div class="ui-field">
+          <label class="ui-label" for="git-url"><span class="ui-label-text">Git URL</span></label>
+          <input id="git-url" type="text" name="git_url" class="ui-input font-mono"
             placeholder="https://github.com/org/infra.git" required />
         </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div class="form-control">
-            <label class="label"><span class="label-text">Branch</span></label>
-            <input type="text" name="git_branch" class="input input-bordered font-mono" value="main" />
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="ui-field">
+            <label class="ui-label" for="git-branch"><span class="ui-label-text">Branch</span></label>
+            <input id="git-branch" type="text" name="git_branch" class="ui-input font-mono" value="main" />
           </div>
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">Folder</span>
-              <span class="label-text-alt text-base-content/50">optional — for mono-repos</span>
+          <div class="ui-field">
+            <label class="ui-label" for="git-folder">
+              <span class="ui-label-text">Folder</span>
+              <span class="ui-label-hint text-muted">optional — for mono-repos</span>
             </label>
-            <input type="text" name="git_folder" class="input input-bordered font-mono"
+            <input id="git-folder" type="text" name="git_folder" class="ui-input font-mono"
               placeholder="stacks/web-app" />
           </div>
         </div>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">Entrypoint file</span>
-            <span class="label-text-alt text-base-content/50">default: compose.pkl</span>
+        <div class="ui-field">
+          <label class="ui-label" for="git-entrypoint">
+            <span class="ui-label-text">Entrypoint file</span>
+            <span class="ui-label-hint text-muted">default: compose.pkl</span>
           </label>
-          <input type="text" name="git_entrypoint" class="input input-bordered font-mono"
+          <input id="git-entrypoint" type="text" name="git_entrypoint" class="ui-input font-mono"
             placeholder="compose.pkl" />
         </div>
 
-        <div class="divider text-xs text-base-content/40">Options</div>
+        <div class="ui-divider text-xs text-dim">Options</div>
         <div class="space-y-3">
           <label class="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" name="git_read_only" class="checkbox checkbox-primary mt-0.5" />
+            <input type="checkbox" name="git_read_only" class="ui-checkbox ui-checkbox-accent mt-0.5" />
             <div>
               <div class="text-sm font-medium">Read-only</div>
-              <div class="text-xs text-base-content/50">Brine will not allow editing files or pushing changes.</div>
+              <div class="text-xs text-muted">Brine will not allow editing files or pushing changes.</div>
             </div>
           </label>
           <label class="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" name="git_auto_deploy" class="checkbox checkbox-primary mt-0.5"
+            <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5"
               onchange="document.getElementById('poll-row').classList.toggle('hidden', !this.checked)" />
             <div>
               <div class="text-sm font-medium">Auto-deploy</div>
-              <div class="text-xs text-base-content/50">Poll the branch and run <code class="font-mono bg-base-200 px-1 rounded">dill up</code> automatically when new commits arrive.</div>
+              <div class="text-xs text-muted">Poll the branch and run <code class="font-mono bg-canvas px-1 rounded">dill up</code> automatically when new commits arrive.</div>
             </div>
           </label>
           <div id="poll-row" class="pl-9 hidden">
-            <div class="form-control max-w-xs">
-              <label class="label"><span class="label-text text-xs">Poll interval</span></label>
-              <input type="text" name="git_poll_interval" class="input input-bordered input-sm font-mono"
+            <div class="ui-field max-w-xs">
+              <label class="ui-label" for="git-poll"><span class="ui-label-text text-xs">Poll interval</span></label>
+              <input id="git-poll" type="text" name="git_poll_interval" class="ui-input ui-input-sm font-mono"
                 value="5m" placeholder="5m" />
             </div>
           </div>
         </div>
 
         <div class="flex items-center gap-3 pt-2">
-          <button type="submit" class="btn btn-primary gap-1.5">
+          <button type="submit" class="ui-button ui-button-primary gap-1.5">
             <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
             Clone &amp; create
           </button>
-          <a href="/stacks" class="btn btn-ghost">Cancel</a>
+          <a href="/stacks" class="ui-button ui-button-ghost">Cancel</a>
         </div>
         <div id="git-result"></div>
       </form>
@@ -253,7 +252,7 @@ import { createBrinePklEditor } from '/static/vendor/editor.js';
 
 function attachPklEditor(textarea) {
   const view = createBrinePklEditor(textarea, {
-    minHeight: '24rem',
+    minHeight: 'var(--editor-new-min-height)',
     snippets: {{toJSON .SnippetCompletions}},
   });
   // Store on panel so nfInsertSnippet can find it.
@@ -276,8 +275,8 @@ function setSource(src) {
   ['local', 'git'].forEach(s => {
     document.getElementById('form-' + s).classList.toggle('hidden', s !== src);
     const tab = document.getElementById('tab-' + s);
-    tab.classList.toggle('btn-primary', s === src);
-    tab.classList.toggle('btn-ghost',   s !== src);
+    tab.classList.toggle('ui-button-primary', s === src);
+    tab.classList.toggle('ui-button-ghost',   s !== src);
   });
 }
 
@@ -368,15 +367,15 @@ function nfSwitchTab(idx) {
   nfActive = idx;
   document.querySelectorAll('.nf-tab').forEach(t => {
     const active = parseInt(t.dataset.idx) === idx;
-    t.classList.toggle('bg-base-100', active);
-    t.classList.toggle('text-base-content', active);
+    t.classList.toggle('bg-panel', active);
+    t.classList.toggle('text-foreground', active);
     t.classList.toggle('font-semibold', active);
     t.classList.toggle('border', active);
-    t.classList.toggle('border-b-base-100', active);
-    t.classList.toggle('border-base-300', active);
-    t.classList.toggle('text-base-content/50', !active);
-    t.classList.toggle('hover:text-base-content', !active);
-    t.classList.toggle('hover:bg-base-100/50', !active);
+    t.classList.toggle('border-b-panel', active);
+    t.classList.toggle('border-line', active);
+    t.classList.toggle('text-muted', !active);
+    t.classList.toggle('hover:text-foreground', !active);
+    t.classList.toggle('hover:bg-panel/50', !active);
   });
   document.querySelectorAll('.nf-panel').forEach(p => {
     p.classList.toggle('hidden', parseInt(p.dataset.idx) !== idx);
@@ -403,26 +402,28 @@ function nfConfirmAdd() {
   // Tab button
   const tab = document.createElement('button');
   tab.type = 'button';
-  tab.className = 'nf-tab px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors text-base-content/50 hover:text-base-content hover:bg-base-100/50 gap-1 flex items-center';
+  tab.className = 'nf-tab px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors text-muted hover:text-foreground hover:bg-panel/50 gap-1 flex items-center';
   tab.dataset.idx = idx;
   tab.onclick = () => nfSwitchTab(idx);
-  tab.innerHTML = `${name}<span class="opacity-40 hover:opacity-100 hover:text-error ml-1 leading-none" onclick="nfRemoveFile(${idx},event)">×</span>`;
+  tab.appendChild(document.createTextNode(name));
+  const remove = document.createElement('span');
+  remove.className = 'opacity-40 hover:opacity-100 hover:text-error ml-1 leading-none';
+  remove.textContent = '×';
+  remove.setAttribute('aria-hidden', 'true');
+  remove.onclick = (event) => nfRemoveFile(idx, event);
+  tab.appendChild(remove);
   document.getElementById('nf-tabs').appendChild(tab);
 
   // Panel
   const panel = document.createElement('div');
   panel.className = 'nf-panel hidden';
   panel.dataset.idx = idx;
-  panel.innerHTML = `
-    <input type="hidden" name="filename" value="${name}" />
-    <textarea name="filecontent"
-      class="textarea textarea-bordered font-mono text-sm w-full resize-y"
-      style="min-height: 24rem;"
-      placeholder="// ${name}"></textarea>`;
+  const fields = BrineUI.createFileFields(document, name);
+  panel.append(fields.input, fields.textarea);
   document.getElementById('nf-panels').appendChild(panel);
 
   // Attach CM editor to the new textarea.
-  const newTa = panel.querySelector('textarea[name="filecontent"]');
+  const newTa = fields.textarea;
   if (window.attachPklEditor && newTa) window.attachPklEditor(newTa);
 
   nfCancelAdd();
@@ -433,7 +434,9 @@ function nfConfirmAdd() {
 function nfRemoveFile(idx, e) {
   e.stopPropagation();
   document.querySelector(`.nf-tab[data-idx="${idx}"]`).remove();
-  document.querySelector(`.nf-panel[data-idx="${idx}"]`).remove();
+  const panel = document.querySelector(`.nf-panel[data-idx="${idx}"]`);
+  if (panel._cmView) panel._cmView.destroy();
+  panel.remove();
   if (nfActive === idx) nfSwitchTab(0);
 }
 

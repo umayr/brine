@@ -106,22 +106,22 @@ func (h *Handler) recipeRows(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	for cat, recipes := range byCategory {
-		fmt.Fprintf(w, `<tr class="bg-base-200"><td colspan="4" class="py-2 px-4 text-xs font-semibold text-base-content/60 uppercase tracking-wider">%s</td></tr>`, cat)
+		fmt.Fprintf(w, `<tr class="bg-canvas"><td colspan="4" class="py-2 px-4 text-xs font-semibold text-muted uppercase tracking-wider">%s</td></tr>`, htmlEscape(cat))
 		for _, recipe := range recipes {
-			fmt.Fprintf(w, `<tr class="hover" id="recipe-%s">
+			fmt.Fprintf(w, `<tr id="recipe-%s">
   <td class="font-mono text-sm">%s</td>
-  <td class="text-xs text-base-content/60">%s</td>
+  <td class="text-xs text-muted">%s</td>
   <td class="text-sm">%s</td>
   <td class="text-right">
-    <a href="/recipes/%s/edit" class="btn btn-ghost btn-xs">Edit</a>
-    <button class="btn btn-ghost btn-xs text-error"
+    <a href="/recipes/%s/edit" class="ui-button ui-button-ghost ui-button-xs">Edit</a>
+    <button class="ui-button ui-button-ghost ui-button-xs text-error"
       hx-delete="/web/recipes/%s"
       hx-target="#recipe-%s"
       hx-swap="outerHTML"
-      hx-confirm="Delete recipe %q?"
+      hx-confirm="Delete recipe %s?"
     >Delete</button>
   </td>
-</tr>`, recipe.Slug, recipe.Name, recipe.Category, recipe.Description, recipe.Slug, recipe.Slug, recipe.Slug, recipe.Name)
+</tr>`, htmlEscape(recipe.Slug), htmlEscape(recipe.Name), htmlEscape(recipe.Category), htmlEscape(recipe.Description), htmlEscape(recipe.Slug), htmlEscape(recipe.Slug), htmlEscape(recipe.Slug), htmlEscape(recipe.Name))
 		}
 	}
 }

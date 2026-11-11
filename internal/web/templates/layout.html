@@ -1,267 +1,108 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="night">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-token" content="{{.CSRF}}">
   <title>{{block "title" .}}Brine{{end}}</title>
+  <script src="/static/theme.js"></script>
+  <link href="/static/theme.css" rel="stylesheet">
   <link href="/static/vendor/app.css" rel="stylesheet">
   <script src="/static/vendor/htmx.min.js"></script>
   <script src="/static/vendor/htmx-sse.js"></script>
   <script src="/static/vendor/lucide.min.js"></script>
-  <script src="/static/theme.js" defer></script>
-  <style>
-    /* Violet/purple primary — Heroku-style */
-    [data-theme="night"] {
-      --p:  62% 0.22 288;
-      --pf: 52% 0.22 288;
-      --pc: 100% 0 0;
-      --b1: 20.5% 0.018 255;
-      --b2: 16% 0.016 255;
-      --b3: 25.5% 0.018 255;
-      --bc: 93% 0.01 255;
-      --rounded-box: 0.5rem;
-      --rounded-btn: 0.375rem;
-    }
+  <script src="/static/ui.js"></script>
 
-    body {
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      letter-spacing: 0;
-    }
-
-    .bg-base-100.rounded-box.shadow-sm {
-      border: 1px solid oklch(var(--b3) / 0.75);
-      box-shadow: 0 1px 0 rgba(255,255,255,0.03), 0 10px 30px rgba(0,0,0,0.16);
-    }
-
-    .btn {
-      min-height: 2.25rem;
-      height: 2.25rem;
-      border-radius: 0.375rem;
-      font-weight: 600;
-      letter-spacing: 0;
-    }
-
-    .btn-xs {
-      min-height: 1.75rem;
-      height: 1.75rem;
-    }
-
-    .btn-sm {
-      min-height: 2rem;
-      height: 2rem;
-    }
-
-    .input, .select, .textarea {
-      border-radius: 0.375rem;
-      border-color: oklch(var(--b3));
-    }
-
-    .table :where(th, td) {
-      border-bottom-color: oklch(var(--b3) / 0.72);
-    }
-
-    .badge {
-      border-radius: 999px;
-      font-weight: 600;
-      padding-left: 0.5rem;
-      padding-right: 0.5rem;
-      line-height: 1.15;
-    }
-
-    .badge-xs {
-      padding-left: 0.425rem;
-      padding-right: 0.425rem;
-    }
-
-    .badge-sm {
-      padding-left: 0.55rem;
-      padding-right: 0.55rem;
-    }
-
-    .runtime-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      height: 2rem;
-      padding: 0 0.65rem;
-      border: 1px solid oklch(var(--b3) / 0.9);
-      border-radius: 999px;
-      background: oklch(var(--b2) / 0.55);
-      color: oklch(var(--bc) / 0.76);
-      font-size: 0.75rem;
-      white-space: nowrap;
-    }
-
-    .runtime-pill .runtime-dot {
-      width: 0.4rem;
-      height: 0.4rem;
-      border-radius: 999px;
-      background: oklch(var(--p));
-      box-shadow: 0 0 0 3px oklch(var(--p) / 0.12);
-    }
-
-    /* JetBrains Mono for all monospaced content */
-    .font-mono, code, pre, kbd, textarea.font-mono, input.font-mono {
-      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
-    }
-
-    /* Terminal panels */
-    .terminal {
-      background: #0d1117;
-      color: #c9d1d9;
-      font-family: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, monospace;
-      font-size: 0.75rem;
-      line-height: 1.65;
-    }
-    .terminal-header {
-      background: #161b22;
-      border-bottom: 1px solid #30363d;
-      color: #8b949e;
-    }
-    .terminal .log-line {
-      display: block;
-      white-space: pre-wrap;
-      word-break: break-all;
-      padding: 0 1rem;
-    }
-    .terminal .log-line:first-child { padding-top: 0.75rem; }
-    .terminal .log-line:last-child  { padding-bottom: 0.75rem; }
-    .terminal .log-line:hover { background: rgba(255,255,255,0.03); }
-    .terminal::-webkit-scrollbar { width: 6px; }
-    .terminal::-webkit-scrollbar-track { background: transparent; }
-    .terminal::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
-
-    /* Field label — used for key-value metadata */
-    .field-label {
-      font-size: 0.6875rem;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      color: oklch(var(--bc) / 0.38);
-      font-weight: 600;
-    }
-
-    /* Sidebar nav active: left border accent instead of bg highlight */
-    .nav-item {
-      display: flex;
-      align-items: center;
-      gap: 0.625rem;
-      padding: 0.4rem 0.75rem;
-      border-radius: 0.5rem;
-      font-size: 0.875rem;
-      transition: all 0.15s;
-      border-left: 2px solid transparent;
-      color: oklch(var(--bc) / 0.45);
-    }
-    .nav-item:hover {
-      background: oklch(var(--b2));
-      color: oklch(var(--bc));
-    }
-    .nav-item.active {
-      border-left-color: oklch(var(--p));
-      background: oklch(var(--p) / 0.08);
-      color: oklch(var(--bc));
-      font-weight: 500;
-    }
-    .nav-item.active svg, .nav-item.active i {
-      color: oklch(var(--p));
-    }
-  </style>
 </head>
-<body class="bg-base-200 min-h-screen">
+<body class="bg-canvas min-h-screen">
 
-<div class="flex min-h-screen">
+<div class="app-shell flex min-h-screen">
 
   <!-- Sidebar -->
-  <aside class="w-52 bg-base-100 border-r border-base-300 flex flex-col shrink-0">
-    <div class="px-5 py-5 border-b border-base-300">
-      <a href="/" class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: oklch(0.62 0.22 288);">
-          <i data-lucide="layers" class="w-4 h-4 text-white"></i>
-        </div>
-        <span class="font-semibold text-base tracking-tight">brine</span>
-      </a>
+  <aside class="app-sidebar w-52 bg-panel border-r border-line flex flex-col shrink-0">
+    <div class="sidebar-brand px-5 py-5 border-b border-line">
+      <a href="/" class="brand-mark" aria-label="Brine home"><span class="brand-symbol" aria-hidden="true">b.</span><span>brine</span></a>
+      <div class="brand-caption">CONTAINER CONTROL</div>
     </div>
 
     <nav class="flex-1 py-4 px-3 space-y-0.5">
-      <a href="/" class="nav-item {{if eq .Page "dashboard"}}active{{end}}">
-        <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0"></i>
-        Dashboard
+      <a href="/" class="nav-item {{if eq .Page "dashboard"}}active{{end}}" {{if eq .Page "dashboard"}}aria-current="page"{{end}}>
+        <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
+        Overview
       </a>
-      <a href="/stacks" class="nav-item {{if eq .Page "stacks"}}active{{end}}">
-        <i data-lucide="layers" class="w-4 h-4 shrink-0"></i>
+      <a href="/stacks" class="nav-item {{if eq .Page "stacks"}}active{{end}}" {{if eq .Page "stacks"}}aria-current="page"{{end}}>
+        <i data-lucide="layers" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         Stacks
       </a>
-      <a href="/containers" class="nav-item {{if eq .Page "containers"}}active{{end}}">
-        <i data-lucide="box" class="w-4 h-4 shrink-0"></i>
+      <a href="/containers" class="nav-item {{if eq .Page "containers"}}active{{end}}" {{if eq .Page "containers"}}aria-current="page"{{end}}>
+        <i data-lucide="container" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         Containers
       </a>
-      <a href="/images" class="nav-item {{if eq .Page "images"}}active{{end}}">
-        <i data-lucide="image" class="w-4 h-4 shrink-0"></i>
+      <a href="/images" class="nav-item {{if eq .Page "images"}}active{{end}}" {{if eq .Page "images"}}aria-current="page"{{end}}>
+        <i data-lucide="disc-3" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         Images
       </a>
-      <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}">
-        <i data-lucide="braces" class="w-4 h-4 shrink-0"></i>
+      <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}" {{if eq .Page "recipes"}}aria-current="page"{{end}}>
+        <i data-lucide="braces" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         Snippets
       </a>
     </nav>
 
-    <div class="px-3 py-3 border-t border-base-300">
-      <button id="theme-toggle" onclick="toggleTheme()" class="nav-item w-full text-xs">
-        <i id="icon-moon" data-lucide="moon" class="w-3.5 h-3.5 shrink-0"></i>
-        <i id="icon-sun"  data-lucide="sun"  class="w-3.5 h-3.5 shrink-0 hidden"></i>
-        <span id="theme-label">Dark mode</span>
-      </button>
+    <div class="sidebar-settings px-3 py-3 border-t border-line">
+      <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" aria-label="Settings" title="Settings" {{if eq .Page "settings"}}aria-current="page"{{end}}>
+        <i data-lucide="settings" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
+        <span class="nav-label">Settings</span>
+      </a>
     </div>
   </aside>
 
   <!-- Main -->
   <div class="flex-1 flex flex-col min-h-screen overflow-hidden">
-    <header class="bg-base-100 border-b border-base-300 px-6 py-3.5 flex items-center justify-between shrink-0">
-      <div class="text-sm text-base-content/70">{{block "header" .}}Brine{{end}}</div>
+    <header class="app-header bg-panel border-b border-line px-6 py-3.5 flex items-center justify-between shrink-0">
+      <div class="text-sm text-muted">{{block "header" .}}Brine{{end}}</div>
       <div class="flex items-center gap-2">
         <div class="runtime-pill" title="Runtime selected when Brine started">
-          <span class="runtime-dot"></span>
-          <span class="text-base-content/45">Runtime</span>
-          <span class="font-mono font-semibold text-base-content">{{.RuntimeEngine}}</span>
+          <i data-lucide="info" class="w-3.5 h-3.5 text-info" aria-hidden="true"></i>
+          <span class="runtime-label">ENGINE</span>
+          <span class="font-mono font-semibold text-foreground">{{.RuntimeEngine}}</span>
         </div>
         {{block "header-actions" .}}{{end}}
         {{if .AuthEnabled}}
         <form method="post" action="/logout" class="inline-flex">
           <input type="hidden" name="_csrf" value="{{.CSRF}}">
-          <button type="submit" class="btn btn-ghost btn-sm gap-1.5" title="Sign out">
+          <button type="submit" class="ui-button ui-button-ghost ui-button-sm gap-1.5" title="Sign out">
             <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
-            <span class="text-xs text-base-content/70">{{.User}}</span>
+            <span class="text-xs text-muted">{{.User}}</span>
           </button>
         </form>
         {{end}}
       </div>
     </header>
 
-    <main class="flex-1 p-6 overflow-auto">
+    <main class="app-main flex-1 p-6 overflow-auto">
       {{block "content" .}}{{end}}
     </main>
   </div>
 </div>
 
-<div id="toasts" class="toast toast-top toast-end z-50"></div>
+<div id="toasts" class="ui-toasts ui-toasts-top ui-toasts-end z-50" role="status" aria-live="polite" aria-atomic="false"></div>
 
-<dialog id="confirm-modal" class="modal">
-  <div class="modal-box max-w-sm">
+<dialog id="confirm-modal" class="ui-dialog" aria-labelledby="modal-title" aria-describedby="modal-message">
+  <div class="ui-dialog-panel">
     <h3 class="font-semibold text-base mb-1" id="modal-title">Confirm</h3>
-    <p class="text-sm text-base-content/60 mb-4" id="modal-message"></p>
-    <div id="modal-checkbox-wrap" class="form-control mb-4 hidden">
-      <label class="label cursor-pointer justify-start gap-2 p-0">
-        <input type="checkbox" id="modal-checkbox" class="checkbox checkbox-sm checkbox-error" checked>
-        <span class="label-text text-sm" id="modal-checkbox-label"></span>
+    <p class="text-sm text-muted mb-4" id="modal-message"></p>
+    <div id="modal-checkbox-wrap" class="ui-field mb-4 hidden">
+      <label class="ui-label cursor-pointer justify-start gap-2 p-0">
+        <input type="checkbox" id="modal-checkbox" class="ui-checkbox ui-checkbox-sm ui-checkbox-danger" checked>
+        <span class="ui-label-text text-sm" id="modal-checkbox-label"></span>
       </label>
     </div>
-    <div class="flex justify-end gap-2">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('confirm-modal').close()">Cancel</button>
-      <button class="btn btn-error btn-sm" id="modal-confirm-btn">Confirm</button>
+    <div class="ui-dialog-actions">
+      <button class="ui-button ui-button-ghost ui-button-sm" onclick="document.getElementById('confirm-modal').close()">Cancel</button>
+      <button class="ui-button ui-button-danger ui-button-sm" id="modal-confirm-btn">Confirm</button>
     </div>
   </div>
-  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  <form method="dialog" class="ui-dialog-backdrop"><button aria-label="Close dialog">close</button></form>
 </dialog>
 
 <script>
@@ -286,12 +127,12 @@
 
   function showToast(msg, type = 'info') {
     const div = document.createElement('div');
-    div.className = `alert alert-${type} shadow-lg max-w-sm text-sm`;
+    div.className = `ui-notice ui-notice-${type} shadow-lg max-w-sm text-sm`;
     const span = document.createElement('span');
     span.textContent = msg; // never interpret server output as HTML
     div.appendChild(span);
     document.getElementById('toasts').appendChild(div);
-    setTimeout(() => div.remove(), 4000);
+    setTimeout(() => div.remove(), BrineUI.duration('--toast-duration', 4000));
   }
 
   function confirmAction(title, message, onConfirm, opts = {}) {

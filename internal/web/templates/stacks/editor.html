@@ -2,26 +2,25 @@
 
 {{define "title"}}Edit {{.Stack.Name}} — Brine{{end}}
 {{define "header"}}
-<div class="flex items-center gap-2 text-base-content/60">
-  <a href="/stacks" class="hover:text-base-content transition-colors">Stacks</a>
-  <span class="text-base-content/30">/</span>
-  <a href="/stacks/{{.Stack.Name}}" class="hover:text-base-content transition-colors font-mono">{{.Stack.Name}}</a>
-  <span class="text-base-content/30">/</span>
-  <span class="text-base-content">Edit</span>
+<div class="flex items-center gap-2 text-muted">
+  <a href="/stacks" class="hover:text-foreground transition-colors">Stacks</a>
+  <span class="text-dim">/</span>
+  <a href="/stacks/{{.Stack.Name}}" class="hover:text-foreground transition-colors font-mono">{{.Stack.Name}}</a>
+  <span class="text-dim">/</span>
+  <span class="text-foreground">Edit</span>
 </div>
 {{end}}
 
 {{define "content"}}
-<div class="flex gap-4 h-full">
+<div class="editor-layout flex gap-4 h-full">
 
   <!-- Editor panel -->
   <div class="flex-1 min-w-0">
 
     <!-- File tabs + editor -->
-    <div class="bg-base-100 rounded-box shadow-sm overflow-hidden">
+    <div class="ui-panel overflow-hidden">
       {{if .EngineAlignment.HasWarning}}
-      <div class="alert alert-warning rounded-none border-0 border-b border-warning/20 items-start">
-        <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5"></i>
+      <div class="ui-notice ui-notice-warning rounded-none border-0 border-b border-warning/20 items-start">
         <div>
           <div class="font-semibold">Engine mismatch</div>
           <div class="text-sm">{{.EngineAlignment.Warning}} Lifecycle actions are disabled until the file matches the runtime engine.</div>
@@ -30,21 +29,21 @@
       {{end}}
 
       <!-- Tab strip -->
-      <div class="flex items-center bg-base-200/60 border-b border-base-300 px-2 pt-2 gap-1 overflow-x-auto">
+      <div class="flex items-center bg-canvas/60 border-b border-line px-2 pt-2 gap-1 overflow-x-auto">
         {{range .Files}}
         <a href="/stacks/{{$.Stack.Name}}/edit?file={{.}}"
           class="px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors
             {{if eq . $.ActiveFile}}
-              bg-base-100 text-base-content font-semibold border border-b-base-100 border-base-300
+              bg-panel text-foreground font-semibold border border-b-panel border-line
             {{else}}
-              text-base-content/50 hover:text-base-content hover:bg-base-100/50
+              text-muted hover:text-foreground hover:bg-panel/50
             {{end}}"
         >
-          {{if eq . $.Stack.Entrypoint}}<span class="w-1 h-1 rounded-full bg-primary inline-block mr-1 mb-0.5"></span>{{end}}{{.}}
+          {{if eq . $.Stack.Entrypoint}}<span class="w-1 h-1 rounded-full bg-accent inline-block mr-1 mb-0.5"></span>{{end}}{{.}}
         </a>
         {{end}}
         <button
-          class="ml-0.5 px-2 py-1.5 text-base-content/30 hover:text-base-content rounded-t-md transition-colors"
+          class="ml-0.5 px-2 py-1.5 text-dim hover:text-foreground rounded-t-md transition-colors"
           onclick="document.getElementById('new-file-modal').showModal()"
           title="Add file"
         ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
@@ -61,24 +60,26 @@
         <input type="hidden" name="active_file" value="{{.ActiveFile}}">
         <textarea
           id="pkl-editor"
+          aria-label="Pkl file contents"
           name="pkl_content"
-          class="textarea textarea-bordered font-mono text-sm resize-y w-full"
-          style="min-height: 30rem;"
+          class="ui-textarea font-mono text-sm resize-y w-full"
+          style="min-height: var(--editor-edit-min-height);"
           required
         >{{.PklContent}}</textarea>
 
         <div class="flex items-center gap-2 flex-wrap">
-          <button type="submit" class="btn btn-primary btn-sm gap-1.5">
+          <span id="editor-dirty" class="text-xs text-warning hidden" role="status">Unsaved changes</span>
+          <button type="submit" class="ui-button ui-button-primary ui-button-sm gap-1.5">
             <i data-lucide="save" class="w-3.5 h-3.5"></i>
             Update
           </button>
-          <button type="button" class="btn btn-ghost btn-sm"
+          <button type="button" class="ui-button ui-button-ghost ui-button-sm"
             hx-post="/web/stacks/{{.Stack.Name}}/validate"
             hx-target="#edit-result"
             hx-swap="innerHTML"
             hx-include="[name=pkl_content],[name=active_file]"
           >Validate</button>
-          <button type="button" id="fmt-btn" class="btn btn-ghost btn-sm"
+          <button type="button" id="fmt-btn" class="ui-button ui-button-ghost ui-button-sm"
             hx-post="/web/stacks/{{.Stack.Name}}/fmt"
             hx-swap="none"
             hx-include="[name=pkl_content],[name=active_file]"
@@ -86,7 +87,7 @@
 
           <div class="ml-auto flex items-center gap-2">
             {{if ne .ActiveFile .Stack.Entrypoint}}
-            <button type="button" class="btn btn-ghost btn-xs text-error gap-1"
+            <button type="button" class="ui-button ui-button-ghost ui-button-xs text-error gap-1"
               hx-delete="/web/stacks/{{.Stack.Name}}/files/{{.ActiveFile}}"
               hx-target="#edit-result"
               hx-swap="innerHTML"
@@ -96,18 +97,18 @@
               Delete file
             </button>
             {{else}}
-            <span class="text-xs text-base-content/40 flex items-center gap-1">
-              <i data-lucide="star" class="w-3 h-3 text-primary fill-primary"></i>
+            <span class="text-xs text-dim flex items-center gap-1">
+              <i data-lucide="star" class="w-3 h-3 text-accent fill-accent"></i>
               entrypoint
             </span>
             {{end}}
-            <a href="/stacks/{{.Stack.Name}}" class="btn btn-ghost btn-sm">Cancel</a>
+            <a href="/stacks/{{.Stack.Name}}" class="ui-button ui-button-ghost ui-button-sm">Cancel</a>
           </div>
         </div>
 
         {{if ne .ActiveFile .Stack.Entrypoint}}
-        <div class="flex items-center gap-2 pt-1 border-t border-base-200">
-          <button type="button" class="btn btn-ghost btn-xs gap-1 text-base-content/50"
+        <div class="flex items-center gap-2 pt-1 border-t border-line">
+          <button type="button" class="ui-button ui-button-ghost ui-button-xs gap-1 text-muted"
             hx-post="/web/stacks/{{.Stack.Name}}/entrypoint"
             hx-vals='{"filename":"{{.ActiveFile}}"}'
             hx-target="#edit-result"
@@ -125,29 +126,29 @@
   </div>
 
   <!-- Snippet sidebar -->
-  <div class="w-64 shrink-0">
-    <div class="bg-base-100 rounded-box shadow-sm sticky top-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-base-200">
+  <div class="editor-snippets w-64 shrink-0">
+    <div class="ui-panel sticky top-4">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-line">
         <h3 class="text-sm font-semibold">Snippets</h3>
-        <a href="/recipes/new" class="btn btn-ghost btn-xs" title="New snippet">
+        <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet">
           <i data-lucide="plus" class="w-3.5 h-3.5"></i>
         </a>
       </div>
 
-      <div class="divide-y divide-base-200 max-h-[calc(100vh-12rem)] overflow-y-auto">
+      <div class="divide-y divide-line max-h-[calc(100vh-12rem)] overflow-y-auto">
         {{if .Snippets}}
         {{range $cat, $snippets := .Snippets}}
         <div>
-          <div class="px-4 py-2 text-xs font-semibold text-base-content/40 uppercase tracking-wider">{{$cat}}</div>
+          <div class="px-4 py-2 text-xs font-semibold text-dim uppercase tracking-wider">{{$cat}}</div>
           {{range $snippets}}
-          <div class="px-4 py-2.5 hover:bg-base-200/50 group cursor-default">
+          <div class="px-4 py-2.5 hover:bg-canvas/50 group cursor-default">
             <div class="flex items-start justify-between gap-2">
               <div class="min-w-0">
                 <div class="text-sm font-medium truncate">{{.Name}}</div>
-                {{if .Description}}<div class="text-xs text-base-content/40 truncate mt-0.5">{{.Description}}</div>{{end}}
+                {{if .Description}}<div class="text-xs text-dim truncate mt-0.5">{{.Description}}</div>{{end}}
               </div>
               <button
-                class="btn btn-ghost btn-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="ui-button ui-button-ghost ui-button-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                 onclick="insertSnippet('{{.Slug}}')"
                 title="Insert at cursor"
               >
@@ -160,9 +161,9 @@
         {{end}}
         {{else}}
         <div class="px-4 py-8 text-center">
-          <i data-lucide="braces" class="w-6 h-6 mx-auto mb-2 text-base-content/20"></i>
-          <p class="text-xs text-base-content/40">No snippets yet.</p>
-          <a href="/recipes/new" class="link link-hover text-xs mt-1 inline-block">Create one</a>
+          <i data-lucide="braces" class="w-6 h-6 mx-auto mb-2 text-dim"></i>
+          <p class="text-xs text-dim">No snippets yet.</p>
+          <a href="/recipes/new" class="underline-offset-2 hover:underline text-xs mt-1 inline-block">Create one</a>
         </div>
         {{end}}
       </div>
@@ -172,28 +173,28 @@
 </div>
 
 <!-- New file modal -->
-<dialog id="new-file-modal" class="modal">
-  <div class="modal-box max-w-sm">
-    <h3 class="font-bold text-lg mb-4">Add file</h3>
+<dialog id="new-file-modal" class="ui-dialog" aria-labelledby="new-file-modal-title">
+  <div class="ui-dialog-panel">
+    <h3 id="new-file-modal-title" class="font-bold text-lg mb-4">Add file</h3>
     <form
       hx-post="/web/stacks/{{.Stack.Name}}/files"
       hx-target="#edit-result"
       hx-swap="innerHTML"
       class="space-y-4"
     >
-      <div class="form-control">
-        <label class="label"><span class="label-text">Filename</span></label>
-        <input type="text" name="filename" class="input input-bordered font-mono"
+      <div class="ui-field">
+        <label class="ui-label" for="new-file-name"><span class="ui-label-text">Filename</span></label>
+        <input id="new-file-name" type="text" name="filename" class="ui-input font-mono"
           placeholder="shared.pkl" pattern="[a-zA-Z0-9_-]+\.pkl" required />
-        <label class="label"><span class="label-text-alt text-base-content/40">Must end in .pkl</span></label>
+        <label class="ui-label"><span class="ui-label-hint text-dim">Must end in .pkl</span></label>
       </div>
-      <div class="modal-action">
-        <button type="button" class="btn btn-ghost" onclick="document.getElementById('new-file-modal').close()">Cancel</button>
-        <button type="submit" class="btn btn-primary" onclick="document.getElementById('new-file-modal').close()">Create</button>
+      <div class="ui-dialog-actions">
+        <button type="button" class="ui-button ui-button-ghost" onclick="document.getElementById('new-file-modal').close()">Cancel</button>
+        <button type="submit" class="ui-button ui-button-primary" onclick="document.getElementById('new-file-modal').close()">Create</button>
       </div>
     </form>
   </div>
-  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  <form method="dialog" class="ui-dialog-backdrop"><button aria-label="Close dialog">close</button></form>
 </dialog>
 
 <script type="module">
@@ -201,7 +202,7 @@ import { createBrinePklEditor } from '/static/vendor/editor.js';
 
 const ta = document.getElementById('pkl-editor');
 const view = createBrinePklEditor(ta, {
-  minHeight: '30rem',
+  minHeight: 'var(--editor-edit-min-height)',
   snippets: {{toJSON .SnippetCompletions}},
 });
 window._pklView = view;
@@ -209,6 +210,29 @@ window._pklView = view;
 
 <script>
 const snippetCache = {};
+const editorForm = document.getElementById('editor-form');
+const editorTextarea = document.getElementById('pkl-editor');
+let savedContent = editorTextarea.value;
+let submittedContent = savedContent;
+function updateDirtyState() {
+  document.getElementById('editor-dirty').classList.toggle('hidden', editorTextarea.value === savedContent);
+}
+editorTextarea.addEventListener('input', updateDirtyState);
+window.addEventListener('beforeunload', (event) => {
+  if (editorTextarea.value !== savedContent) {
+    event.preventDefault();
+    event.returnValue = '';
+  }
+});
+editorForm.addEventListener('htmx:beforeRequest', (event) => {
+  if (event.target === editorForm) submittedContent = editorTextarea.value;
+});
+editorForm.addEventListener('htmx:beforeOnLoad', (event) => {
+  if (event.target === editorForm && event.detail.xhr.status >= 200 && event.detail.xhr.status < 300 && event.detail.xhr.getResponseHeader('HX-Redirect')) {
+    savedContent = submittedContent;
+    updateDirtyState();
+  }
+});
 
 async function insertSnippet(slug) {
   let body = snippetCache[slug];
@@ -235,6 +259,7 @@ async function insertSnippet(slug) {
     const after  = ta.value.substring(ta.selectionEnd);
     const prefix = (start > 0 && ta.value[start - 1] !== '\n') ? '\n' : '';
     ta.value = before + prefix + body + '\n' + after;
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
     ta.selectionStart = ta.selectionEnd = start + prefix.length + body.length + 1;
     ta.focus();
   }
@@ -253,6 +278,7 @@ document.getElementById('fmt-btn').addEventListener('htmx:afterRequest', functio
   if (e.detail.successful) {
     const text = e.detail.xhr.responseText;
     document.getElementById('pkl-editor').value = text;
+    updateDirtyState();
     if (window._pklView) {
       window._pklView.dispatch({
         changes: { from: 0, to: window._pklView.state.doc.length, insert: text },

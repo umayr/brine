@@ -4,9 +4,10 @@
 {{define "header"}}Containers{{end}}
 
 {{define "content"}}
-<div class="bg-base-100 rounded-box shadow-sm">
-  <div class="overflow-x-auto">
-    <table class="table">
+<div class="index-page">
+  <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1>Containers</h1></div><span class="index-count">LIVE</span></div>
+  <div class="index-table overflow-x-auto">
+    <table class="ui-table">
       <thead>
         <tr>
           <th>Name</th>
@@ -25,8 +26,8 @@
         hx-swap="innerHTML"
       >
         <tr>
-          <td colspan="7" class="text-center py-8 text-base-content/40">
-            <span class="loading loading-spinner loading-sm"></span>
+          <td colspan="7" class="text-center py-8 text-dim">
+            <span class="ui-spinner ui-spinner-sm"></span>
           </td>
         </tr>
       </tbody>
