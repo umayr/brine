@@ -69,9 +69,16 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
 }
 
-// parseTemplates parses all templates from the embedded FS.
-// In dev mode, this re-reads from disk on each request.
+// parseTemplates parses the production embedded templates.
 func parseTemplates() (*templateSet, error) {
+	return parseTemplatesFS(templateFS)
+}
+
+// parseTemplatesFS parses templates from the supplied source filesystem.
+func parseTemplatesFS(source fs.FS) (*templateSet, error) {
+	if source == nil {
+		return nil, fmt.Errorf("template source: %w", fs.ErrInvalid)
+	}
 	ts := &templateSet{
 		partials: make(map[string]*template.Template),
 		pages:    make(map[string]*template.Template),
@@ -79,18 +86,18 @@ func parseTemplates() (*templateSet, error) {
 	}
 
 	// Read layout
-	layoutBytes, err := fs.ReadFile(templateFS, "templates/layout.html")
+	layoutBytes, err := fs.ReadFile(source, "templates/layout.html")
 	if err != nil {
 		return nil, fmt.Errorf("read layout: %w", err)
 	}
 
 	// Read all partials
-	partialGlob, _ := fs.Glob(templateFS, "templates/partials/*.html")
+	partialGlob, _ := fs.Glob(source, "templates/partials/*.html")
 	partialSrcs := map[string]string{}
 	for _, p := range partialGlob {
-		data, err := fs.ReadFile(templateFS, p)
+		data, err := fs.ReadFile(source, p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read partial %s: %w", p, err)
 		}
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "templates/partials/"), ".html")
 		partialSrcs[name] = string(data)
@@ -106,17 +113,17 @@ func parseTemplates() (*templateSet, error) {
 	}
 
 	// Parse page templates (each includes layout + itself)
-	pagePaths, _ := fs.Glob(templateFS, "templates/**/*.html")
-	rootPages, _ := fs.Glob(templateFS, "templates/*.html")
+	pagePaths, _ := fs.Glob(source, "templates/**/*.html")
+	rootPages, _ := fs.Glob(source, "templates/*.html")
 	pagePaths = append(pagePaths, rootPages...)
 
 	for _, p := range pagePaths {
 		if strings.Contains(p, "partials/") || p == "templates/layout.html" {
 			continue
 		}
-		data, err := fs.ReadFile(templateFS, p)
+		data, err := fs.ReadFile(source, p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read page %s: %w", p, err)
 		}
 		// Each page template is parsed together with the layout so that
 		// {{template "layout.html" .}} works.

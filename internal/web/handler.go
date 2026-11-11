@@ -1,6 +1,8 @@
 package web
 
 import (
+	"io/fs"
+	"os"
 	"sync"
 	"time"
 
@@ -17,7 +19,8 @@ type Handler struct {
 	recipes       store.RecipeStore
 	git           *git.Runner
 	auth          *auth.Authenticator
-	dev           bool // re-parse templates on every request when true
+	dev           bool // read templates and static files from the source tree
+	devFS         fs.FS
 	engine        string
 	deployTimeout time.Duration
 
@@ -35,6 +38,7 @@ func New(ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runn
 		auth:          authn,
 		engine:        engine,
 		dev:           dev,
+		devFS:         os.DirFS("internal/web"),
 		deployTimeout: deployTimeout,
 	}
 }
@@ -42,7 +46,7 @@ func New(ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runn
 // templates returns the parsed template set, using the cache unless in dev mode.
 func (h *Handler) templates() (*templateSet, error) {
 	if h.dev {
-		return parseTemplates()
+		return parseTemplatesFS(h.devFS)
 	}
 	h.mu.RLock()
 	ts := h.ts

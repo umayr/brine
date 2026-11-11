@@ -36,7 +36,7 @@ func run() error {
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
 	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "path to dill binary")
-	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: re-parse templates on every request")
+	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: serve templates and static files from the repository (run from repo root)")
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")
