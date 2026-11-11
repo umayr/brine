@@ -63,6 +63,8 @@ type stackNewData struct {
 
 type stackDetailData struct {
 	pageData
+	GitRevision     string
+	GitState        string
 	Stack           *store.Stack
 	Files           []string
 	ActiveFile      string

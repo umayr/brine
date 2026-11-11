@@ -81,24 +81,13 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 		return
 	}
 
-	// For non-read-only stacks, skip the pull if the user has uncommitted
-	// local edits — we don't want to clobber their work.
-	if !stack.Git.ReadOnly {
-		dirty, _ := s.git.HasChanges(ctx, repoDir)
-		if dirty {
-			syncTime := time.Now()
-			_ = s.store.UpdateGitStatus(name, stack.Git.LastCommit, "skipped: uncommitted local changes", syncTime)
-			return
-		}
-	}
-
 	syncCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
 	changed, err := s.git.Pull(syncCtx, repoDir)
 	if err != nil {
 		syncTime := time.Now()
-		_ = s.store.UpdateGitStatus(name, "", err.Error(), syncTime)
+		_ = s.store.UpdateGitStatus(name, stack.Git.LastCommit, err.Error(), syncTime)
 		log.Printf("git syncer: pull %s: %v", name, err)
 		return
 	}

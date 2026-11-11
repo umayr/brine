@@ -200,7 +200,7 @@
           onclick="document.getElementById('push-modal').showModal()"
         >
           <i data-lucide="upload" class="w-3.5 h-3.5"></i>
-          Push changes
+          Push staged changes
         </button>
         {{end}}
       </div>
@@ -226,9 +226,11 @@
         <div class="font-mono text-sm">{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}</div>
       </div>
       {{end}}
+      <div><div class="field-label mb-1">Current revision</div><div class="font-mono text-xs">{{if .GitRevision}}{{.GitRevision}}{{else}}Unavailable{{end}}</div></div>
+      <div><div class="field-label mb-1">Working tree</div><div class="font-mono text-xs">{{.GitState}}</div></div>
       {{if .Stack.Git.LastCommit}}
       <div>
-        <div class="field-label mb-1">Last commit</div>
+        <div class="field-label mb-1">Last synced commit</div>
         <div class="font-mono text-xs text-muted">{{.Stack.Git.LastCommit}}</div>
       </div>
       {{end}}
@@ -346,7 +348,7 @@
 <dialog id="push-modal" class="ui-dialog" aria-labelledby="push-modal-title">
   <div class="ui-dialog-panel">
     <h3 id="push-modal-title" class="font-bold text-lg">Push changes</h3>
-    <p class="text-sm text-muted mt-1 mb-4">Commit all local edits and push to <span class="font-mono">{{if .Stack.Git}}{{.Stack.Git.Branch}}{{end}}</span>.</p>
+    <p class="text-sm text-muted mt-1 mb-4">Commit only changes already staged outside Brine and push to <span class="font-mono">{{if .Stack.Git}}{{.Stack.Git.Branch}}{{end}}</span>. Unstaged and untracked files are not included. Review and stage files with Git before continuing.</p>
     <div class="ui-field mb-4">
       <label class="ui-label" for="push-message"><span class="ui-label-text">Commit message</span></label>
       <input type="text" id="push-message" class="ui-input "

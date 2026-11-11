@@ -39,6 +39,13 @@ func (r *Runner) Clone(ctx context.Context, url, branch, destDir string) error {
 // Pull fetches from origin and fast-forwards the current branch.
 // Returns true if the local HEAD changed (i.e. there were upstream commits).
 func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
+	dirty, err := r.HasChanges(ctx, repoDir)
+	if err != nil {
+		return false, fmt.Errorf("check working tree: %w", err)
+	}
+	if dirty {
+		return false, fmt.Errorf("pull blocked: uncommitted local changes; review and commit or discard them first")
+	}
 	before, err := r.HeadRef(ctx, repoDir)
 	if err != nil {
 		return false, fmt.Errorf("head ref before pull: %w", err)
@@ -53,12 +60,9 @@ func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
 	return before != after, nil
 }
 
-// Push stages all changes, commits with message, and pushes to origin.
+// Push commits explicitly staged changes and pushes to origin.
 // Output is written to w.
 func (r *Runner) Push(ctx context.Context, repoDir, message string, w io.Writer) error {
-	if err := r.runWriter(ctx, repoDir, w, "add", "-A"); err != nil {
-		return fmt.Errorf("git add: %w", err)
-	}
 	if err := r.runWriter(ctx, repoDir, w, "commit", "-m", message); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
