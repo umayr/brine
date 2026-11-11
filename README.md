@@ -336,12 +336,13 @@ internal/web         HTMX handlers, templates, embedded assets
 ### Git trust boundary
 
 Git operations run as the Brine service user, with its filesystem, network,
-credentials and environment. Git hooks are disabled for Brine's Git commands;
-this also disables hooks intentionally configured by the operator. This is not
-Git sandboxing: Git configuration (including repository-local and operator
-configuration), credential and remote helpers, SSH commands, filters selected by
-repository attributes, and transport URLs can still execute programs or access
-and disclose data available to the service. Clone URLs may address local paths
+credentials and environment. Brine suppresses client hooks discovered through
+`core.hooksPath`, including template-installed and intentionally configured
+operator hooks; server-side hooks are not suppressed. This is not Git sandboxing:
+Git configuration (including repository-local and operator configuration),
+filesystem-monitor hooks configured via `core.fsmonitor`, credential and remote
+helpers, SSH commands, filters selected by repository attributes, and transport
+URLs can still execute programs or access and disclose data available to the service. Clone URLs may address local paths
 or network services. Git output and errors can reach API/UI clients and sync
 status. Only use trusted Git sources, repository metadata, configuration and
 service credentials; do not expose Git operations to untrusted users. Isolation

@@ -153,8 +153,9 @@ func (r *Runner) output(ctx context.Context, workDir string, args ...string) (st
 	return out.String(), nil
 }
 
-// command disables Git hooks, including hooks installed through templates or config.
-// Other Git configuration, helpers and filters are still trusted and may execute.
+// command suppresses client hooks discovered through core.hooksPath, including
+// template-installed hooks. Other configuration, including core.fsmonitor,
+// helpers and filters are still trusted and may execute.
 func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
 	return exec.CommandContext(ctx, r.Binary, append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
 }

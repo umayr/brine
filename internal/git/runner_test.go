@@ -123,7 +123,7 @@ func TestRunnerDisablesConfiguredHooks(t *testing.T) {
 	gitCmd(t, dir, "push", "-u", "origin", "HEAD")
 	hooks := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "hook-ran")
-	for _, name := range []string{"pre-commit", "commit-msg", "post-commit", "pre-push"} {
+	for _, name := range []string{"pre-commit", "prepare-commit-msg", "commit-msg", "post-commit", "pre-push"} {
 		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 1\n"), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -142,5 +142,96 @@ func TestRunnerDisablesConfiguredHooks(t *testing.T) {
 	}
 	if got := gitCmd(t, remote, "show", "HEAD:file"); got != "changed" {
 		t.Fatalf("remote content = %q", got)
+	}
+}
+
+func TestCloneSuppressesTemplatePostCheckoutHook(t *testing.T) {
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	source := repo(t)
+	branch := strings.TrimSpace(gitCmd(t, source, "branch", "--show-current"))
+	template := t.TempDir()
+	hooks := filepath.Join(template, "hooks")
+	if err := os.Mkdir(hooks, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	t.Setenv("BRINE_TEST_HOOK_MARKER", marker)
+	t.Setenv("GIT_TEMPLATE_DIR", template)
+	if err := os.WriteFile(filepath.Join(hooks, "post-checkout"), []byte("#!/bin/sh\ntouch \"$BRINE_TEST_HOOK_MARKER\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Verify the template is effective without the Runner's override.
+	gitCmd(t, "", "clone", source, filepath.Join(t.TempDir(), "control"))
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("control hook did not run: %v", err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	clone := filepath.Join(t.TempDir(), "clone")
+	if err := New().Clone(context.Background(), source, branch, clone); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("hook ran or marker stat failed: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(clone, "file")); err != nil || string(data) != "initial" {
+		t.Fatalf("clone content = %q, %v", data, err)
+	}
+}
+
+func TestPullSuppressesPostMergeHook(t *testing.T) {
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	source := repo(t)
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitCmd(t, "", "clone", source, clone)
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	t.Setenv("BRINE_TEST_HOOK_MARKER", marker)
+	if err := os.WriteFile(filepath.Join(clone, ".git", "hooks", "post-merge"), []byte("#!/bin/sh\ntouch \"$BRINE_TEST_HOOK_MARKER\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "file"), []byte("upstream"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, source, "commit", "-am", "upstream")
+	changed, err := New().Pull(context.Background(), clone)
+	if err != nil || !changed {
+		t.Fatalf("pull: changed=%v err=%v", changed, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("hook ran or marker stat failed: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(clone, "file")); err != nil || string(data) != "upstream" {
+		t.Fatalf("pull content = %q, %v", data, err)
+	}
+	// Confirm the installed hook runs for an ordinary fast-forward pull.
+	if err := os.WriteFile(filepath.Join(source, "file"), []byte("second"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, source, "commit", "-am", "second")
+	gitCmd(t, clone, "pull", "--ff-only")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("control hook did not run: %v", err)
+	}
+}
+
+func TestHasChangesCanExecuteConfiguredFsmonitor(t *testing.T) {
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	dir := repo(t)
+	marker := filepath.Join(t.TempDir(), "fsmonitor-ran")
+	t.Setenv("BRINE_TEST_HOOK_MARKER", marker)
+	hook := filepath.Join(t.TempDir(), "fsmonitor")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch \"$BRINE_TEST_HOOK_MARKER\"\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, dir, "config", "core.fsmonitor", hook)
+	if _, err := New().HasChanges(context.Background(), dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("configured fsmonitor did not execute: %v", err)
 	}
 }
