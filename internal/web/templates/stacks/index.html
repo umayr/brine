@@ -12,7 +12,7 @@
 
 {{define "content"}}
 <div class="index-page">
-  <div id="stack-inventory" hx-get="/web/stacks" hx-trigger="load, every 5s, refresh-stacks" hx-swap="innerHTML" hx-sync="this:replace"
+  <div id="stack-inventory" hx-get="/web/stacks" hx-trigger="load, every 5s, refresh-stacks" hx-swap="innerHTML" hx-sync="this:drop"
     hx-on::send-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
     hx-on::response-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }">
     <div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1>Stacks</h1></div></div>
@@ -22,11 +22,32 @@
 </div>
 
 <script>
+const stackActions = new Map();
+const stackButtonMarkup = new WeakMap();
+
+function updateStackActions() {
+  document.querySelectorAll('#stack-inventory [data-stack-action]').forEach(button => {
+    const action = stackActions.get(button.dataset.stackName);
+    if (action) {
+      if (!stackButtonMarkup.has(button)) stackButtonMarkup.set(button, button.innerHTML);
+      button.disabled = true;
+      if (action === button.dataset.stackAction) {
+        button.innerHTML = '<span class="ui-spinner ui-spinner-xs"></span> ' + (action === 'deploy' ? 'Deploying' : 'Deleting');
+      }
+    } else if (stackButtonMarkup.has(button)) {
+      button.disabled = false;
+      button.innerHTML = stackButtonMarkup.get(button);
+      stackButtonMarkup.delete(button);
+    }
+  });
+}
+document.getElementById('stack-inventory').addEventListener('htmx:afterSwap', updateStackActions);
+
 async function deployStack(name, btn) {
+  if (stackActions.has(name)) return;
+  stackActions.set(name, 'deploy');
+  updateStackActions();
   showToast('Deploying ' + name + '…', 'info');
-  btn.disabled = true;
-  const original = btn.innerHTML;
-  btn.innerHTML = '<span class="ui-spinner ui-spinner-xs"></span> Deploying';
   try {
     const res = await fetch(`/api/stacks/${name}/up`, { method: 'POST', headers: brineHeaders() });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -48,29 +69,41 @@ async function deployStack(name, btn) {
   } catch {
     showToast('Deploy failed', 'error');
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = original;
+    stackActions.delete(name);
+    updateStackActions();
     lucide.createIcons();
   }
 }
 
 async function deleteStack(name, removeContainers) {
-  const res = await fetch(`/api/stacks/${name}`, {
-    method: 'DELETE',
-    headers: brineHeaders({'Content-Type': 'application/json'}),
-    body: JSON.stringify({ remove_containers: !!removeContainers }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    let msg = text;
-    try { msg = JSON.parse(text).error || text; } catch {}
-    showToast('Delete failed: ' + msg.slice(0, 300), 'error');
-    return;
+  if (stackActions.has(name)) return;
+  stackActions.set(name, 'delete');
+  updateStackActions();
+  try {
+    const res = await fetch(`/api/stacks/${name}`, {
+      method: 'DELETE',
+      headers: brineHeaders({'Content-Type': 'application/json'}),
+      body: JSON.stringify({ remove_containers: !!removeContainers }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let msg = text;
+      try { msg = JSON.parse(text).error || text; } catch {}
+      showToast('Delete failed: ' + msg.slice(0, 300), 'error');
+      return;
+    }
+    const inventory = document.getElementById('stack-inventory');
+    htmx.trigger(inventory, 'htmx:abort');
+    inventory.innerHTML = '<div class="index-table py-20 text-center"><span role="status">Loading stacks…</span></div>';
+    htmx.trigger(inventory, 'refresh-stacks');
+    showToast(removeContainers ? 'Stack and containers removed' : 'Stack deleted', 'success');
+  } catch {
+    showToast('Delete failed', 'error');
+  } finally {
+    stackActions.delete(name);
+    updateStackActions();
+    lucide.createIcons();
   }
-  const inventory = document.getElementById('stack-inventory');
-  inventory.innerHTML = '<div class="index-table py-20 text-center"><span role="status">Loading stacks…</span></div>';
-  htmx.trigger(inventory, 'refresh-stacks');
-  showToast(removeContainers ? 'Stack and containers removed' : 'Stack deleted', 'success');
 }
 </script>
 {{end}}
