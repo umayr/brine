@@ -25,7 +25,9 @@ function removeImage(id) {
   fetch(`/api/images/${id}`, { method: 'DELETE', headers: brineHeaders() })
     .then(res => {
       if (res.ok) {
-        htmx.trigger('#images-body', 'refresh-images');
+        const body = document.getElementById('images-body');
+        body.innerHTML = document.getElementById('images-loading').innerHTML;
+        htmx.trigger(body, 'refresh-images');
         showToast('Image removed', 'success');
       } else {
         showToast('Remove failed', 'error');

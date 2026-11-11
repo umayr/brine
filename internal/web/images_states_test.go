@@ -2,11 +2,45 @@ package web
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/engine"
 )
+
+type imageListEngine struct {
+	engine.Engine
+	images []engine.ImageInfo
+	err    error
+}
+
+func (e imageListEngine) ListImages(context.Context) ([]engine.ImageInfo, error) {
+	return e.images, e.err
+}
+
+func TestImageRowsHandlerStates(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		engine imageListEngine
+		want   string
+	}{
+		{"empty", imageListEngine{}, "No images found."},
+		{"engine error", imageListEngine{err: errors.New("engine <offline>")}, "engine &lt;offline&gt;"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{agent: agent.NewLocalAgent(tc.engine, nil)}
+			w := httptest.NewRecorder()
+			h.imageRows(w, httptest.NewRequest("GET", "/web/images", nil))
+			if w.Code != 200 || !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("status %d, body %s; want %q", w.Code, w.Body.String(), tc.want)
+			}
+		})
+	}
+}
 
 func TestImageInventoryStates(t *testing.T) {
 	ts, err := parseTemplates()

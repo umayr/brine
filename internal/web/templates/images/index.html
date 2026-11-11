@@ -67,6 +67,7 @@
       </table>
     </div>
   </div>
+  <template id="images-loading"><tr><td colspan="5" class="text-center py-8 text-dim"><span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span> <span role="status">Loading images…</span></td></tr></template>
   <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Retry</button></td></tr></template>
 
 </div>
