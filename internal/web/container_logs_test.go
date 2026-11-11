@@ -21,6 +21,9 @@ func TestStreamContainerLogs(t *testing.T) {
 	}{
 		{"completed", strings.NewReader("<hello> & world\n"), "data: <div class=\"log-line\">&lt;hello&gt; &amp; world</div>\n\nevent: done", "event: stream-error"},
 		{"failed", failingLogReader{}, "event: stream-error", "event: done"},
+		{"output then failure", io.MultiReader(strings.NewReader("first line\n"), failingLogReader{}), "data: <div class=\"log-line\">first line</div>\n\nevent: stream-error", "event: done"},
+		{"oversized line", strings.NewReader(strings.Repeat("x", 1024*1024+1)), "event: stream-error", "event: done"},
+		{"empty", strings.NewReader(""), "event: done", "event: stream-error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
