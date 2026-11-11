@@ -35,7 +35,7 @@ it talks to the container engine directly for container and image views.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.4.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
+- A `dill` binary (v0.5.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -62,7 +62,7 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
-The image bundles Brine, Dill (v0.4.0), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.5.0), and Pkl (0.31.1):
 
 ```sh
 docker build -t brine .
@@ -87,7 +87,7 @@ docker run -d --name brine \
   brine --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.4.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.5.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
@@ -177,7 +177,7 @@ Stack and recipe paths are validated; directories are `0700` and files `0600`.
 Stacks amend the published Dill schema:
 
 ```pkl
-amends "package://pkg.ushd.ca/dill@0.4.0#/dill.pkl"
+amends "package://pkg.ushd.ca/dill@0.5.0#/dill.pkl"
 
 config {
   name = "my-app"
@@ -193,6 +193,20 @@ config {
 
 Keep `config.name` equal to the Brine stack name. The starter template syncs it while
 you type, and the server rewrites the placeholder on create if it was left as `my-app`.
+
+### Upgrading existing stacks to Dill 0.5
+
+Dill 0.5 uses camelCase schema fields and resolved configuration keys. Before
+running existing stacks with the new binary, update their schema import to
+`package://pkg.ushd.ca/dill@0.5.0#/dill.pkl` and rename any old fields:
+`host_ip` → `hostIp`, `read_only` → `readOnly`, `external_volume` → `externalVolume`,
+`start_period` → `startPeriod`, `container_name` → `containerName`,
+`pull_policy` → `pullPolicy`, `depends_on` → `dependsOn`,
+`network_mode` → `networkMode`, and `cap_add` → `capAdd`.
+
+Brine does not rewrite existing stack files, recipes, or Git repositories.
+Validate the migrated project and review its plan before deploying. These Pkl
+schema changes do not rename Brine's own REST API fields or Git settings.
 
 Git-backed stacks support branch, subfolder, entrypoint, read-only, and auto-deploy
 with a poll interval. Auto-deploy runs `dill up` only when the pull changed `HEAD`;

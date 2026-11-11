@@ -193,6 +193,19 @@ test('new file fields assign untrusted names as DOM values, never HTML', () => {
   assert.equal(fields.textarea.innerHTML, undefined);
 });
 
+test('editor completions follow the Dill 0.5 camelCase schema', () => {
+  const source = read('internal/web/assets/editor.js');
+  const termsBlock = source.match(/const pklTerms = \[([\s\S]*?)\];/);
+  assert.ok(termsBlock, 'missing editor completion terms');
+  const terms = [...termsBlock[1].matchAll(/'([^']+)'/g)].map(match => match[1]);
+  for (const field of ['dependsOn', 'pullPolicy', 'containerName', 'networkMode', 'capAdd', 'hostIp', 'readOnly', 'externalVolume', 'startPeriod', 'memLimit', 'memReservation', 'cpus', 'cpuShares', 'pidsLimit']) {
+    assert.ok(terms.includes(field), `missing Dill 0.5 field ${field}`);
+  }
+  for (const obsolete of ['depends_on', 'pull_policy', 'container_name', 'network_mode', 'cap_add', 'host_ip', 'read_only', 'external_volume', 'start_period', 'resources', 'working_dir', 'entrypoint', 'networks', 'secrets']) {
+    assert.ok(!terms.includes(obsolete), `unsupported completion ${obsolete}`);
+  }
+});
+
 test('built CSS retains every authored component variant for dynamic Go/HTMX fragments', () => {
   const source = read('internal/web/assets/app.css');
   const built = read('internal/web/static/vendor/app.css');
