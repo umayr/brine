@@ -213,3 +213,16 @@ test('built CSS retains every authored component variant for dynamic Go/HTMX fra
     assert.ok(built.includes(selector), `missing ${selector}: rebuild assets and keep the full owned component API`);
   }
 });
+
+test('log filtering is case-insensitive and can restore previously hidden lines', () => {
+  const { filterLogLines } = require('../internal/web/static/ui.js');
+  const lines = [{ textContent: 'Server ERROR' }, { textContent: 'server ready' }];
+  const container = { children: lines };
+  filterLogLines(container, 'error');
+  assert.deepEqual(lines.map(line => line.hidden), [false, true]);
+  const incoming = { textContent: 'another ERROR' };
+  filterLogLines({ children: [incoming] }, 'error');
+  assert.equal(incoming.hidden, false);
+  filterLogLines(container, '');
+  assert.deepEqual(lines.map(line => line.hidden), [false, false]);
+});
