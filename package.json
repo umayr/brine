@@ -4,7 +4,7 @@
   "scripts": {
     "build:web": "npm run build:css && npm run build:js && npm run copy:vendor",
     "test:components": "node --test tests/component-contract.test.cjs",
-    "test:ui": "npm run test:components && playwright test",
+    "test:ui": "npm run test:components && node --test tests/playwright-config.test.cjs && playwright test",
     "build:css": "tailwindcss -c tailwind.config.js -i ./internal/web/assets/app.css -o ./internal/web/static/vendor/app.css --minify",
     "build:js": "esbuild ./internal/web/assets/editor.js --bundle --format=esm --target=es2020 --outfile=./internal/web/static/vendor/editor.js --minify",
     "copy:vendor": "cp ./node_modules/htmx.org/dist/htmx.min.js ./internal/web/static/vendor/htmx.min.js && cp ./node_modules/htmx.org/dist/ext/sse.js ./internal/web/static/vendor/htmx-sse.js && cp ./node_modules/lucide/dist/umd/lucide.min.js ./internal/web/static/vendor/lucide.min.js && cp ./node_modules/prismjs/prism.js ./internal/web/static/vendor/prism.js"

@@ -12,8 +12,8 @@ module.exports = defineConfig({
   testDir: './tests',
   testMatch: '**/*.spec.js',
   webServer: [
-    ...(!externalFixture ? [{ command: 'go run ./cmd/brine-fixture --port 18082', url: 'http://127.0.0.1:18082', reuseExistingServer: false, timeout: 120000 }] : []),
-    ...(managedAuth ? [{ command: 'go run ./cmd/brine-fixture --auth --port 18083', url: 'http://127.0.0.1:18083/login', reuseExistingServer: false, timeout: 120000 }] : []),
+    ...(!externalFixture ? [{ command: 'go run ./cmd/brine-fixture --port 18082', url: 'http://127.0.0.1:18082', reuseExistingServer: false, gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 }, timeout: 120000 }] : []),
+    ...(managedAuth ? [{ command: 'go run ./cmd/brine-fixture --auth --port 18083', url: 'http://127.0.0.1:18083/login', reuseExistingServer: false, gracefulShutdown: { signal: 'SIGTERM', timeout: 5000 }, timeout: 120000 }] : []),
   ],
   use: {
     browserName: 'chromium',
