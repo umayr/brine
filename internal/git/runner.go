@@ -116,7 +116,7 @@ func (r *Runner) run(ctx context.Context, workDir string, args ...string) error 
 
 // runWriter executes a git command, writing stdout+stderr to w.
 func (r *Runner) runWriter(ctx context.Context, workDir string, w io.Writer, args ...string) error {
-	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd := r.command(ctx, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -136,7 +136,7 @@ func (r *Runner) runWriter(ctx context.Context, workDir string, w io.Writer, arg
 
 // output runs a git command and returns stdout as a string.
 func (r *Runner) output(ctx context.Context, workDir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd := r.command(ctx, args...)
 	if workDir != "" {
 		cmd.Dir = workDir
 	}
@@ -151,6 +151,12 @@ func (r *Runner) output(ctx context.Context, workDir string, args ...string) (st
 		return "", fmt.Errorf("git %s: %s", args[0], msg)
 	}
 	return out.String(), nil
+}
+
+// command disables Git hooks, including hooks installed through templates or config.
+// Other Git configuration, helpers and filters are still trusted and may execute.
+func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, r.Binary, append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
 }
 
 // lockedWriter serializes stdout and stderr writes to the same output stream.

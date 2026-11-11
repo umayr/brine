@@ -114,3 +114,33 @@ func TestPullFastForwardsCleanRepository(t *testing.T) {
 		t.Fatalf("second pull: changed=%v err=%v", changed, err)
 	}
 }
+
+func TestRunnerDisablesConfiguredHooks(t *testing.T) {
+	dir := repo(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	gitCmd(t, dir, "init", "--bare", remote)
+	gitCmd(t, dir, "remote", "add", "origin", remote)
+	gitCmd(t, dir, "push", "-u", "origin", "HEAD")
+	hooks := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	for _, name := range []string{"pre-commit", "commit-msg", "post-commit", "pre-push"} {
+		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 1\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitCmd(t, dir, "config", "core.hooksPath", hooks)
+	if err := os.WriteFile(filepath.Join(dir, "file"), []byte("changed"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, dir, "add", "file")
+	var output bytes.Buffer
+	if err := New().Push(context.Background(), dir, "change", &output); err != nil {
+		t.Fatalf("push: %v; output: %s", err, output.String())
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("hook ran or marker stat failed: %v", err)
+	}
+	if got := gitCmd(t, remote, "show", "HEAD:file"); got != "changed" {
+		t.Fatalf("remote content = %q", got)
+	}
+}
