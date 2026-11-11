@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -153,6 +154,18 @@ func (h *Handler) render(w http.ResponseWriter, r *http.Request, page string, da
 		http.Error(w, "template not found: "+page, http.StatusInternalServerError)
 		return
 	}
+	if h.dev {
+		// A live edit can parse but fail during execution. Do not commit a
+		// successful response (or partial markup) until execution succeeds.
+		var body bytes.Buffer
+		if err := t.Execute(&body, h.withGlobalTemplateData(r, data)); err != nil {
+			http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = body.WriteTo(w)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.Execute(w, h.withGlobalTemplateData(r, data)); err != nil {
 		// Response already started; log and return
@@ -184,6 +197,16 @@ func (h *Handler) renderPartial(w http.ResponseWriter, r *http.Request, name str
 	t, ok := ts.partials[name]
 	if !ok {
 		http.Error(w, "partial not found: "+name, http.StatusInternalServerError)
+		return
+	}
+	if h.dev {
+		var body bytes.Buffer
+		if err := t.Execute(&body, data); err != nil {
+			http.Error(w, "partial error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = body.WriteTo(w)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
