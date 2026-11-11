@@ -237,6 +237,12 @@ make test-race
 make vet
 ```
 
+Run `--dev` from the repository root to read `internal/web/templates/` and
+`internal/web/static/` from disk on each request. Reload the page to see edits;
+rerun `npm run build:web` after changing frontend sources in `internal/web/assets/`.
+Use only a trusted local source tree: development file serving follows symlinks.
+Without `--dev`, templates and static assets remain embedded in the binary.
+
 Layout:
 
 ```

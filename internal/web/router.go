@@ -14,9 +14,20 @@ var staticFS embed.FS
 
 // Mount registers all web routes on r.
 func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
-	// Static assets
-	staticSub, _ := fs.Sub(staticFS, "static")
-	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	// Static assets use the same source tree as templates in dev mode.
+	var source fs.FS = staticFS
+	if h.dev {
+		source = h.devFS
+	}
+	var staticHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "static filesystem unavailable", http.StatusInternalServerError)
+	})
+	if source != nil {
+		if staticSub, err := fs.Sub(source, "static"); err == nil {
+			staticHandler = http.StripPrefix("/static/", http.FileServer(http.FS(staticSub)))
+		}
+	}
+	r.Handle("/static/*", staticHandler)
 
 	// Log streaming must not be cut by a request timeout.
 	r.Get("/web/containers/{id}/logs", h.containerLogsSSE)
