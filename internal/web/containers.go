@@ -35,7 +35,7 @@ func (h *Handler) containerDetail(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerRows(w http.ResponseWriter, r *http.Request) {
 	containers, err := h.agent.Engine().ListContainers(r.Context())
 	if err != nil {
-		h.renderAlert(w, "error", err.Error())
+		h.renderPartial(w, r, "container-list-error", err.Error())
 		return
 	}
 	h.renderPartial(w, r, "container-rows", containers)
