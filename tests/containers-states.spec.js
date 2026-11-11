@@ -30,3 +30,49 @@ test('container inventory HTTP failure offers retry', async ({ page }) => {
   await page.locator('#containers-body').getByRole('button', { name: 'Retry' }).click();
   await expect(page.locator('#containers-body tr').first().locator('td')).toHaveCount(7);
 });
+
+test('failed container action does not replace inventory with an inventory error', async ({ page }) => {
+  await page.route('**/web/containers/*/stop', route => route.fulfill({ status: 503 }));
+  await page.goto(new URL('/containers', baseURL).href);
+  const body = page.locator('#containers-body');
+  const stop = body.getByRole('button', { name: 'Stop', exact: true }).first();
+  await expect(stop).toBeVisible();
+  const rowCount = await body.locator('tr').count();
+  const response = page.waitForResponse(res => res.url().endsWith('/stop') && res.status() === 503);
+  await stop.click();
+  await response;
+  await expect(stop).toBeVisible();
+  await expect(body.locator('tr')).toHaveCount(rowCount);
+  await expect(body).not.toContainText('Inventory is unavailable');
+});
+
+test('retry supersedes an in-flight poll instead of letting an older failure replace inventory', async ({ page }) => {
+  let requests = 0;
+  let releasePoll;
+  let pollStarted;
+  let pollFinished;
+  const finished = new Promise(resolve => { pollFinished = resolve; });
+  const pending = new Promise(resolve => { releasePoll = resolve; });
+  const started = new Promise(resolve => { pollStarted = resolve; });
+  await page.route('**/web/containers', async route => {
+    const request = ++requests;
+    if (request === 1) return route.fulfill({ status: 503 });
+    if (request === 2) {
+      pollStarted();
+      await pending;
+      await route.fulfill({ status: 503 }).catch(() => {});
+      pollFinished();
+      return;
+    }
+    return route.continue();
+  });
+  await page.goto(new URL('/containers', baseURL).href);
+  const body = page.locator('#containers-body');
+  await expect(body.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await started;
+  await body.getByRole('button', { name: 'Retry' }).click();
+  await expect(body.locator('tr').first().locator('td')).toHaveCount(7);
+  releasePoll();
+  await finished;
+  await expect(body).not.toContainText('Inventory is unavailable');
+});

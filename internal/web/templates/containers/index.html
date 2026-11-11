@@ -24,8 +24,8 @@
         hx-get="/web/containers"
         hx-trigger="load, every 5s"
         hx-swap="innerHTML"
-        hx-on::send-error="this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button'))"
-        hx-on::response-error="this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button'))"
+        hx-on::send-error="if (event.detail.target === this) { this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
+        hx-on::response-error="if (event.detail.target === this) { this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
       >
         <tr>
           <td colspan="7" class="text-center py-8 text-dim">
@@ -36,6 +36,6 @@
       </tbody>
     </table>
   </div>
-  <template id="containers-request-error"><tr><td colspan="7" class="py-8 text-center"><div role="alert" class="text-error">Containers could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML">Retry</button></td></tr></template>
+  <template id="containers-request-error"><tr><td colspan="7" class="py-8 text-center"><div role="alert" class="text-error">Containers could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Retry</button></td></tr></template>
 </div>
 {{end}}

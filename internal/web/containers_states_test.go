@@ -28,7 +28,7 @@ func TestContainerRowsHandlerStates(t *testing.T) {
 		want   []string
 	}{
 		{"empty", containerListEngine{}, []string{"No containers found.", "configured engine returned no containers"}},
-		{"engine error", containerListEngine{err: errors.New("engine <offline>")}, []string{"Inventory is unavailable", "engine &lt;offline&gt;", "colspan=\"7\"", "Retry"}},
+		{"engine error", containerListEngine{err: errors.New("engine <offline>")}, []string{"Inventory is unavailable", "engine &lt;offline&gt;", "colspan=\"7\"", "Retry", "hx-sync=\"#containers-body:replace\""}},
 		{"populated", containerListEngine{containers: []engine.ContainerInfo{{ID: "123", Name: "example", State: "running"}}}, []string{"example", "running", "Stop"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
