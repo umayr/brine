@@ -9,8 +9,11 @@ failure are errors, not skips. Use `-count=1` to avoid cached results.
 ## Prerequisites and acquisition
 
 You need Go (the version in `go.mod`), `curl`, `unzip`, and Pkl. Dill must be
-able to find Pkl on `PATH`, or via `DILL_PKL_PATH`. Brine's container uses Pkl
-0.31.1; the test has also been run with 0.32.2. Install a release appropriate to
+able to find an executable Pkl on `PATH`, or via `DILL_PKL_PATH` (which takes
+precedence). The test resolves it to an absolute path and passes it to Dill;
+if unavailable, it fails before validation rather than using Dill's cache or
+downloader. Brine's container uses Pkl 0.31.1; the test has also been run with
+0.32.2. Install a release appropriate to
 your platform from https://github.com/apple/pkl/releases and check `pkl --version`.
 
 Download the executable and schema archive directly from the [Dill v0.5.0
@@ -60,7 +63,8 @@ needed. Downloads above are setup steps, not part of the test.
 The suite checks file and stdin validation of valid and invalid Pkl, relative
 schema resolution for stdin, formatting and formatting idempotence, and that
 stdin operations do not overwrite the original file. Invalid validation tests
-cover Dill's JSON validity response rather than relying on its exit status.
+check the released CLI's exit-zero JSON response and diagnostic for both file
+and stdin, as well as the diagnostic returned by Runner.
 It does not test `plan`, `ps`, or lifecycle operations: those require a real
 container engine and are deliberately not run against an existing endpoint.
 It also does not exercise network package resolution or the web/API layers.
