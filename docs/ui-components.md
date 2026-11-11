@@ -59,6 +59,27 @@ git diff --check
 
 Go tests cover template parsing/execution, engine-independent settings rendering, route authentication, embedded assets, unavailable dashboard data, and escaped sign-in/recipe fragments. These checks are not a complete accessibility audit, visual verification or real lifecycle integration test. Check keyboard interactions, responsive layouts and light/dark contrast manually when changing components.
 
+## Browser validation
+
+The tracked fixture and browser suite run in CI and locally. Run `npm ci`, then
+install Chromium once with `npx playwright install chromium`, or set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`, then run `npm run test:ui`.
+
+Playwright automatically starts disposable fixtures on localhost ports 18082
+(populated UI) and 18083 (synthetic authentication), then cleans up managed servers. These ports must be free; managed servers are not reused.
+The fixtures use temporary stores and fake engine/Dill responses. Infrastructure
+writes are rejected; only the optional auth fixture's login/logout POSTs are allowed.
+No real engine, Dill executable or deployment is touched. Set
+`BRINE_FIXTURE_BASE_URL` to reuse a separately running read-only fixture;
+`BRINE_VISUAL_BASE_URL` and `BRINE_VISUAL_PASSWORD` opt into an externally managed
+disposable login target.
+
+The browser suites cover appearance, keyboard interaction, storage errors and
+cross-tab synchronization, editor content, semantic contrast, dialogs, reduced
+motion, toast safety and responsive populated/empty pages. They are fixture and
+component checks, not real lifecycle integration, a pixel-diff baseline or a full
+accessibility audit. Screenshots remain in local `test-results/`.
+
 ## Dependency maintenance
 
 The frontend no longer depends on DaisyUI or CodeMirror's fixed One Dark theme. The direct esbuild range is `^0.28.2`; the lockfile also retains compatible security updates for PostCSS (8.5.32), postcss-selector-parser (6.1.6), nanoid (3.3.20), and source-map-js (1.2.2), retaining Tailwind 3. Run `npm audit --audit-level=low` alongside clean installs when updating dependencies. An audit is not a comprehensive application-security assessment.

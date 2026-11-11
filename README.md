@@ -258,6 +258,42 @@ npm run build:web
 npm run test:components
 ```
 
+### Browser regression harness
+
+The tracked fixture and Playwright suite provide browser regression checks locally
+and in CI. Install dependencies with `npm ci` first.
+
+```sh
+npx playwright install chromium
+npm run test:ui
+```
+
+To use an existing Chromium-compatible browser instead, set
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable before running the UI tests.
+The suite runs source/component contracts and browser checks against automatically
+managed disposable fixtures on localhost ports 18082 and 18083 (the latter tests
+synthetic sign-in). These ports must be free; existing servers are not reused. The managed fixtures never use a real Dill or engine. Screenshots are saved
+under `test-results/`; these checks do not run lifecycle actions. To use a separately
+started disposable login instance, set `BRINE_VISUAL_BASE_URL` and
+`BRINE_VISUAL_PASSWORD` before running `tests/visual.spec.js`.
+
+For populated UI testing without Docker or Dill, start the read-only fixture
+server from the repository root:
+
+```sh
+go run ./cmd/brine-fixture  # http://127.0.0.1:18082
+# In another terminal:
+BRINE_FIXTURE_BASE_URL=http://127.0.0.1:18082 npx playwright test tests/fixtures.spec.js
+```
+
+The fixture uses temporary data, binds only to localhost, blocks infrastructure
+writes, and never connects to a real engine. Its optional `--auth` mode permits
+only login/logout POSTs using disposable fixture credentials. It provides example
+stacks, containers, images, and logs. It is intended for visual inspection, not
+lifecycle integration tests. The ignored `.local/` directory is not a production runtime dependency.
+
+### Development file reload
+
 Run `--dev` from the repository root to read `internal/web/templates/` and
 `internal/web/static/` from disk on each request. Reload the page to see edits;
 rerun `npm run build:web` after changing frontend sources in `internal/web/assets/`.
