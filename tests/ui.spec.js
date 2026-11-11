@@ -40,10 +40,13 @@ test('stream status recognizes markers split at every position', async ({ page }
 
 test('editor warns about unsaved changes and clears warning after save', async ({ page }) => {
   await page.setContent(`<form id="editor-form"><textarea id="pkl-editor">original</textarea></form>
-    <span id="editor-dirty" class="hidden"></span><button id="fmt-btn"></button><div id="edit-result"></div>`);
+    <span id="editor-dirty" class="hidden"></span><button id="validate-btn"></button><button id="fmt-btn"></button><div id="edit-result"></div>`);
   const template = fs.readFileSync(path.resolve(__dirname, '../internal/web/templates/stacks/editor.html'), 'utf8');
   const script = template.split('<script>\nconst snippetCache = {};')[1].split('</script>')[0];
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
   await page.addScriptTag({ content: 'const snippetCache = {};' + script });
+  expect(errors).toEqual([]);
   const dirty = page.locator('#editor-dirty');
   await page.locator('#pkl-editor').fill('modified');
   await expect(dirty).not.toHaveClass(/hidden/);

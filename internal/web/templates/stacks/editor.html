@@ -55,6 +55,7 @@
         hx-put="/web/stacks/{{.Stack.Name}}"
         hx-target="#edit-result"
         hx-swap="innerHTML"
+        hx-sync="this:drop"
         class="p-4 space-y-3"
       >
         <input type="hidden" name="active_file" value="{{.ActiveFile}}">
@@ -73,7 +74,7 @@
             <i data-lucide="save" class="w-3.5 h-3.5"></i>
             Update
           </button>
-          <button type="button" class="ui-button ui-button-ghost ui-button-sm"
+          <button type="button" id="validate-btn" class="ui-button ui-button-ghost ui-button-sm"
             hx-post="/web/stacks/{{.Stack.Name}}/validate"
             hx-target="#edit-result"
             hx-swap="innerHTML"
@@ -120,7 +121,8 @@
         </div>
         {{end}}
 
-        <div id="edit-result"></div>
+        <p class="text-xs text-dim">Validate checks this draft with Dill as a configuration, not as a replacement in other files' imports. Save does not deploy.</p>
+        <div id="edit-result" class="whitespace-pre-wrap break-words" role="status" aria-live="polite"></div>
       </form>
     </div>
   </div>
@@ -217,7 +219,14 @@ let submittedContent = savedContent;
 function updateDirtyState() {
   document.getElementById('editor-dirty').classList.toggle('hidden', editorTextarea.value === savedContent);
 }
-editorTextarea.addEventListener('input', updateDirtyState);
+editorTextarea.addEventListener('input', () => {
+  updateDirtyState();
+  const result = document.getElementById('edit-result');
+  if (result.dataset.diagnostic === 'true') {
+    result.textContent = 'Draft changed since the last check. Validate again for current results.';
+    result.dataset.diagnostic = 'stale';
+  }
+});
 window.addEventListener('beforeunload', (event) => {
   if (editorTextarea.value !== savedContent) {
     event.preventDefault();
@@ -231,6 +240,10 @@ editorForm.addEventListener('htmx:beforeOnLoad', (event) => {
   if (event.target === editorForm && event.detail.xhr.status >= 200 && event.detail.xhr.status < 300 && event.detail.xhr.getResponseHeader('HX-Redirect')) {
     savedContent = submittedContent;
     updateDirtyState();
+    if (editorTextarea.value !== submittedContent) {
+      event.preventDefault();
+      document.getElementById('edit-result').textContent = 'Earlier content saved. Newer changes are still unsaved.';
+    }
   }
 });
 
@@ -273,20 +286,48 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// Format button: on success update CM view (and keep textarea in sync); on error show in result area.
-document.getElementById('fmt-btn').addEventListener('htmx:afterRequest', function(e) {
-  if (e.detail.successful) {
-    const text = e.detail.xhr.responseText;
-    document.getElementById('pkl-editor').value = text;
-    updateDirtyState();
-    if (window._pklView) {
-      window._pklView.dispatch({
-        changes: { from: 0, to: window._pklView.state.doc.length, insert: text },
-      });
+// Keep requests tied to the exact draft that was submitted.
+for (const [id, label] of [['validate-btn', 'Validating'], ['fmt-btn', 'Formatting']]) {
+  const button = document.getElementById(id);
+  let requestedContent;
+  button.addEventListener('htmx:beforeRequest', () => {
+    requestedContent = editorTextarea.value;
+    button.disabled = true;
+    document.getElementById('edit-result').textContent = label + ' draft…';
+  });
+  button.addEventListener('htmx:beforeOnLoad', event => {
+    // Formatted source is data, not HTMX markup (including out-of-band swaps).
+    if (id === 'fmt-btn') {
+      event.preventDefault();
+    } else if (editorTextarea.value !== requestedContent) {
+      event.preventDefault();
+      document.getElementById('edit-result').textContent = 'Draft changed during validation. Validate again for current results.';
     }
-  } else {
-    document.getElementById('edit-result').innerHTML = e.detail.xhr.responseText;
-  }
-});
+  });
+  button.addEventListener('htmx:afterRequest', event => {
+    button.disabled = false;
+    const result = document.getElementById('edit-result');
+    if (id === 'validate-btn') {
+      result.dataset.diagnostic = editorTextarea.value === requestedContent ? 'true' : 'stale';
+      if (editorTextarea.value !== requestedContent) result.textContent = 'Draft changed during validation. Validate again for current results.';
+      else if (!event.detail.successful) result.textContent = 'Validation request failed. No validation result is available.';
+      return;
+    }
+    if (event.detail.xhr.status < 200 || event.detail.xhr.status >= 300) {
+      result.textContent = 'Formatting failed: ' + (event.detail.xhr.responseText || 'No details available.');
+    } else if (editorTextarea.value !== requestedContent) {
+      result.textContent = 'Draft changed during formatting. Formatted output was not applied.';
+    } else {
+      const text = event.detail.xhr.responseText;
+      if (window._pklView) {
+        window._pklView.dispatch({ changes: { from: 0, to: window._pklView.state.doc.length, insert: text } });
+      } else {
+        editorTextarea.value = text;
+        editorTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      result.textContent = 'Formatting applied to draft. Save to keep changes.';
+    }
+  });
+}
 </script>
 {{end}}

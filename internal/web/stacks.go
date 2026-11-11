@@ -248,46 +248,61 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", "Stack not found")
 		return
 	}
-	_ = r.ParseForm()
-	content := r.FormValue("pkl_content")
-	if content != "" {
-		// Validate in-memory content (e.g. from the editor before saving).
-		if err := h.agent.Dill().ValidateContent(r.Context(), stack.PklPath, content); err != nil {
-			h.renderAlert(w, "error", err.Error())
-			return
-		}
-	} else {
-		// Validate the file on disk.
-		if err := h.agent.Dill().Validate(r.Context(), stack.PklPath); err != nil {
-			h.renderAlert(w, "error", err.Error())
-			return
-		}
+	if err := r.ParseForm(); err != nil {
+		h.renderAlert(w, "error", "Invalid form data")
+		return
 	}
-	h.renderAlert(w, "success", "Valid ✓")
+	content, submitted := r.Form["pkl_content"]
+	if submitted {
+		path := stack.PklPath
+		if filename := r.FormValue("active_file"); filename != "" {
+			if _, err := h.store.ReadFile(name, filename); err != nil {
+				h.renderAlert(w, "error", err.Error())
+				return
+			}
+			path = filepath.Join(filepath.Dir(stack.PklPath), filename)
+		}
+		if err := h.agent.Dill().ValidateContent(r.Context(), path, content[0]); err != nil {
+			h.renderAlert(w, "error", "Draft validation failed:\n"+err.Error())
+			return
+		}
+		h.renderAlert(w, "success", "Draft validated. Changes are not saved by validation.")
+		return
+	}
+	if err := h.agent.Dill().Validate(r.Context(), stack.PklPath); err != nil {
+		h.renderAlert(w, "error", "Saved entrypoint validation failed:\n"+err.Error())
+		return
+	}
+	h.renderAlert(w, "success", "Saved entrypoint validated.")
 }
 
 func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	stack, err := h.store.Get(name)
 	if err != nil {
-		h.renderAlert(w, "error", "Stack not found")
+		http.Error(w, "Stack not found", http.StatusNotFound)
 		return
 	}
-	_ = r.ParseForm()
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
 	activeFile := r.FormValue("active_file")
 	content := r.FormValue("pkl_content")
 
 	// Derive the path for context (PKL import resolution); content comes from the form.
 	formatPath := stack.PklPath
 	if activeFile != "" {
+		if _, err := h.store.ReadFile(name, activeFile); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
 		formatPath = filepath.Join(filepath.Dir(stack.PklPath), activeFile)
 	}
 
 	formatted, err := h.agent.Dill().Fmt(r.Context(), formatPath, content)
 	if err != nil {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusUnprocessableEntity)
-		fmt.Fprintf(w, `<div class="ui-notice ui-notice-error mt-3"><pre class="whitespace-pre-wrap font-mono text-sm break-words">%s</pre></div>`, htmlEscape(err.Error()))
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
