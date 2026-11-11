@@ -1,23 +1,23 @@
 {{range .}}
-<tr class="hover" id="image-{{.ID}}">
-  <td class="font-mono text-xs text-base-content/50">{{.ID}}</td>
+<tr class="hover:bg-raised/50" id="image-{{.ID}}">
+  <td class="font-mono text-xs text-muted">{{.ID}}</td>
   <td>
     {{range .Tags}}
-    <span class="badge badge-ghost badge-sm font-mono mr-1">{{.}}</span>
+    <span class="ui-status ui-status-neutral ui-status-sm font-mono mr-1">{{.}}</span>
     {{else}}
-    <span class="font-mono text-xs text-base-content/30">untagged</span>
+    <span class="font-mono text-xs text-dim">untagged</span>
     {{end}}
   </td>
-  <td class="font-mono text-xs text-base-content/60">{{formatBytes .Size}}</td>
-  <td class="font-mono text-xs text-base-content/60">{{.Created.Format "2006-01-02"}}</td>
+  <td class="font-mono text-xs text-muted">{{formatBytes .Size}}</td>
+  <td class="font-mono text-xs text-muted">{{.Created.Format "2006-01-02"}}</td>
   <td class="text-right">
-    <button class="btn btn-ghost btn-xs text-error"
+    <button class="ui-button ui-button-ghost ui-button-xs text-error"
       onclick="confirmAction('Remove image', 'Remove {{if .Tags}}{{index .Tags 0}}{{else}}{{.ID}}{{end}}?', () => removeImage('{{.ID}}'))"
     >Remove</button>
   </td>
 </tr>
 {{else}}
-<tr><td colspan="5" class="text-center py-12 text-base-content/30 font-mono text-sm">no images found</td></tr>
+<tr><td colspan="5" class="text-center py-12 text-dim font-mono text-sm">no images found</td></tr>
 {{end}}
 
 <script>

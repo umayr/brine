@@ -1,0 +1,202 @@
+/* Brine theme — editable source of truth, loaded directly before component CSS.
+   Variable changes need no CSS build; rebuild Go to update embedded assets.
+   Dark/light and accent selectors
+   are set by theme.js; semantic status colors never refer to the accent.
+   Breakpoint conditions live in app.css/Tailwind because native media queries
+   cannot consume custom properties. Font/SVG paths are vendored local assets. */
+@font-face { font-family: "IBM Plex Mono"; src: url("/static/fonts/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("/static/fonts/IBMPlexMono-Medium.ttf") format("truetype"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("/static/fonts/IBMPlexMono-SemiBold.ttf") format("truetype"); font-weight: 600; font-display: swap; }
+
+:root {
+  color-scheme: dark;
+  --color-bg: #000000;
+  --color-panel: #171717;
+  --color-raised: #222222;
+  --color-line: #333333;
+  --color-text: #ededed;
+  --color-muted: #a3a3a3;
+  --color-dim: #8a8a8a;
+  --accent-sage: #a8d5ac;
+  --accent-glacier: #9cc9e3;
+  --accent-lilac: #c5b5e4;
+  --accent-sand: #dec69b;
+  --accent-rose: #dbb0aa;
+  --accent-graphite: #d2d8d4;
+  /* Set a fixed color here to override every palette, or keep this reference
+     so the appearance selector chooses among the palette variables below. */
+  --color-accent: var(--selected-accent, var(--accent-sage));
+  --color-accent-contrast: #111111;
+  --status-success: #a8d5ac;
+  --status-warning: #d7be84;
+  --status-error: #e6a49c;
+  --status-info: #b2bfd4;
+  --status-neutral: var(--color-muted);
+  --status-fill: 10%;
+  --status-outline: 45%;
+  --status-icon-size: 0.875rem;
+  --symbol-success: url("/static/icons/circle-check.svg");
+  --symbol-warning: url("/static/icons/triangle-alert.svg");
+  --symbol-error: url("/static/icons/circle-x.svg");
+  --symbol-info: url("/static/icons/info.svg");
+  --symbol-neutral: url("/static/icons/circle-minus.svg");
+  --symbol-unknown: url("/static/icons/circle-help.svg");
+  --symbol-running: url("/static/icons/loader-circle.svg");
+  --symbol-queued: url("/static/icons/clock-3.svg");
+
+  --font-family: "IBM Plex Mono", ui-monospace, monospace;
+  --font-family-code: var(--font-family);
+  --font-size-root: 16px;
+  --font-size-xs: 0.6875rem;
+  --font-size-sm: 0.75rem;
+  --font-size-base: 0.8125rem;
+  --font-size-lg: 0.9375rem;
+  --font-size-xl: 1.125rem;
+  --font-size-2xl: 1.625rem;
+  --font-size-3xl: 1.875rem;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --line-height: 1.65;
+  --line-height-heading: 1.35;
+  --tracking-heading: -0.04em;
+  --tracking-label: 0.05em;
+
+  --space-0-5: 0.125rem;
+  --space-1: 0.25rem;
+  --space-1-5: 0.375rem;
+  --space-2: 0.5rem;
+  --space-2-5: 0.625rem;
+  --space-3: 0.75rem;
+  --space-3-5: 0.875rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-7: 1.75rem;
+  --space-8: 2rem;
+  --space-9: 2.25rem;
+  --space-10: 2.5rem;
+  --space-11: 2.75rem;
+  --space-12: 3rem;
+  --space-14: 3.5rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --space-24: 6rem;
+  --space-28: 7rem;
+  --space-32: 8rem;
+  --space-40: 10rem;
+  --space-48: 12rem;
+  --space-52: 13rem;
+  --space-56: 14rem;
+  --space-64: 16rem;
+  --space-72: 18rem;
+  --space-80: 20rem;
+  --space-96: 24rem;
+
+  --radius-sm: 0.1875rem;
+  --radius-control: 0.25rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.3125rem;
+  --radius-xl: 0.4375rem;
+  --radius-panel: 0.3125rem;
+  --radius-dialog: 0.4375rem;
+  --border-width: 1px;
+  --border-emphasis: 2px;
+  --focus-width: 2px;
+  --focus-offset: 3px;
+  --disabled-opacity: 0.45;
+  --control-height: 2.25rem;
+  --control-height-sm: 2rem;
+  --control-height-xs: 1.75rem;
+  --control-padding-x: var(--space-3-5);
+  --icon-size: 1.125rem;
+  --icon-stroke: 1.6;
+
+  --sidebar-width: 13.625rem;
+  --header-height: 4.375rem;
+  --content-padding: var(--space-12);
+  --content-padding-mobile: var(--space-4);
+  --table-padding-x: var(--space-4);
+  --table-padding-y: var(--space-4);
+  --table-padding-y-sm: var(--space-2-5);
+  --table-padding-y-compact: var(--space-2);
+  --table-padding-y-sm-compact: var(--space-1-5);
+  --appearance-accent-min-width: 9rem;
+  --appearance-accent-min-height: 6.5rem;
+  --appearance-swatch-size: 1.625rem;
+  --appearance-preview-min-width: 12rem;
+  --appearance-status-preview-width: 26rem;
+  --login-width: 25rem;
+  --appearance-control-max-width: 9rem;
+  --toast-width: 28rem;
+  --control-hover-mix: 88%;
+  --table-hover-fill: 3%;
+  --dialog-width: 32.5rem;
+  --dialog-gutter: var(--space-8);
+  --dialog-padding: var(--space-6);
+  --backdrop: #000000bd;
+  --shadow-panel: 0 0 #0000;
+  --shadow-dialog: 0 24px 80px #0008;
+  --shadow-toast: 0 12px 40px #0006;
+  --layer-header: 20;
+  --layer-dialog: 50;
+  --layer-toast: 60;
+  --spinner-duration: 900ms;
+  --toast-duration: 4000ms;
+
+  --editor-bg: var(--color-bg);
+  --editor-text: var(--color-text);
+  --editor-muted: var(--color-dim);
+  --editor-border: var(--color-line);
+  --editor-min-height: 28rem;
+  --editor-new-min-height: 24rem;
+  --editor-edit-min-height: 30rem;
+  --editor-snippet-min-height: 18rem;
+  --editor-active-line: color-mix(in srgb, var(--color-text) 5%, transparent);
+  --editor-selection: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  --editor-snippet: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  --syntax-comment: #8a8a8a;
+  --syntax-keyword: #c5b5e4;
+  --syntax-string: #a8d5ac;
+  --syntax-number: #dec69b;
+  --syntax-type: #9cc9e3;
+  --syntax-annotation: #dbb0aa;
+  --syntax-punctuation: #a3a3a3;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-bg: #fafafa;
+  --color-panel: #ffffff;
+  --color-raised: #f0f0f0;
+  --color-line: #d4d4d4;
+  --color-text: #171717;
+  --color-muted: #525252;
+  --color-dim: #616161;
+  --accent-sage: #28683c;
+  --accent-glacier: #1e6090;
+  --accent-lilac: #6950a0;
+  --accent-sand: #70551b;
+  --accent-rose: #943f54;
+  --accent-graphite: #44484b;
+  --color-accent-contrast: #ffffff;
+  --status-success: #23683f;
+  --status-warning: #805500;
+  --status-error: #a93134;
+  --status-info: #3b5575;
+  --backdrop: #00000088;
+  --syntax-comment: #616161;
+  --syntax-keyword: #6950a0;
+  --syntax-string: #28683c;
+  --syntax-number: #70551b;
+  --syntax-type: #1e6090;
+  --syntax-annotation: #943f54;
+  --syntax-punctuation: #525252;
+}
+
+:root[data-accent="sage"] { --selected-accent: var(--accent-sage); }
+:root[data-accent="glacier"] { --selected-accent: var(--accent-glacier); }
+:root[data-accent="lilac"] { --selected-accent: var(--accent-lilac); }
+:root[data-accent="sand"] { --selected-accent: var(--accent-sand); }
+:root[data-accent="rose"] { --selected-accent: var(--accent-rose); }
+:root[data-accent="graphite"] { --selected-accent: var(--accent-graphite); }

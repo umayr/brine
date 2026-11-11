@@ -481,50 +481,29 @@ func writeJSONError(w http.ResponseWriter, status int, msg string) {
 }
 
 var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
-<html lang="en" data-theme="night">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sign in · Brine</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         background: #14161b; color: #e7e9ee; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .card { width: 100%; max-width: 22rem; padding: 2rem; border: 1px solid #2d3138; border-radius: 0.75rem;
-          background: #1a1d23; box-shadow: 0 24px 60px rgba(0,0,0,.45); }
-  .brand { display: flex; align-items: center; gap: .6rem; margin-bottom: 1.5rem; }
-  .dot { width: 1.9rem; height: 1.9rem; border-radius: .55rem; background: #8b5cf6;
-         display: flex; align-items: center; justify-content: center; font-weight: 700; }
-  h1 { font-size: 1rem; margin: 0; letter-spacing: -.01em; }
-  label { display: block; font-size: .75rem; text-transform: uppercase; letter-spacing: .07em;
-          color: #8b929e; margin: 0 0 .4rem; font-weight: 600; }
-  input { width: 100%; padding: .6rem .7rem; margin-bottom: 1rem; border-radius: .45rem;
-          border: 1px solid #333842; background: #14161b; color: #e7e9ee; font-size: .9rem; }
-  input:focus { outline: 2px solid #8b5cf6; outline-offset: 1px; border-color: transparent; }
-  button { width: 100%; padding: .65rem; border: 0; border-radius: .45rem; background: #8b5cf6;
-           color: #fff; font-weight: 600; font-size: .9rem; cursor: pointer; }
-  button:hover { background: #7c4deb; }
-  .err { margin: 0 0 1rem; padding: .6rem .7rem; border-radius: .45rem;
-         background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.35); color: #fca5a5; font-size: .8rem; }
-  .hint { margin-top: 1.25rem; font-size: .72rem; color: #6b7280; line-height: 1.5; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-</style>
+<script src="/static/theme.js"></script>
+<link href="/static/theme.css" rel="stylesheet">
+<link href="/static/vendor/app.css" rel="stylesheet">
 </head>
-<body>
-  <form class="card" method="post" action="/login">
-    <div class="brand">
-      <div class="dot">B</div>
+<body class="login-page">
+  <form class="login-card" method="post" action="/login">
+    <div class="login-brand">
+      <div class="login-dot">B</div>
       <h1>Sign in to Brine</h1>
     </div>
-    {{if .Error}}<p class="err">{{.Error}}</p>{{end}}
+    {{if .Error}}<p class="login-error" role="alert">{{.Error}}</p>{{end}}
     <input type="hidden" name="next" value="{{.Next}}">
     <label for="user">Username</label>
     <input id="user" name="user" autocomplete="username" autofocus required value="{{.User}}">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <button type="submit">Sign in</button>
-    <p class="hint">First run? Credentials are in <span class="mono">~/.brine/credentials.json</span> (or were printed at startup).</p>
+    <p class="login-hint">First run? Credentials are in <span class="mono">~/.brine/credentials.json</span> (or were printed at startup).</p>
   </form>
 </body>
 </html>

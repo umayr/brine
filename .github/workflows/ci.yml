@@ -26,6 +26,8 @@ jobs:
         run: |
           npm ci
           npm run build:web
+      - name: Component contracts
+        run: npm run test:components
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)

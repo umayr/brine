@@ -25,6 +25,8 @@ it talks to the container engine directly for container and image views.
 - **Containers**: list, inspect, start/stop/restart, and stream logs over SSE.
 - **Images**: list, pull, and remove.
 - **Recipes**: reusable Pkl snippets available in the editor.
+- **Appearance settings**: browser-local theme, accent and table density, with live previews
+  and reset under Settings → Appearance (`/settings`).
 - **Auth**: single-admin login with sessions, CSRF protection, and a bearer token for API clients.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
@@ -235,6 +237,11 @@ make run          # build web assets + binary, run with --dev
 make test
 make test-race
 make vet
+
+# Standalone component contracts (no engine or Dill required)
+npm ci
+npm run build:web
+npm run test:components
 ```
 
 Run `--dev` from the repository root to read `internal/web/templates/` and
@@ -242,6 +249,15 @@ Run `--dev` from the repository root to read `internal/web/templates/` and
 rerun `npm run build:web` after changing frontend sources in `internal/web/assets/`.
 Use only a trusted local source tree: development file serving follows symlinks.
 Without `--dev`, templates and static assets remain embedded in the binary.
+
+The production component layer is Brine-owned; Tailwind supplies utilities, with no
+DaisyUI dependency. Customize the plain CSS variables in
+`internal/web/static/theme.css` (no Tailwind rebuild for variable-only edits).
+Static assets are embedded in release binaries, so shipping theme changes requires
+rebuilding the Go binary. Rebuild web assets after changing
+`internal/web/assets/` or the Tailwind configuration. See
+[the component and theme contract](docs/ui-components.md) for classes, palettes,
+status semantics, editor variables and checks.
 
 Layout:
 

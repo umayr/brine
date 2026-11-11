@@ -2,17 +2,17 @@
 
 {{define "title"}}{{.Stack.Name}} — Brine{{end}}
 {{define "header"}}
-<div class="flex items-center gap-2 text-base-content/60">
-  <a href="/stacks" class="hover:text-base-content transition-colors">Stacks</a>
-  <span class="text-base-content/30">/</span>
-  <span class="font-mono text-base-content">{{.Stack.Name}}</span>
-  {{if .Stack.Git}}<span class="badge badge-ghost badge-sm gap-1 font-normal"><i data-lucide="git-branch" class="w-3 h-3"></i>git</span>{{end}}
+<div class="flex items-center gap-2 text-muted">
+  <a href="/stacks" class="hover:text-foreground transition-colors">Stacks</a>
+  <span class="text-dim">/</span>
+  <span class="font-mono text-foreground">{{.Stack.Name}}</span>
+  {{if .Stack.Git}}<span class="ui-status ui-status-neutral ui-status-sm gap-1 font-normal"><i data-lucide="git-branch" class="w-3 h-3"></i>git</span>{{end}}
 </div>
 {{end}}
 
 {{define "header-actions"}}
 {{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
-<a href="/stacks/{{.Stack.Name}}/edit" class="btn btn-ghost btn-sm gap-1.5">
+<a href="/stacks/{{.Stack.Name}}/edit" class="ui-button ui-button-ghost ui-button-sm gap-1.5">
   <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
   Edit
 </a>
@@ -23,9 +23,9 @@
 <div class="space-y-4">
 
   <!-- Action bar -->
-  <div class="bg-base-100 rounded-box shadow-sm px-4 py-3 flex flex-wrap items-center gap-1.5">
+  <div class="ui-panel px-4 py-3 flex flex-wrap items-center gap-1.5">
     <!-- Primary action -->
-    <button class="btn btn-primary btn-sm gap-1.5" data-stack-action
+    <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
       onclick="runAction('up', '{{.Stack.Name}}')"
       {{if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
@@ -34,29 +34,29 @@
     </button>
 
     <!-- Lifecycle -->
-    <div class="flex items-center gap-1 border-l border-base-300 pl-1.5 ml-0.5">
-      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Stop containers and remove them"
+    <div class="flex items-center gap-1 border-l border-line pl-1.5 ml-0.5">
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Stop containers and remove them"
         onclick="confirmAction('Run down', 'Stop and remove containers for {{.Stack.Name}}?', () => runAction('down', '{{.Stack.Name}}'))"
         {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="square" class="w-3.5 h-3.5"></i>
         Down
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Pause containers"
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Pause containers"
         onclick="runAction('stop', '{{.Stack.Name}}')"
         {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="pause" class="w-3.5 h-3.5"></i>
         Stop
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action title="Start stopped containers"
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Start stopped containers"
         onclick="runAction('start', '{{.Stack.Name}}')"
         {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="play" class="w-3.5 h-3.5"></i>
         Start
       </button>
-      <button class="btn btn-ghost btn-sm gap-1.5" data-stack-action
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action
         onclick="runAction('restart', '{{.Stack.Name}}')"
         {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
@@ -66,8 +66,8 @@
     </div>
 
     <!-- Plan -->
-    <div class="border-l border-base-300 pl-1.5 ml-0.5">
-      <button class="btn btn-ghost btn-sm gap-1.5"
+    <div class="border-l border-line pl-1.5 ml-0.5">
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5"
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
@@ -80,14 +80,14 @@
 
     <!-- Danger zone -->
     <div class="flex items-center gap-1.5 ml-auto">
-      <div id="action-status" class="hidden badge badge-ghost badge-sm font-mono mr-1">idle</div>
-      <button class="btn btn-sm btn-outline btn-error gap-1.5" data-stack-action
+      <div id="action-status" role="status" aria-live="polite" class="hidden ui-status ui-status-neutral ui-status-sm font-mono mr-1">idle</div>
+      <button class="ui-button ui-button-sm ui-button-outline ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Teardown stack', 'This removes containers, images, volumes, and networks for {{.Stack.Name}}.', '{{.Stack.Name}}', () => runAction('teardown', '{{.Stack.Name}}'))"
       >
         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
         Teardown
       </button>
-      <button class="btn btn-sm btn-error gap-1.5" data-stack-action
+      <button class="ui-button ui-button-sm ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Delete stack', 'Remove {{.Stack.Name}} from Brine? Its containers will be stopped and removed.', '{{.Stack.Name}}', () => deleteStack('{{.Stack.Name}}', true))"
       >
         <i data-lucide="x" class="w-3.5 h-3.5"></i>
@@ -97,8 +97,7 @@
   </div>
 
   {{if .EngineAlignment.HasWarning}}
-  <div class="alert alert-warning rounded-box shadow-sm items-start">
-    <i data-lucide="triangle-alert" class="w-4 h-4 mt-0.5"></i>
+  <div class="ui-notice ui-notice-warning rounded-panel shadow-sm items-start">
     <div>
       <div class="font-semibold">Engine mismatch</div>
       <div class="text-sm">{{.EngineAlignment.Warning}} Lifecycle actions are disabled until the file matches the runtime engine.</div>
@@ -107,7 +106,7 @@
   {{end}}
 
   <!-- Meta -->
-  <div class="bg-base-100 rounded-box shadow-sm divide-x divide-base-200 flex">
+  <div class="stack-metadata ui-panel divide-x divide-line flex">
     <div class="flex-1 px-5 py-4">
       <div class="field-label mb-1">Runtime engine</div>
       <div class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</div>
@@ -134,11 +133,11 @@
   <div id="plan-result"></div>
 
   <!-- Action output terminal -->
-  <div id="action-output" class="hidden rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
+  <div id="action-output" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
       <span id="action-title" class="font-mono text-xs">output</span>
-      <button onclick="document.getElementById('action-output').classList.add('hidden')"
-        class="text-xs text-gray-500 hover:text-gray-300 transition-colors">
+      <button aria-label="Close action output" onclick="document.getElementById('action-output').classList.add('hidden')"
+        class="text-xs text-muted hover:text-muted transition-colors">
         <i data-lucide="x" class="w-3.5 h-3.5"></i>
       </button>
     </div>
@@ -146,14 +145,14 @@
   </div>
 
   <!-- Containers in this stack -->
-  <div class="bg-base-100 rounded-box shadow-sm">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+  <div class="ui-panel">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
       <h2 class="font-semibold">Containers</h2>
       <button
         hx-get="/web/stacks/{{.Stack.Name}}/containers"
         hx-target="#stack-containers"
         hx-swap="innerHTML"
-        class="btn btn-ghost btn-xs gap-1.5"
+        class="ui-button ui-button-ghost ui-button-xs gap-1.5"
         id="stack-containers-refresh"
       >
         <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
@@ -165,39 +164,39 @@
       hx-trigger="load, every 5s"
       hx-swap="innerHTML"
     >
-      <div class="px-5 py-6 text-center text-base-content/40">
-        <span class="loading loading-spinner loading-sm"></span>
+      <div class="px-5 py-6 text-center text-dim">
+        <span class="ui-spinner ui-spinner-sm"></span>
       </div>
     </div>
   </div>
 
   <!-- Git source panel (shown only for git-backed stacks) -->
   {{if .Stack.Git}}
-  <div class="bg-base-100 rounded-box shadow-sm">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-base-200">
+  <div class="ui-panel">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
       <div class="flex items-center gap-2">
-        <i data-lucide="git-branch" class="w-4 h-4 text-base-content/50"></i>
+        <i data-lucide="git-branch" class="w-4 h-4 text-muted"></i>
         <h2 class="font-semibold">Git source</h2>
         {{if .Stack.Git.ReadOnly}}
-        <span class="badge badge-warning badge-sm">read-only</span>
+        <span class="ui-status ui-status-warning ui-status-sm">read-only</span>
         {{end}}
         {{if .Stack.Git.AutoDeploy}}
-        <span class="badge badge-primary badge-sm">auto-deploy</span>
+        <span class="ui-status ui-status-info ui-status-sm">auto-deploy</span>
         {{end}}
       </div>
       <div class="flex items-center gap-2">
-        <button class="btn btn-ghost btn-xs gap-1.5"
+        <button class="ui-button ui-button-ghost ui-button-xs gap-1.5"
           hx-post="/web/stacks/{{.Stack.Name}}/git/pull"
           hx-target="#git-result"
           hx-swap="innerHTML"
           hx-indicator="#git-spinner"
         >
-          <span id="git-spinner" class="htmx-indicator loading loading-spinner loading-xs"></span>
+          <span id="git-spinner" class="htmx-indicator ui-spinner ui-spinner-xs"></span>
           <i data-lucide="download" class="w-3.5 h-3.5"></i>
           Pull latest
         </button>
         {{if not .Stack.Git.ReadOnly}}
-        <button class="btn btn-ghost btn-xs gap-1.5"
+        <button class="ui-button ui-button-ghost ui-button-xs gap-1.5"
           onclick="document.getElementById('push-modal').showModal()"
         >
           <i data-lucide="upload" class="w-3.5 h-3.5"></i>
@@ -209,7 +208,7 @@
     <div class="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
       <div>
         <div class="field-label mb-1">URL</div>
-        <div class="font-mono text-xs truncate text-base-content/80">{{.Stack.Git.URL}}</div>
+        <div class="font-mono text-xs truncate text-muted">{{.Stack.Git.URL}}</div>
       </div>
       <div>
         <div class="field-label mb-1">Branch</div>
@@ -230,20 +229,19 @@
       {{if .Stack.Git.LastCommit}}
       <div>
         <div class="field-label mb-1">Last commit</div>
-        <div class="font-mono text-xs text-base-content/70">{{.Stack.Git.LastCommit}}</div>
+        <div class="font-mono text-xs text-muted">{{.Stack.Git.LastCommit}}</div>
       </div>
       {{end}}
       {{if .Stack.Git.LastSyncAt}}
       <div>
         <div class="field-label mb-1">Last synced</div>
-        <div class="font-mono text-xs text-base-content/70">{{.Stack.Git.LastSyncAt.Format "2006-01-02 15:04:05"}}</div>
+        <div class="font-mono text-xs text-muted">{{.Stack.Git.LastSyncAt.Format "2006-01-02 15:04:05"}}</div>
       </div>
       {{end}}
     </div>
     {{if .Stack.Git.SyncError}}
     <div class="px-5 pb-4">
-      <div class="alert alert-error alert-sm text-xs">
-        <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+      <div class="ui-notice ui-notice-error ui-notice-sm text-xs">
         {{.Stack.Git.SyncError}}
       </div>
     </div>
@@ -251,9 +249,9 @@
     <div id="git-result" class="px-5 pb-4"></div>
 
     <!-- Git settings form -->
-    <div class="border-t border-base-200 px-5 py-4">
+    <div class="border-t border-line px-5 py-4">
       <details class="group">
-        <summary class="text-xs text-base-content/50 cursor-pointer hover:text-base-content list-none flex items-center gap-1">
+        <summary class="text-xs text-muted cursor-pointer hover:text-foreground list-none flex items-center gap-1">
           <i data-lucide="settings" class="w-3 h-3"></i>
           Settings
           <i data-lucide="chevron-down" class="w-3 h-3 group-open:rotate-180 transition-transform"></i>
@@ -264,36 +262,36 @@
           hx-swap="innerHTML"
           class="mt-4 grid grid-cols-2 gap-4"
         >
-          <div class="form-control">
-            <label class="label"><span class="label-text text-xs">Branch</span></label>
-            <input type="text" name="git_branch" class="input input-bordered input-sm font-mono"
+          <div class="ui-field">
+            <label class="ui-label"><span class="ui-label-text text-xs">Branch</span></label>
+            <input type="text" name="git_branch" class="ui-input ui-input-sm font-mono"
               value="{{.Stack.Git.Branch}}" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text text-xs">Folder</span></label>
-            <input type="text" name="git_folder" class="input input-bordered input-sm font-mono"
+          <div class="ui-field">
+            <label class="ui-label"><span class="ui-label-text text-xs">Folder</span></label>
+            <input type="text" name="git_folder" class="ui-input ui-input-sm font-mono"
               value="{{.Stack.Git.Folder}}" placeholder="optional" />
           </div>
-          <div class="form-control">
-            <label class="label"><span class="label-text text-xs">Poll interval</span></label>
-            <input type="text" name="git_poll_interval" class="input input-bordered input-sm font-mono"
+          <div class="ui-field">
+            <label class="ui-label"><span class="ui-label-text text-xs">Poll interval</span></label>
+            <input type="text" name="git_poll_interval" class="ui-input ui-input-sm font-mono"
               value="{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}"
               placeholder="5m" />
           </div>
           <div class="col-span-2 space-y-2">
             <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" name="git_read_only" class="checkbox checkbox-warning checkbox-sm"
+              <input type="checkbox" name="git_read_only" class="ui-checkbox ui-checkbox-warning ui-checkbox-sm"
                 {{if .Stack.Git.ReadOnly}}checked{{end}} />
-              <span class="label-text text-xs">Read-only — disable editor and push</span>
+              <span class="ui-label-text text-xs">Read-only — disable editor and push</span>
             </label>
             <label class="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" name="git_auto_deploy" class="checkbox checkbox-primary checkbox-sm"
+              <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent ui-checkbox-sm"
                 {{if .Stack.Git.AutoDeploy}}checked{{end}} />
-              <span class="label-text text-xs">Auto-deploy on new commits</span>
+              <span class="ui-label-text text-xs">Auto-deploy on new commits</span>
             </label>
           </div>
           <div class="col-span-2">
-            <button type="submit" class="btn btn-sm btn-primary">Save settings</button>
+            <button type="submit" class="ui-button ui-button-sm ui-button-primary">Save settings</button>
           </div>
         </form>
       </details>
@@ -302,7 +300,7 @@
   {{end}}
 
   <!-- PKL source -->
-  <div class="rounded-box overflow-hidden shadow-sm" style="border: 1px solid #30363d;">
+  <div class="rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-2 py-1.5">
       <div class="flex items-center gap-0.5 overflow-x-auto">
         {{range .Files}}
@@ -310,17 +308,17 @@
           class="pk-tab px-3 py-1 text-xs font-mono rounded transition-colors whitespace-nowrap"
           data-file="{{.}}"
           onclick="pkSwitchTab(this)"
-        >{{if eq . $.Stack.Entrypoint}}<span class="w-1.5 h-1.5 rounded-full bg-primary/70 inline-block mr-1 mb-0.5"></span>{{end}}{{.}}</button>
+        >{{if eq . $.Stack.Entrypoint}}<span class="w-1.5 h-1.5 rounded-full bg-accent/70 inline-block mr-1 mb-0.5"></span>{{end}}{{.}}</button>
         {{end}}
       </div>
       {{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
-      <a href="/stacks/{{.Stack.Name}}/edit" class="shrink-0 text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1 ml-2">
+      <a href="/stacks/{{.Stack.Name}}/edit" class="shrink-0 text-xs text-muted hover:text-muted transition-colors flex items-center gap-1 ml-2">
         <i data-lucide="pencil" class="w-3 h-3"></i> edit
       </a>
       {{end}}
     </div>
     {{range .Files}}
-    <pre class="pk-panel terminal p-4 overflow-x-auto language-pkl {{if ne . $.ActiveFile}}hidden{{end}}" data-file="{{.}}" style="min-height: 4rem;"><code class="language-pkl">{{index $.FileContents .}}</code></pre>
+    <pre class="pk-panel terminal p-4 overflow-x-auto language-pkl {{if ne . $.ActiveFile}}hidden{{end}}" data-file="{{.}}" style="min-height: var(--space-16);"><code class="language-pkl">{{index $.FileContents .}}</code></pre>
     {{end}}
   </div>
 
@@ -329,8 +327,8 @@
     const file = btn.dataset.file;
     document.querySelectorAll('.pk-tab').forEach(t => {
       const active = t.dataset.file === file;
-      t.style.background = active ? 'rgba(255,255,255,0.06)' : '';
-      t.style.color = active ? '#c9d1d9' : '#6e7681';
+      t.classList.toggle('bg-foreground/5', active);
+      t.style.color = active ? 'var(--editor-text)' : 'var(--editor-muted)';
     });
     document.querySelectorAll('.pk-panel').forEach(p => {
       p.classList.toggle('hidden', p.dataset.file !== file);
@@ -345,21 +343,21 @@
 </div>
 
 <!-- Push modal -->
-<dialog id="push-modal" class="modal">
-  <div class="modal-box">
-    <h3 class="font-bold text-lg">Push changes</h3>
-    <p class="text-sm text-base-content/60 mt-1 mb-4">Commit all local edits and push to <span class="font-mono">{{if .Stack.Git}}{{.Stack.Git.Branch}}{{end}}</span>.</p>
-    <div class="form-control mb-4">
-      <label class="label"><span class="label-text">Commit message</span></label>
-      <input type="text" id="push-message" class="input input-bordered"
+<dialog id="push-modal" class="ui-dialog" aria-labelledby="push-modal-title">
+  <div class="ui-dialog-panel">
+    <h3 id="push-modal-title" class="font-bold text-lg">Push changes</h3>
+    <p class="text-sm text-muted mt-1 mb-4">Commit all local edits and push to <span class="font-mono">{{if .Stack.Git}}{{.Stack.Git.Branch}}{{end}}</span>.</p>
+    <div class="ui-field mb-4">
+      <label class="ui-label" for="push-message"><span class="ui-label-text">Commit message</span></label>
+      <input type="text" id="push-message" class="ui-input "
         value="chore: update stack via brine" />
     </div>
-    <div class="modal-action">
-      <button class="btn btn-ghost" onclick="document.getElementById('push-modal').close()">Cancel</button>
-      <button class="btn btn-primary" onclick="doPush('{{.Stack.Name}}')">Push</button>
+    <div class="ui-dialog-actions">
+      <button class="ui-button ui-button-ghost" onclick="document.getElementById('push-modal').close()">Cancel</button>
+      <button class="ui-button ui-button-primary" onclick="doPush('{{.Stack.Name}}')">Push</button>
     </div>
   </div>
-  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+  <form method="dialog" class="ui-dialog-backdrop"><button aria-label="Close dialog">close</button></form>
 </dialog>
 
 <script>
@@ -406,9 +404,9 @@ async function runAction(action, name, method, body, contentType) {
   log.textContent = '';
   title.textContent = actionLabel(action) + ' ' + name + '...';
   status.textContent = 'running';
-  status.className = 'badge badge-info badge-sm font-mono mr-1';
+  status.className = 'ui-status ui-status-running ui-status-sm font-mono mr-1';
   status.classList.remove('hidden');
-  buttons.forEach(btn => btn.disabled = true);
+  buttons.forEach(btn => { btn.dataset.initiallyDisabled = String(btn.disabled); btn.disabled = true; });
 
   try {
     const res = await fetch(`/api/stacks/${name}/${action}`, {
@@ -423,28 +421,27 @@ async function runAction(action, name, method, body, contentType) {
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let sawError = false;
-    let sawDone = false;
+    const stream = BrineUI.createStreamStatus();
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, {stream: true});
-      if (chunk.includes('[brine:error]')) sawError = true;
-      if (chunk.includes('[brine:done]')) sawDone = true;
+      stream.push(chunk);
       log.textContent += chunk;
       log.scrollTop = log.scrollHeight;
     }
 
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
-    if (sawError || !sawDone) {
+    stream.push(decoder.decode());
+    if (stream.status.error || !stream.status.done) {
       title.textContent = `${action} failed after ${elapsed}s`;
       status.textContent = 'failed';
-      status.className = 'badge badge-error badge-sm font-mono mr-1';
+      status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
       showToast(`${action} failed`, 'error');
     } else {
       title.textContent = `${action} complete in ${elapsed}s`;
       status.textContent = 'complete';
-      status.className = 'badge badge-success badge-sm font-mono mr-1';
+      status.className = 'ui-status ui-status-success ui-status-sm font-mono mr-1';
       showToast(`${action} complete`, 'success');
       const refresh = document.getElementById('stack-containers-refresh');
       if (refresh) htmx.trigger(refresh, 'click');
@@ -456,10 +453,10 @@ async function runAction(action, name, method, body, contentType) {
     log.textContent += '\n[brine:error] ' + err.message + '\n';
     title.textContent = `${action} failed`;
     status.textContent = 'failed';
-    status.className = 'badge badge-error badge-sm font-mono mr-1';
+    status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
     showToast(`${action} failed`, 'error');
   } finally {
-    buttons.forEach(btn => btn.disabled = false);
+    buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true');
   }
 }
 
@@ -477,18 +474,6 @@ function actionLabel(action) {
 }
 </script>
 
-<style>
-/* PKL token colors — GitHub Dark palette on top of existing terminal background */
-.token.comment    { color: #8b949e; font-style: italic; }
-.token.keyword    { color: #ff7b72; }
-.token.string     { color: #a5d6ff; }
-.token.number,
-.token.boolean    { color: #79c0ff; }
-.token.class-name { color: #ffa657; }
-.token.annotation { color: #d2a8ff; }
-.token.punctuation{ color: #6e7681; }
-.token.operator   { color: #ff7b72; }
-</style>
 <script src="/static/vendor/prism.js"></script>
 <script>
 Prism.languages.pkl = {

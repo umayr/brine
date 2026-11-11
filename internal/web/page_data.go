@@ -33,9 +33,12 @@ func (p *pageData) setAuth(csrf, user string, enabled bool) {
 
 type dashboardData struct {
 	pageData
-	Stats      dashboardStats
-	Stacks     []*store.Stack
-	Containers []engine.ContainerInfo
+	Stats                 dashboardStats
+	Stacks                []*store.Stack
+	Containers            []engine.ContainerInfo
+	StacksUnavailable     bool
+	ContainersUnavailable bool
+	ImagesUnavailable     bool
 }
 
 type dashboardStats struct {
