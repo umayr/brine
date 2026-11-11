@@ -190,6 +190,7 @@
           hx-target="#git-result"
           hx-swap="innerHTML"
           hx-indicator="#git-spinner"
+          hx-on::after-request="htmx.trigger(document.body, 'git-refresh')"
         >
           <span id="git-spinner" class="htmx-indicator ui-spinner ui-spinner-xs"></span>
           <i data-lucide="download" class="w-3.5 h-3.5"></i>
@@ -226,8 +227,10 @@
         <div class="font-mono text-sm">{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}</div>
       </div>
       {{end}}
+      <div id="git-state-values" class="contents" hx-get="/stacks/{{.Stack.Name}}" hx-trigger="git-refresh from:body" hx-select="#git-state-values" hx-swap="outerHTML">
       <div><div class="field-label mb-1">Current revision</div><div class="font-mono text-xs">{{if .GitRevision}}{{.GitRevision}}{{else}}Unavailable{{end}}</div></div>
       <div><div class="field-label mb-1">Working tree</div><div class="font-mono text-xs">{{.GitState}}</div></div>
+      </div>
       {{if .Stack.Git.LastCommit}}
       <div>
         <div class="field-label mb-1">Last synced commit</div>
@@ -458,6 +461,7 @@ async function runAction(action, name, method, body, contentType) {
     status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
     showToast(`${action} failed`, 'error');
   } finally {
+    if (action === 'git/push') htmx.trigger(document.body, 'git-refresh');
     buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true');
   }
 }

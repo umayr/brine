@@ -87,7 +87,7 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 	changed, err := s.git.Pull(syncCtx, repoDir)
 	if err != nil {
 		syncTime := time.Now()
-		_ = s.store.UpdateGitStatus(name, stack.Git.LastCommit, err.Error(), syncTime)
+		_ = s.store.UpdateGitStatus(name, "", err.Error(), syncTime)
 		log.Printf("git syncer: pull %s: %v", name, err)
 		return
 	}

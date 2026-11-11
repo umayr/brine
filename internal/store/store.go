@@ -70,6 +70,7 @@ type StackStore interface {
 	CreateFromGit(name string, src *GitSource, entrypoint string) (*Stack, error)
 
 	// UpdateGitStatus records the result of the most recent git pull/sync.
+	// On failure (syncErr is nonempty), commit is ignored and the last successful commit is preserved.
 	UpdateGitStatus(name, commit, syncErr string, syncTime time.Time) error
 
 	// UpdateGitSource updates the mutable git configuration fields (branch, folder,

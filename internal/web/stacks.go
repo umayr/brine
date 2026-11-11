@@ -471,7 +471,7 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
 	if err != nil {
-		_ = h.store.UpdateGitStatus(name, stack.Git.LastCommit, err.Error(), time.Now())
+		_ = h.store.UpdateGitStatus(name, "", err.Error(), time.Now())
 		h.renderAlert(w, "error", "git pull: "+err.Error())
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Runner shells out to the system git binary.
@@ -120,8 +121,9 @@ func (r *Runner) runWriter(ctx context.Context, workDir string, w io.Writer, arg
 		cmd.Dir = workDir
 	}
 	var errBuf bytes.Buffer
-	cmd.Stdout = w
-	cmd.Stderr = io.MultiWriter(w, &errBuf)
+	output := &lockedWriter{w: w}
+	cmd.Stdout = output
+	cmd.Stderr = io.MultiWriter(output, &errBuf)
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(errBuf.String())
 		if msg == "" {
@@ -149,4 +151,16 @@ func (r *Runner) output(ctx context.Context, workDir string, args ...string) (st
 		return "", fmt.Errorf("git %s: %s", args[0], msg)
 	}
 	return out.String(), nil
+}
+
+// lockedWriter serializes stdout and stderr writes to the same output stream.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
 }

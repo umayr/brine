@@ -213,3 +213,25 @@ test('built CSS retains every authored component variant for dynamic Go/HTMX fra
     assert.ok(built.includes(selector), `missing ${selector}: rebuild assets and keep the full owned component API`);
   }
 });
+
+test('git actions refresh revision state and streamed push failure remains failed', async () => {
+  const template = read('internal/web/templates/stacks/detail.html');
+  assert.match(template, /hx-on::after-request="htmx\.trigger\(document\.body, 'git-refresh'\)"/);
+  assert.match(template, /id="git-state-values"[^>]*hx-trigger="git-refresh from:body"[^>]*hx-select="#git-state-values"/);
+  const script = template.slice(template.indexOf('async function runAction('), template.indexOf('</script>', template.indexOf('async function runAction(')));
+  for (const [marker, expected] of [['[brine:error] push failed', 'failed'], ['[brine:done] git push complete', 'complete']]) {
+    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status'].map(id => [id, {textContent: '', classList: {remove() {}}, scrollTop: 0, scrollHeight: 0}]));
+    const events = []; let readCount = 0;
+    const context = {
+      document: {body: {}, getElementById: id => elements[id] || null, querySelectorAll: () => []},
+      htmx: {trigger: (_, name) => events.push(name)},
+      fetch: async () => ({ok: true, body: {getReader: () => ({read: async () => readCount++ ? {done: true} : {done: false, value: new TextEncoder().encode(marker)}})}}),
+      BrineUI: require('../internal/web/static/ui.js'), brineHeaders: headers => headers,
+      showToast() {}, TextDecoder, Date,
+    };
+    vm.createContext(context); vm.runInContext(script, context);
+    await context.runAction('git/push', 'test', 'POST', '{}', 'application/json');
+    assert.equal(elements['action-status'].textContent, expected);
+    assert.ok(events.includes('git-refresh'));
+  }
+});
