@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,7 @@ import (
 //	{dataDir}/stacks/{name}/meta.json
 type FSStore struct {
 	dataDir string
+	mu      sync.RWMutex
 }
 
 // NewFSStore creates an FSStore rooted at dataDir, creating the stacks
@@ -100,6 +102,8 @@ func (s *FSStore) writeMeta(stack *Stack) error {
 }
 
 func (s *FSStore) List() ([]*Stack, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	entries, err := os.ReadDir(filepath.Join(s.dataDir, "stacks"))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -125,6 +129,8 @@ func (s *FSStore) List() ([]*Stack, error) {
 }
 
 func (s *FSStore) Get(name string) (*Stack, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	stack, err := s.readMeta(name)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -136,6 +142,8 @@ func (s *FSStore) Get(name string) (*Stack, error) {
 }
 
 func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return nil, err
 	}
@@ -166,6 +174,8 @@ func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
 }
 
 func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return nil, err
 	}
@@ -189,6 +199,8 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 }
 
 func (s *FSStore) Delete(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
@@ -199,6 +211,8 @@ func (s *FSStore) Delete(name string) error {
 }
 
 func (s *FSStore) ReadPkl(name string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := ValidateStackName(name); err != nil {
 		return "", err
 	}
@@ -216,6 +230,8 @@ func (s *FSStore) ReadPkl(name string) (string, error) {
 
 // Files returns all .pkl filenames within the stack's files directory.
 func (s *FSStore) Files(name string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := ValidateStackName(name); err != nil {
 		return nil, err
 	}
@@ -242,6 +258,8 @@ func (s *FSStore) Files(name string) ([]string, error) {
 
 // ReadFile returns the content of a specific .pkl file within a stack.
 func (s *FSStore) ReadFile(name, filename string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if err := ValidateStackName(name); err != nil {
 		return "", err
 	}
@@ -261,6 +279,8 @@ func (s *FSStore) ReadFile(name, filename string) (string, error) {
 
 // WriteFile creates or overwrites a .pkl file within a stack.
 func (s *FSStore) WriteFile(name, filename, content string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
@@ -283,6 +303,8 @@ func (s *FSStore) WriteFile(name, filename, content string) error {
 
 // DeleteFile removes a .pkl file from a stack. Returns an error if it is the entrypoint or read-only.
 func (s *FSStore) DeleteFile(name, filename string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
@@ -304,6 +326,8 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 
 // SetEntrypoint changes the entrypoint file for a stack.
 func (s *FSStore) SetEntrypoint(name, filename string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
@@ -330,6 +354,8 @@ func (s *FSStore) SetEntrypoint(name, filename string) error {
 // CreateFromGit registers a new git-backed stack. The repo must already
 // be cloned at {stackDir}/repo/ by the caller.
 func (s *FSStore) CreateFromGit(name string, src *GitSource, entrypoint string) (*Stack, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return nil, err
 	}
@@ -378,6 +404,8 @@ func (s *FSStore) CreateFromGit(name string, src *GitSource, entrypoint string) 
 
 // UpdateGitStatus records the result of the most recent git pull.
 func (s *FSStore) UpdateGitStatus(name, commit, syncErr string, syncTime time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
@@ -389,13 +417,17 @@ func (s *FSStore) UpdateGitStatus(name, commit, syncErr string, syncTime time.Ti
 		return fmt.Errorf("stack %q is not git-backed", name)
 	}
 	stack.Git.LastSyncAt = &syncTime
-	stack.Git.LastCommit = commit
+	if syncErr == "" {
+		stack.Git.LastCommit = commit
+	}
 	stack.Git.SyncError = syncErr
 	return s.writeMeta(stack)
 }
 
 // UpdateGitSource updates the mutable configuration fields of a git-backed stack.
 func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}

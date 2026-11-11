@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 )
 
 // Runner shells out to the system git binary.
@@ -39,6 +40,13 @@ func (r *Runner) Clone(ctx context.Context, url, branch, destDir string) error {
 // Pull fetches from origin and fast-forwards the current branch.
 // Returns true if the local HEAD changed (i.e. there were upstream commits).
 func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
+	dirty, err := r.HasChanges(ctx, repoDir)
+	if err != nil {
+		return false, fmt.Errorf("check working tree: %w", err)
+	}
+	if dirty {
+		return false, fmt.Errorf("pull blocked: uncommitted local changes; review and commit or discard them first")
+	}
 	before, err := r.HeadRef(ctx, repoDir)
 	if err != nil {
 		return false, fmt.Errorf("head ref before pull: %w", err)
@@ -53,12 +61,9 @@ func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
 	return before != after, nil
 }
 
-// Push stages all changes, commits with message, and pushes to origin.
+// Push commits explicitly staged changes and pushes to origin.
 // Output is written to w.
 func (r *Runner) Push(ctx context.Context, repoDir, message string, w io.Writer) error {
-	if err := r.runWriter(ctx, repoDir, w, "add", "-A"); err != nil {
-		return fmt.Errorf("git add: %w", err)
-	}
 	if err := r.runWriter(ctx, repoDir, w, "commit", "-m", message); err != nil {
 		return fmt.Errorf("git commit: %w", err)
 	}
@@ -116,8 +121,9 @@ func (r *Runner) runWriter(ctx context.Context, workDir string, w io.Writer, arg
 		cmd.Dir = workDir
 	}
 	var errBuf bytes.Buffer
-	cmd.Stdout = w
-	cmd.Stderr = io.MultiWriter(w, &errBuf)
+	output := &lockedWriter{w: w}
+	cmd.Stdout = output
+	cmd.Stderr = io.MultiWriter(output, &errBuf)
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(errBuf.String())
 		if msg == "" {
@@ -145,4 +151,16 @@ func (r *Runner) output(ctx context.Context, workDir string, args ...string) (st
 		return "", fmt.Errorf("git %s: %s", args[0], msg)
 	}
 	return out.String(), nil
+}
+
+// lockedWriter serializes stdout and stderr writes to the same output stream.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
 }

@@ -75,7 +75,28 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 		fileContents[f] = content
 	}
 
+	var revision, gitState string
+	if stack.Git != nil {
+		repoDir, err := h.store.RepoDir(name)
+		if err == nil {
+			revision, err = h.git.ShortRef(r.Context(), repoDir)
+		}
+		if err == nil {
+			var dirty bool
+			dirty, err = h.git.HasChanges(r.Context(), repoDir)
+			if dirty {
+				gitState = "Uncommitted changes"
+			} else {
+				gitState = "Clean"
+			}
+		}
+		if err != nil {
+			gitState = "Unavailable: " + err.Error()
+		}
+	}
 	h.render(w, r, "stacks/detail.html", &stackDetailData{
+		GitRevision:     revision,
+		GitState:        gitState,
 		pageData:        pageData{Page: "stacks"},
 		Stack:           stack,
 		Files:           files,
@@ -450,6 +471,7 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
 	if err != nil {
+		_ = h.store.UpdateGitStatus(name, "", err.Error(), time.Now())
 		h.renderAlert(w, "error", "git pull: "+err.Error())
 		return
 	}

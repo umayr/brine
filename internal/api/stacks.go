@@ -434,6 +434,7 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
 	if err != nil {
+		_ = h.store.UpdateGitStatus(name, "", err.Error(), time.Now())
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
