@@ -1,0 +1,6 @@
+<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1>Stacks</h1></div></div>
+<div class="index-table py-20 text-center">
+  <div role="alert" class="text-error">Stacks could not be loaded. Inventory is unavailable.</div>
+  <p class="text-muted text-sm mt-2">{{.}}</p>
+  <button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/stacks" hx-target="#stack-inventory" hx-swap="innerHTML" hx-sync="#stack-inventory:replace">Retry</button>
+</div>

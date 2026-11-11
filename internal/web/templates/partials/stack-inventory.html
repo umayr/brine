@@ -1,0 +1,75 @@
+<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1>Stacks</h1></div><span class="index-count">{{len .}} TOTAL</span></div>
+<div class="index-table">
+  {{if .}}
+  <div class="overflow-x-auto">
+    <table class="ui-table">
+      <thead>
+        <tr class="text-muted">
+          <th>Name</th>
+          <th>Source</th>
+          <th>Updated</th>
+          <th class="text-right">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .}}
+        <tr class="hover:bg-raised/50 cursor-pointer" id="stack-row-{{.Name}}" onclick="window.location='/stacks/{{.Name}}'">
+          <td>
+            <div class="flex items-center gap-2">
+              <a href="/stacks/{{.Name}}" class="font-mono font-semibold stack-link">{{.Name}}</a>
+              {{if .Git}}
+                {{if .Git.AutoDeploy}}<span class="ui-status ui-status-info ui-status-xs">auto</span>{{end}}
+              {{end}}
+            </div>
+          </td>
+          <td>
+            {{if .Git}}
+            <span class="ui-status ui-status-neutral ui-status-sm gap-1 font-normal">
+              <i data-lucide="git-branch" class="w-3 h-3"></i>
+              {{.Git.Branch}}
+              {{if .Git.ReadOnly}}<span class="opacity-60">· ro</span>{{end}}
+            </span>
+            {{else}}
+            <span class="text-dim text-xs">local</span>
+            {{end}}
+          </td>
+          <td class="font-mono text-xs text-muted">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
+          <td class="text-right" onclick="event.stopPropagation()">
+            <div class="flex gap-1 justify-end">
+              <button class="ui-button ui-button-ghost ui-button-xs gap-1"
+                onclick="deployStack('{{.Name}}', this)"
+              >
+                <i data-lucide="play" class="w-3 h-3"></i>
+                Deploy
+              </button>
+              {{if not (and .Git .Git.ReadOnly)}}
+              <a href="/stacks/{{.Name}}/edit" class="ui-button ui-button-ghost ui-button-xs gap-1">
+                <i data-lucide="pencil" class="w-3 h-3"></i>
+                Edit
+              </a>
+              {{end}}
+              <button class="ui-button ui-button-ghost ui-button-xs gap-1 text-error"
+                onclick="confirmAction('Delete stack', 'Remove {{.Name}} from Brine?', (remove) => deleteStack('{{.Name}}', remove), {checkbox: 'Stop and remove its containers first', checked: true})"
+              >
+                <i data-lucide="trash-2" class="w-3 h-3"></i>
+                Delete
+              </button>
+            </div>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="py-20 text-center">
+    <i data-lucide="layers" class="w-12 h-12 mx-auto mb-4 text-dim"></i>
+    <p class="text-muted mb-5">No stacks yet. Create one to get started.</p>
+    <a href="/stacks/new" class="ui-button ui-button-primary gap-1.5">
+      <i data-lucide="plus" class="w-4 h-4"></i>
+      New stack
+    </a>
+  </div>
+  {{end}}
+
+</div>
