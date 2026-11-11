@@ -130,3 +130,21 @@ test('deletion locks actions and supersedes a stale inventory request', async ({
   releasePoll();
   await expect(inventory).not.toContainText('Deleting');
 });
+
+test('inventory refresh preserves focus on the same stack control', async ({ page }) => {
+  await page.goto(new URL('/stacks', baseURL).href);
+  const inventory = page.locator('#stack-inventory');
+  const row = inventory.locator('tbody tr').first();
+  await expect(row.getByRole('link', { name: 'Edit' })).toBeVisible();
+  const ids = await inventory.locator('[id]').evaluateAll(elements => elements.map(element => element.id));
+  expect(new Set(ids).size).toBe(ids.length);
+
+  for (const control of [row.locator('.stack-link'), row.getByRole('link', { name: 'Edit' }), row.getByRole('button', { name: 'Deploy' }), row.getByRole('button', { name: 'Delete' })]) {
+    await control.focus();
+    await expect(control).toBeFocused();
+    await control.evaluate(element => element.dataset.beforeRefresh = 'yes');
+    await page.evaluate(() => htmx.trigger('#stack-inventory', 'refresh-stacks'));
+    await expect(control).not.toHaveAttribute('data-before-refresh', 'yes');
+    await expect(control).toBeFocused();
+  }
+});

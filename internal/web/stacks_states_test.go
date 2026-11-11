@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -40,5 +41,27 @@ func TestStackInventoryStates(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStackInventoryControlIDsAreUnique(t *testing.T) {
+	h := &Handler{store: inventoryStore{stacks: []*store.Stack{{Name: "foo"}, {Name: "edit-foo"}, {Name: "new"}, {Name: "a_B-9"}}}}
+	w := httptest.NewRecorder()
+	h.stackInventory(w, httptest.NewRequest("GET", "/web/stacks", nil))
+	ids := regexp.MustCompile(`\bid="([^"]+)"`).FindAllStringSubmatch(w.Body.String(), -1)
+	seen := make(map[string]bool)
+	for _, match := range ids {
+		if seen[match[1]] {
+			t.Errorf("duplicate ID %q", match[1])
+		}
+		seen[match[1]] = true
+	}
+	for _, name := range []string{"foo", "edit-foo", "new", "a_B-9"} {
+		for _, action := range []string{"open", "edit", "deploy", "delete"} {
+			id := "stack-inventory-" + action + "-" + name
+			if !seen[id] {
+				t.Errorf("missing ID %q", id)
+			}
+		}
 	}
 }
