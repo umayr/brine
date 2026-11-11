@@ -17,7 +17,7 @@ func (h *Handler) imageList(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) imageRows(w http.ResponseWriter, r *http.Request) {
 	images, err := h.agent.Engine().ListImages(r.Context())
 	if err != nil {
-		h.renderAlert(w, "error", err.Error())
+		h.renderPartial(w, r, "image-list-error", err.Error())
 		return
 	}
 	h.renderPartial(w, r, "image-rows", images)

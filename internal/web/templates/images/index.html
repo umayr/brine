@@ -11,7 +11,7 @@
 
 {{define "content"}}
 <div class="index-page space-y-4">
-  <div class="index-heading"><div><span class="section-code">03 / RUNTIME</span><h1>Images</h1></div></div>
+  <div class="index-heading"><div><span class="section-code">03 / RUNTIME</span><h1>Images</h1><p class="text-muted text-sm mt-2">Images available to the configured container engine.</p></div></div>
 
   <!-- Pull modal -->
   <dialog id="pull-modal" class="ui-dialog" aria-labelledby="pull-modal-title">
@@ -52,18 +52,23 @@
         <tbody
           id="images-body"
           hx-get="/web/images"
-          hx-trigger="load"
+          hx-trigger="load, refresh-images"
           hx-swap="innerHTML"
+          hx-on::send-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
+          hx-on::response-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
         >
           <tr>
             <td colspan="5" class="text-center py-8 text-dim">
-              <span class="ui-spinner ui-spinner-sm"></span>
+              <span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span>
+              <span role="status">Loading images…</span>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
   </div>
+  <template id="images-loading"><tr><td colspan="5" class="text-center py-8 text-dim"><span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span> <span role="status">Loading images…</span></td></tr></template>
+  <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Retry</button></td></tr></template>
 
 </div>
 {{end}}

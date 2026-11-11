@@ -17,7 +17,7 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="5" class="text-center py-12 text-dim font-mono text-sm">no images found</td></tr>
+<tr><td colspan="5" class="text-center py-12 text-muted text-sm"><strong>No images found.</strong><br>The configured engine returned no images. Pull an image to add one.</td></tr>
 {{end}}
 
 <script>
@@ -25,7 +25,9 @@ function removeImage(id) {
   fetch(`/api/images/${id}`, { method: 'DELETE', headers: brineHeaders() })
     .then(res => {
       if (res.ok) {
-        document.getElementById('image-' + id)?.remove();
+        const body = document.getElementById('images-body');
+        body.innerHTML = document.getElementById('images-loading').innerHTML;
+        htmx.trigger(body, 'refresh-images');
         showToast('Image removed', 'success');
       } else {
         showToast('Remove failed', 'error');
