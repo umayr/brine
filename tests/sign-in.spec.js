@@ -19,7 +19,7 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('input[name="next"]')).toHaveValue('/settings');
       await expect(user).toHaveAttribute('autocomplete', 'username');
       await expect(pass).toHaveAttribute('autocomplete', 'current-password');
-      await page.keyboard.type('admin');
+      await expect(user).toHaveValue('admin');
       await page.keyboard.press('Tab');
       await expect(pass).toBeFocused();
       await page.keyboard.type('wrong');
@@ -28,10 +28,15 @@ for (const theme of ['light', 'dark']) {
       await expect(user).toHaveValue('admin');
       await expect(pass).toHaveValue('');
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-      await pass.fill(password);
-      await page.getByRole('button', { name: 'Sign in' }).click();
-      await expect(page).toHaveURL(new URL('/', baseURL).href);
       await context.close();
     });
   }
 }
+
+test('successful first sign-in returns to the requested destination', async ({ page }) => {
+  await page.goto(new URL('/login?next=%2Fsettings', baseURL).href);
+  await page.getByLabel('Username').fill('admin');
+  await page.getByLabel('Password').fill(password);
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page).toHaveURL(new URL('/settings', baseURL).href);
+});
