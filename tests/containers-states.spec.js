@@ -38,9 +38,13 @@ test('failed container action does not replace inventory with an inventory error
   const stop = body.getByRole('button', { name: 'Stop', exact: true }).first();
   await expect(stop).toBeVisible();
   const rowCount = await body.locator('tr').count();
-  const response = page.waitForResponse(res => res.url().endsWith('/stop') && res.status() === 503);
+  await stop.evaluate(button => {
+    window.actionFinished = new Promise(resolve => {
+      button.addEventListener('htmx:afterRequest', event => resolve(event.detail.xhr.status), { once: true });
+    });
+  });
   await stop.click();
-  await response;
+  expect(await page.evaluate(() => window.actionFinished)).toBe(503);
   await expect(stop).toBeVisible();
   await expect(body.locator('tr')).toHaveCount(rowCount);
   await expect(body).not.toContainText('Inventory is unavailable');
@@ -50,8 +54,6 @@ test('retry supersedes an in-flight poll instead of letting an older failure rep
   let requests = 0;
   let releasePoll;
   let pollStarted;
-  let pollFinished;
-  const finished = new Promise(resolve => { pollFinished = resolve; });
   const pending = new Promise(resolve => { releasePoll = resolve; });
   const started = new Promise(resolve => { pollStarted = resolve; });
   await page.route('**/web/containers', async route => {
@@ -60,19 +62,24 @@ test('retry supersedes an in-flight poll instead of letting an older failure rep
     if (request === 2) {
       pollStarted();
       await pending;
-      await route.fulfill({ status: 503 }).catch(() => {});
-      pollFinished();
-      return;
+      return route.fulfill({ status: 503 }).catch(() => {});
     }
     return route.continue();
   });
   await page.goto(new URL('/containers', baseURL).href);
   const body = page.locator('#containers-body');
   await expect(body.getByRole('button', { name: 'Retry' })).toBeVisible();
+  await body.evaluate(element => {
+    window.pollAborted = new Promise(resolve => {
+      element.addEventListener('htmx:beforeRequest', event => {
+        if (event.detail.elt === element) event.detail.xhr.addEventListener('abort', () => resolve(true), { once: true });
+      }, { once: true });
+    });
+  });
   await started;
   await body.getByRole('button', { name: 'Retry' }).click();
-  await expect(body.locator('tr').first().locator('td')).toHaveCount(7);
+  expect(await page.evaluate(() => window.pollAborted)).toBe(true);
   releasePoll();
-  await finished;
+  await expect(body.locator('tr').first().locator('td')).toHaveCount(7);
   await expect(body).not.toContainText('Inventory is unavailable');
 });
