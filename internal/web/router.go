@@ -59,6 +59,7 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		// HTMX partial routes
 		r.Route("/web", func(r chi.Router) {
 			// Stack partials
+			r.Get("/stacks", h.stackInventory)
 			r.Post("/stacks", h.stackCreate)
 			r.Post("/stacks/git", h.stackGitCreate)
 			r.Put("/stacks/{name}", h.stackUpdate)

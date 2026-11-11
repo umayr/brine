@@ -15,15 +15,16 @@ import (
 )
 
 func (h *Handler) stackList(w http.ResponseWriter, r *http.Request) {
+	h.render(w, r, "stacks/index.html", &stackListData{pageData: pageData{Page: "stacks"}})
+}
+
+func (h *Handler) stackInventory(w http.ResponseWriter, r *http.Request) {
 	stacks, err := h.store.List()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		h.renderPartial(w, r, "stack-inventory-error", err.Error())
 		return
 	}
-	h.render(w, r, "stacks/index.html", &stackListData{
-		pageData: pageData{Page: "stacks"},
-		Stacks:   stacks,
-	})
+	h.renderPartial(w, r, "stack-inventory", stacks)
 }
 
 func (h *Handler) stackNew(w http.ResponseWriter, r *http.Request) {
