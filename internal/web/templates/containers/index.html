@@ -5,7 +5,7 @@
 
 {{define "content"}}
 <div class="index-page">
-  <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1>Containers</h1></div><span class="index-count">LIVE</span></div>
+  <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1>Containers</h1><p class="text-muted text-sm mt-2">Containers available to the configured container engine. Refreshes every 5 seconds.</p></div></div>
   <div class="index-table overflow-x-auto">
     <table class="ui-table">
       <thead>
@@ -24,14 +24,18 @@
         hx-get="/web/containers"
         hx-trigger="load, every 5s"
         hx-swap="innerHTML"
+        hx-on::send-error="if (event.detail.target === this) { this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
+        hx-on::response-error="if (event.detail.target === this) { this.innerHTML = document.getElementById('containers-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
       >
         <tr>
           <td colspan="7" class="text-center py-8 text-dim">
-            <span class="ui-spinner ui-spinner-sm"></span>
+            <span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span>
+            <span role="status">Loading containers…</span>
           </td>
         </tr>
       </tbody>
     </table>
   </div>
+  <template id="containers-request-error"><tr><td colspan="7" class="py-8 text-center"><div role="alert" class="text-error">Containers could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Retry</button></td></tr></template>
 </div>
 {{end}}
