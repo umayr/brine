@@ -10,8 +10,9 @@ failure are errors, not skips. Use `-count=1` to avoid cached results.
 
 You need Go (the version in `go.mod`), `curl`, `unzip`, and Pkl. Dill must be
 able to find an executable Pkl on `PATH`, or via `DILL_PKL_PATH` (which takes
-precedence). The test resolves it to an absolute path and passes it to Dill;
-if unavailable, it fails before validation rather than using Dill's cache or
+precedence). The test resolves it to an absolute path, checks `--version`, and
+passes it to Dill; if unavailable or not responding as Pkl, it fails before
+validation rather than using Dill's cache or
 downloader. Brine's container uses Pkl 0.31.1; the test has also been run with
 0.32.2. Install a release appropriate to
 your platform from https://github.com/apple/pkl/releases and check `pkl --version`.
@@ -60,11 +61,14 @@ needed. Downloads above are setup steps, not part of the test.
 
 ## Coverage and limits
 
-The suite checks file and stdin validation of valid and invalid Pkl, relative
-schema resolution for stdin, formatting and formatting idempotence, and that
-stdin operations do not overwrite the original file. Invalid validation tests
-check the released CLI's exit-zero JSON response and diagnostic for both file
-and stdin, as well as the diagnostic returned by Runner.
+The suite checks file and stdin validation of valid and invalid Pkl, local
+relative schema and sibling module imports, missing sibling imports, a schema
+type error, formatting (including invalid syntax) and formatting idempotence,
+and that stdin operations do not overwrite the original file. Invalid syntax
+validation tests check the released CLI's exit-zero JSON response and diagnostic
+for both file and stdin, as well as the diagnostic returned by Runner. These
+fixtures exercise only the indicated Pkl constructs, not arbitrary Pkl features
+or all possible import and error paths.
 It does not test `plan`, `ps`, or lifecycle operations: those require a real
 container engine and are deliberately not run against an existing endpoint.
 It also does not exercise network package resolution or the web/API layers.

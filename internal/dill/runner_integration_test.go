@@ -25,6 +25,11 @@ func resolveIntegrationPkl() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("Pkl prerequisite %q: %w", name, err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput(); err != nil || !strings.Contains(string(out), "Pkl ") {
+		return "", fmt.Errorf("Pkl prerequisite %q failed --version: %q, %v", path, out, err)
+	}
 	return path, nil
 }
 
@@ -37,6 +42,17 @@ func TestResolveIntegrationPklMissing(t *testing.T) {
 	t.Setenv("DILL_PKL_PATH", filepath.Join(t.TempDir(), "missing-pkl"))
 	if _, err := resolveIntegrationPkl(); err == nil {
 		t.Fatal("missing explicit Pkl accepted")
+	}
+}
+
+func TestResolveIntegrationPklRejectsNonPkl(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-pkl")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho not-pkl\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DILL_PKL_PATH", path)
+	if _, err := resolveIntegrationPkl(); err == nil {
+		t.Fatal("non-Pkl executable accepted")
 	}
 }
 
@@ -127,10 +143,54 @@ config {
 			t.Fatalf("stdin validation modified file: %q, %v", after, err)
 		}
 	})
+	t.Run("RelativeImport", func(t *testing.T) {
+		settings := filepath.Join(dir, "settings.pkl")
+		if err := os.WriteFile(settings, []byte("image = \"nginx:alpine\"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		const imported = `amends "dill.pkl"
+import "settings.pkl"
+config {
+  name = "brine-integration"
+  engine = "docker"
+  services { ["web"] { image = settings.image } }
+}
+`
+		importPath := filepath.Join(dir, "imported.pkl")
+		if err := os.WriteFile(importPath, []byte(imported), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := runner.Validate(ctx, importPath); err != nil {
+			t.Fatalf("file relative import: %v", err)
+		}
+		if err := runner.ValidateContent(ctx, importPath, imported); err != nil {
+			t.Fatalf("stdin relative import: %v", err)
+		}
+		if err := os.Remove(settings); err != nil {
+			t.Fatal(err)
+		}
+		for name, validate := range map[string]func() error{
+			"file":  func() error { return runner.Validate(ctx, importPath) },
+			"stdin": func() error { return runner.ValidateContent(ctx, importPath, imported) },
+		} {
+			if err := validate(); err == nil || !strings.Contains(err.Error(), "settings.pkl") {
+				t.Errorf("%s missing import diagnostic: %v", name, err)
+			}
+		}
+	})
+	t.Run("SchemaTypeError", func(t *testing.T) {
+		bad := strings.Replace(valid, `image = "nginx:alpine"`, `image = 42`, 1)
+		if err := runner.ValidateContent(ctx, path, bad); err == nil || !strings.Contains(err.Error(), "String") {
+			t.Fatalf("schema type diagnostic: %v", err)
+		}
+	})
 	t.Run("Fmt", func(t *testing.T) {
 		formatted, err := runner.Fmt(ctx, path, "x=1\n")
 		if err != nil || formatted != "x = 1\n" {
 			t.Fatalf("format: %q, %v", formatted, err)
+		}
+		if _, err := runner.Fmt(ctx, path, invalid); err == nil {
+			t.Fatal("invalid Pkl formatting succeeded")
 		}
 		again, err := runner.Fmt(ctx, path, formatted)
 		if err != nil || again != formatted {
