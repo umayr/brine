@@ -21,11 +21,12 @@ rejected before invoking Dill if the recipe is missing or unsafe. Dill subproces
 receive a minimal explicit environment rather than the Brine server environment.
 
 Paired CI is configured to build Dill at the exact candidate commit
-`ff4d11aac9349536bba18b29fcb0c6de2a925e57`, record the built binary checksum,
+`f5c8dff23d0b3a8e43820fcda91d42e253a9cb33`, record the built binary checksum,
 and use its matching Pkl schema. The candidate must be published before that
 checkout can succeed, and the jobs have not yet qualified either engine. This
-interim candidate has known proof gaps under active Dill repair; the parent will
-update the exact pin after review. CI
+interim candidate contains the proof review fixes and test-only Podman failure
+diagnostics. Independent re-review and fresh Linux results remain pending; the
+previous candidate's Podman create failures are not yet resolved. CI
 separately tests the unmodified 0.5.0 image as an incompatible negative case.
 No independently pinned binary checksum or compatible released Dill version is
 claimed here.

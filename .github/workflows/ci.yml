@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: umayr/dill
-          ref: ff4d11aac9349536bba18b29fcb0c6de2a925e57
+          ref: f5c8dff23d0b3a8e43820fcda91d42e253a9cb33
           path: dill-candidate
       - uses: actions/setup-go@v5
         with:

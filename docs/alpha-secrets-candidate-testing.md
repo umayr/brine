@@ -2,13 +2,14 @@
 
 The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
 support. The CI Docker job tests that its capability command fails. The paired CI
-configuration pins Dill commit `ff4d11aac9349536bba18b29fcb0c6de2a925e57`
+configuration pins Dill commit `f5c8dff23d0b3a8e43820fcda91d42e253a9cb33`
 and builds it from source; the resulting binary SHA-256 is recorded and checked
 within each job. The jobs have **not yet run** and do not establish engine support. This is an
-interim pin: independent review found source-identity proof and proof-output
-workspace-boundary gaps in this candidate. The parent will update the exact pin
-after the paired Dill fix is reviewed; the new source-replacement assertion
-must not be weakened to accommodate this interim candidate.
+interim pin: it contains fixes for the source-identity proof and proof-output
+workspace-boundary findings, with independent re-review and fresh Linux results
+still pending. The previous candidate passed Docker qualification but failed
+both Podman create tests. The source-replacement assertion must not be weakened
+to accommodate any candidate.
 
 On an isolated disposable Linux engine, build Dill with that candidate's
 `make build`, and use the candidate's own Pkl schema in a synthetic config.
