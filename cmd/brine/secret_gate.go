@@ -40,6 +40,21 @@ func stackPathResolver(st store.StackStore) func(string) (string, error) {
 	}
 }
 
+// stackSourceCheck verifies content readiness independently of metadata lookup.
+func stackSourceCheck(st store.StackStore) func(string) error {
+	resolve := stackPathResolver(st)
+	return func(path string) error {
+		name, err := resolve(path)
+		if err != nil {
+			return dill.ErrSecretUnavailable
+		}
+		if _, err = st.ReadFile(name, filepath.Base(path)); err != nil {
+			return dill.ErrSecretUnavailable
+		}
+		return nil
+	}
+}
+
 // legacySecretRecordGate protects diagnostics for previously secret-enabled
 // deployments without requiring an engine for ordinary offline validation.
 func legacySecretRecordGate(st store.StackStore, state *secretbindings.Store) func(context.Context, string) error {

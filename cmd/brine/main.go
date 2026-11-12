@@ -128,6 +128,7 @@ func run() error {
 	runner.Engine = cfg.Engine
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)
+	runner.CheckSource = stackSourceCheck(st)
 
 	// Wire up local agent. Persisted restrictions continue to apply even when
 	// secret support is not configured for new operations.

@@ -21,6 +21,9 @@ func (c *StrictController) context(ctx context.Context, path string) (string, st
 	if c == nil || c.Secret == nil || !c.Secret.valid() || c.Resolve == nil || !filepath.IsAbs(path) {
 		return "", "", false, ErrSecretUnavailable
 	}
+	if err := c.Secret.Runner.checkSource(path); err != nil {
+		return "", "", false, ErrSecretUnavailable
+	}
 	if err := c.Secret.Runner.CheckSecretCapabilities(ctx, c.Secret.Engine); err != nil {
 		return "", "", false, err
 	}

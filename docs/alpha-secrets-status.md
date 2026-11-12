@@ -15,8 +15,10 @@ Pkl binary. The policy must be outside Brine's data directory. Disabling these
 options preserves legacy compatibility, but is not Alpha secret support or a
 secret-safety guarantee; known secret-enabled deployment records and container
 markers still prohibit downgrade. Stop/down/teardown do not require capability
-discovery or source availability. Dill subprocesses receive a minimal explicit
-environment rather than the Brine server environment.
+discovery or secret-source availability. Stop and down do not read the recipe;
+teardown requires a safe, readable recipe for image-selection semantics and is
+rejected before invoking Dill if the recipe is missing or unsafe. Dill subprocesses
+receive a minimal explicit environment rather than the Brine server environment.
 
 The paired Dill candidate is not yet available or pinned. Once coordinated,
 paired CI must build Dill with `make build` at the exact candidate commit,

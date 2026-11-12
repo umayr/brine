@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -241,14 +242,30 @@ config {
 		t.Fatalf("initial checked deployment failed: %v", err)
 	}
 	assertMount(source)
+	// The paired Dill label-only fast-path must not discover or execute Pkl.
+	evalMarker := filepath.Join(root, "unexpected-pkl-execution")
+	unavailablePkl := filepath.Join(root, "unavailable-pkl")
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+	write(unavailablePkl, []byte("#!/bin/sh\ntouch "+quote(evalMarker)+"\nexit 1\n"), 0700)
+	assertNoPkl := func() {
+		t.Helper()
+		if _, err := os.Stat(evalMarker); !os.IsNotExist(err) {
+			t.Fatal("label cleanup invoked Pkl")
+		}
+	}
 	checkStale := func(name string, mutate, restore func()) {
 		t.Helper()
 		token := preview()
 		mutate()
+		before, beforeErr := cli.ContainerInspect(ctx, stack+"_app")
 		e := s.ConfirmAndApply(ctx, id, stack, config, token)
+		after, afterErr := cli.ContainerInspect(ctx, stack+"_app")
 		restore()
-		if e == nil {
-			t.Fatalf("%s change accepted stale preview", name)
+		if !errors.Is(e, secretbindings.ErrStale) {
+			t.Fatalf("%s change did not reject stale preview before apply: %v", name, e)
+		}
+		if beforeErr != nil || afterErr != nil || before.State == nil || after.State == nil || before.ID != after.ID || before.State.Running != after.State.Running || before.State.Status != after.State.Status || before.State.StartedAt != after.State.StartedAt || before.State.FinishedAt != after.State.FinishedAt || before.RestartCount != after.RestartCount {
+			t.Fatalf("%s confirmation changed live state", name)
 		}
 		active, e := state.Active(id, stack, "lab-a")
 		if e != nil || !bytes.Equal(active, binding) {
@@ -264,8 +281,16 @@ config {
 	checkStale("policy", func() { write(policyPath, makePolicy([]policySource{src, src2, second}), 0600) }, func() { write(policyPath, policy, 0600) })
 	checkStale("live engine", func() {
 		var out bytes.Buffer
-		if e := runner.Stop(ctx, config, &out); e != nil {
-			t.Fatalf("stop fixture: %v", e)
+		runner.PklBinary = unavailablePkl
+		e := runner.Stop(ctx, config, &out)
+		runner.PklBinary = pkl
+		if e != nil {
+			t.Fatalf("stop fixture without Pkl: %v", e)
+		}
+		assertNoPkl()
+		info, e := cli.ContainerInspect(ctx, stack+"_app")
+		if e != nil || info.State == nil || info.State.Running {
+			t.Fatal("label stop did not stop fixture")
 		}
 	}, func() {
 		if e := s.ApplyActive(ctx, id, stack, config); e != nil {
@@ -311,9 +336,13 @@ config {
 		t.Fatal("missing source reported available")
 	}
 	var output bytes.Buffer
-	if err = runner.Down(ctx, config, &output); err != nil {
-		t.Fatalf("cleanup with missing source failed: %v", err)
+	runner.PklBinary = unavailablePkl
+	err = runner.Down(ctx, config, &output)
+	runner.PklBinary = pkl
+	if err != nil {
+		t.Fatalf("cleanup with missing source and unavailable Pkl failed: %v", err)
 	}
+	assertNoPkl()
 	if _, err = cli.ContainerInspect(ctx, stack+"_app"); !errdefs.IsNotFound(err) {
 		t.Fatal("fixture container remains after cleanup")
 	}

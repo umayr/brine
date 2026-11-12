@@ -228,6 +228,9 @@ func (s *SecretRunner) plan(ctx context.Context, id, stack, config string, draft
 	if !s.valid() || !filepath.IsAbs(config) {
 		return nil, nil, "", 0, ErrSecretUnavailable
 	}
+	if err := s.Runner.checkSource(config); err != nil {
+		return nil, nil, "", 0, ErrSecretUnavailable
+	}
 	if err := s.Runner.CheckSecretCapabilities(ctx, s.Engine); err != nil {
 		return nil, nil, "", 0, err
 	}
@@ -317,6 +320,9 @@ func (s *SecretRunner) applyActive(ctx context.Context, id, stack, config string
 	if !filepath.IsAbs(config) {
 		return ErrSecretUnavailable
 	}
+	if err := s.Runner.checkSource(config); err != nil {
+		return ErrSecretUnavailable
+	}
 	if err := s.Runner.CheckSecretCapabilities(ctx, s.Engine); err != nil {
 		return err
 	}
@@ -389,6 +395,9 @@ func (s *SecretRunner) check(ctx context.Context, id, stack, config string, draf
 // CheckLocked requires the shared deployment coordinator lock.
 func (s *SecretRunner) CheckLocked(ctx context.Context, id, stack, config string, draft bool) error {
 	if !s.valid() || !filepath.IsAbs(config) {
+		return ErrSecretUnavailable
+	}
+	if err := s.Runner.checkSource(config); err != nil {
 		return ErrSecretUnavailable
 	}
 	if err := s.Runner.CheckSecretCapabilities(ctx, s.Engine); err != nil {

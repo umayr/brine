@@ -90,3 +90,18 @@ strict validation/lifecycle invocations; the binding's `target` must match and
 never selects authority. Cleanup does not require the selector, bindings or
 policy. Selector presence alone must not require bindings for an ordinary
 configuration with no grants. Neither harness uses `DILL_SECRET_TARGET`.
+
+### Recipe unavailable or unsafe
+
+Stack metadata remains discoverable if the workspace or configured entrypoint is
+missing or unsafe. Editor repair, safe entrypoint selection and Git recovery
+remain available when their own workspace prerequisites are safe. Stop and down
+use a guaranteed nonexistent config path inside a private invocation directory,
+with the trusted stack, engine and socket, so they do not read the unavailable
+recipe or an ambient default. Avoiding Pkl discovery and evaluation additionally
+requires the paired Dill label-only missing-file fast-path; this is not yet
+qualified. The disposable candidate harness checks stop/down with an unavailable
+Pkl executable and an evaluation marker. Teardown retains its distinct image-selection
+semantics and requires a safe, readable recipe; Brine rejects it before invoking
+Dill when that recipe is unavailable or unsafe. This is not a claim of
+recipe-independent full teardown qualification.

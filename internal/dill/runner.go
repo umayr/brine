@@ -25,6 +25,7 @@ type Runner struct {
 	Engine       string
 	Socket       string
 	ResolveStack func(string) (string, error)
+	CheckSource  func(string) error
 
 	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
 	BeforeLegacyAction   func(context.Context, string) error
@@ -212,9 +213,52 @@ func (r *Runner) runLifecycle(ctx context.Context, w io.Writer, path string, arg
 	return nil
 }
 
+// checkSource rejects unsafe recipe paths before source-consuming commands.
+func (r *Runner) checkSource(path string) error {
+	if r.CheckSource != nil {
+		return r.CheckSource(path)
+	}
+	return nil
+}
+
+// runLabelCleanup forces Dill's label-only fallback with a nonexistent config
+// inside its private runtime home, never the workspace or process cwd.
+func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action string) error {
+	argv, err := r.lifecycleArgs(path, action)
+	if err != nil {
+		return err
+	}
+	cmd, cleanup, err := r.command(ctx)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	home := ""
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "HOME=") {
+			home = strings.TrimPrefix(e, "HOME=")
+			break
+		}
+	}
+	if !filepath.IsAbs(home) {
+		return errors.New("private cleanup context unavailable")
+	}
+	argv[1] = filepath.Join(home, "unavailable-config.pkl")
+	cmd.Args = append([]string{cmd.Path}, argv...)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err = cmd.Run(); err != nil {
+		return errors.New("Dill lifecycle failed; an endpoint-pinning compatible Dill may be required")
+	}
+	return nil
+}
+
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if err := r.checkSource(pklPath); err != nil {
+		return err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Up(ctx, pklPath)
 	}
@@ -229,18 +273,21 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 // Down stops and removes all containers in the stack.
 func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
-	return r.runLifecycle(ctx, w, pklPath, "down")
+	return r.runLabelCleanup(ctx, w, pklPath, "down")
 }
 
 // Stop stops running containers without removing them.
 func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
-	return r.runLifecycle(ctx, w, pklPath, "stop")
+	return r.runLabelCleanup(ctx, w, pklPath, "stop")
 }
 
 // Start starts previously stopped containers.
 func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if err := r.checkSource(pklPath); err != nil {
+		return err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Start(ctx, pklPath, false)
 	}
@@ -255,6 +302,9 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 // Restart stops then starts all containers.
 func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if err := r.checkSource(pklPath); err != nil {
+		return err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Start(ctx, pklPath, true)
 	}
@@ -270,6 +320,9 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 // Pass force=true to force-remove images referenced by other containers.
 func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if err := r.checkSource(pklPath); err != nil {
+		return errors.New("teardown requires a safe recipe; stop and down remain available")
+	}
 	args := []string{"teardown"}
 	if force {
 		args = append(args, "--force")
@@ -280,6 +333,9 @@ func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.
 // PS lists containers in the stack using `dill ps --format json`.
 // Returns an empty slice if the stack is not deployed.
 func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) {
+	if err := r.checkSource(pklPath); err != nil {
+		return nil, err
+	}
 	args, err := r.lifecycleArgs(pklPath, "ps", "--format", "json")
 	if err != nil {
 		return nil, err
@@ -298,6 +354,9 @@ func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) 
 // Plan returns a structured diff of what `dill up` would change.
 // Exit 0 = no changes, exit 1 = has changes (not an error), exit 2 = error.
 func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) {
+	if err := r.checkSource(pklPath); err != nil {
+		return nil, err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Plan(ctx, pklPath)
 	}
@@ -329,6 +388,9 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 // NOTE: dill exits 0 in both valid and invalid cases when --format json is used;
 // validity must be determined by parsing the JSON output, not the exit code.
 func (r *Runner) Validate(ctx context.Context, pklPath string) error {
+	if err := r.checkSource(pklPath); err != nil {
+		return err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Validate(ctx, pklPath, nil)
 	}
@@ -351,6 +413,9 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 // ValidateContent validates in-memory content using `dill validate --stdin`.
 // pklPath is used for directory context (PKL import resolution).
 func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) error {
+	if err := r.checkSource(pklPath); err != nil {
+		return err
+	}
 	if r.StrictActions != nil {
 		return r.StrictActions.Validate(ctx, pklPath, &content)
 	}
@@ -387,6 +452,9 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 // Fmt formats content using `dill fmt --stdin`, returning the formatted output.
 // The pklPath is used for context (directory resolution of PKL imports).
 func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, error) {
+	if err := r.checkSource(pklPath); err != nil {
+		return "", err
+	}
 	var stdout, stderr bytes.Buffer
 	cmd, cleanup, err := r.command(ctx, "-f", pklPath, "fmt", "--stdin")
 	if err != nil {

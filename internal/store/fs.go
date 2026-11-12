@@ -100,16 +100,6 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 			return nil, fmt.Errorf("stack %q metadata: %w", name, err)
 		}
 	}
-	workspace, err := s.workspaceFD(name, stack.Git)
-	if err != nil {
-		return nil, fmt.Errorf("unsafe workspace")
-	}
-	defer unix.Close(workspace)
-	entry, err := openWorkspaceFile(workspace, entrypointOrDefault(stack.Entrypoint), unix.O_RDONLY)
-	if err != nil {
-		return nil, fmt.Errorf("unsafe entrypoint")
-	}
-	entry.Close()
 	// Recompute the entrypoint path from the current data directory so that a
 	// moved data dir (or a containerised brine) does not keep stale absolute paths.
 	stack.PklPath = filepath.Join(s.filesDir(name, stack.Git), entrypointOrDefault(stack.Entrypoint))
@@ -531,11 +521,6 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 		return fmt.Errorf("unsafe workspace")
 	}
 	defer unix.Close(fd)
-	f, err := openWorkspaceFile(fd, entrypointOrDefault(stack.Entrypoint), unix.O_RDONLY)
-	if err != nil {
-		return fmt.Errorf("unsafe entrypoint")
-	}
-	f.Close()
 	// Preserve status fields; only update config fields.
 	src.LastSyncAt = stack.Git.LastSyncAt
 	src.LastCommit = stack.Git.LastCommit

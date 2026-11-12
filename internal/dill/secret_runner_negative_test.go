@@ -77,4 +77,17 @@ exit 2
 	if _, err = state.Preview("demo", "demo", "lab-a"); err == nil {
 		t.Fatal("preview retained without proof")
 	}
+	r.Runner.CheckSource = func(string) error { return ErrSecretUnavailable }
+	if _, err = r.Preview(context.Background(), "demo", "demo", config); err != ErrSecretUnavailable {
+		t.Fatalf("unsafe preview: %v", err)
+	}
+	if err = r.CheckDraft(context.Background(), "demo", "demo", config); err != ErrSecretUnavailable {
+		t.Fatalf("unsafe status: %v", err)
+	}
+	if err = r.ApplyActive(context.Background(), "demo", "demo", config); err != ErrSecretUnavailable {
+		t.Fatalf("unsafe apply: %v", err)
+	}
+	if err = strict.Up(context.Background(), config); err != ErrSecretUnavailable {
+		t.Fatalf("unsafe strict action: %v", err)
+	}
 }

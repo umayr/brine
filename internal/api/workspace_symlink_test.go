@@ -139,3 +139,62 @@ func TestGitWorkspaceSymlinksCannotExposeOrOverwriteExternalFiles(t *testing.T) 
 		t.Fatal("symlink entrypoint write")
 	}
 }
+
+func TestGitPullCanRepairMissingOrSymlinkedEntrypoint(t *testing.T) {
+	for _, kind := range []string{"missing", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			base := t.TempDir()
+			st, err := store.NewFSStore(filepath.Join(base, "data"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			repo, err := st.RepoDir("demo")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = os.MkdirAll(repo, 0700); err != nil {
+				t.Fatal(err)
+			}
+			entry := filepath.Join(repo, "compose.pkl")
+			if err = os.WriteFile(entry, []byte("original"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = st.CreateFromGit("demo", &store.GitSource{URL: "synthetic"}, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err = os.Remove(entry); err != nil {
+				t.Fatal(err)
+			}
+			outside := filepath.Join(base, "outside")
+			if err = os.WriteFile(outside, []byte("protected"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if kind == "symlink" {
+				if err = os.Symlink(outside, entry); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git := gitpkg.New()
+			git.Binary = filepath.Join(base, "git")
+			script := "#!/bin/sh\ncase \" $* \" in *\" pull --ff-only \"*) rm -f '" + entry + "'; printf repaired > '" + entry + "';; *\" rev-parse \"*) echo synthetic;; esac\nexit 0\n"
+			if err = os.WriteFile(git.Binary, []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			r := chi.NewRouter()
+			Mount(r, nil, st, nil, git, "docker", httpx.Timeouts{}, time.Second)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("POST", "/api/stacks/demo/git/pull", nil))
+			if w.Code != 200 {
+				t.Fatalf("repair pull: %d %s", w.Code, w.Body.String())
+			}
+			content, err := st.ReadPkl("demo")
+			if err != nil || content != "repaired" {
+				t.Fatal("pull did not restore safe content")
+			}
+			target, err := os.ReadFile(outside)
+			if err != nil || string(target) != "protected" {
+				t.Fatal("unsafe target modified")
+			}
+		})
+	}
+}
