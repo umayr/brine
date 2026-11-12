@@ -64,6 +64,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("--no-auth requires a loopback bind")
 	}
 	if c.SecretTarget != "" || c.SecretPolicy != "" || c.SecretPkl != "" {
+		if c.NoAuth {
+			return fmt.Errorf("secret mode requires authentication")
+		}
 		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`).MatchString(c.SecretTarget) || !filepath.IsAbs(c.SecretPolicy) || filepath.Clean(c.SecretPolicy) != c.SecretPolicy {
 			return fmt.Errorf("secret mode requires an explicit target and absolute policy path")
 		}

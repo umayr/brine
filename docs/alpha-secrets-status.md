@@ -8,7 +8,7 @@ discovery checks interface compatibility, not target readiness.
 
 Supplying both `--secret-target` and an absolute `--secret-policy`, together
 with an explicit local `--engine-socket`, selects strict mode. In strict mode
-all stack plan, up, start and restart operations require exact Alpha capability
+authentication is required and all stack plan, up, start and restart operations require exact Alpha capability
 discovery, including for unmarked stacks; an old or malformed Dill receives an
 upgrade error. Optional `--secret-pkl` selects an absolute operator-installed
 Pkl binary. The policy must be outside Brine's data directory. Disabling these
