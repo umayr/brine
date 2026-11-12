@@ -2,14 +2,17 @@
 
 The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
 support. The CI Docker job tests that its capability command fails. The paired CI
-configuration pins Dill commit `ffbca6c3c2aa36e0dadedecff986c723589b0a2a`
+configuration pins Dill commit `bfe4940051275272c86f9f209e49f926d07d893a`
 and builds it from source; the resulting binary SHA-256 is recorded and checked
-within each job. The jobs have **not yet run** and do not establish engine support. This is an
-interim pin: it contains the statically reviewed source-identity and workspace
-proof fixes, plus a source-pinned crun compatibility correction for the observed
-Podman OCI-version failure. Fresh native-runtime and paired results remain
-pending. The source-replacement assertion must not be weakened to accommodate
-any candidate.
+within each job. This is an interim diagnostic pin, not a qualified release.
+Run 43319491835 at Brine `d87b846`, paired with Dill `ffbca6c`, passed Docker
+qualification including disposable mutation and expected retained-network cleanup.
+Podman selected the corrected crun 1.26 runtime and created the workload, but
+failed the stop/start proof-stability assertion. The new pin adds test-only,
+MAC-verified field-path diagnostics; it does not change production proof inputs
+or weaken the assertion. Fresh exact-head results and full Podman qualification
+remain pending. Source-replacement and lifecycle assertions must not be weakened
+to accommodate any candidate.
 
 On an isolated disposable Linux engine, build Dill with that candidate's
 `make build`, and use the candidate's own Pkl schema in a synthetic config.
