@@ -2,16 +2,19 @@
 
 The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
 support. The CI Docker job tests that its capability command fails. The paired CI
-configuration pins Dill commit `bfe4940051275272c86f9f209e49f926d07d893a`
+configuration pins Dill commit `258e73e58ba018931be57172908e8e64f433945e`
 and builds it from source; the resulting binary SHA-256 is recorded and checked
-within each job. This is an interim diagnostic pin, not a qualified release.
+within each job. This is an interim correction pin, not a qualified release.
 Run 43319491835 at Brine `d87b846`, paired with Dill `ffbca6c`, passed Docker
 qualification including disposable mutation and expected retained-network cleanup.
 Podman selected the corrected crun 1.26 runtime and created the workload, but
-failed the stop/start proof-stability assertion. The new pin adds test-only,
-MAC-verified field-path diagnostics; it does not change production proof inputs
-or weaken the assertion. Fresh exact-head results and full Podman qualification
-remain pending. Source-replacement and lifecycle assertions must not be weakened
+failed the stop/start proof-stability assertion. Subsequent MAC-verified
+diagnostics at Dill `bfe4940` isolated changes to runtime network attachments.
+The new pin serializes Podman's complete network configuration rather than the
+inspect report's container IP/MAC allocations, matching Docker's existing scope.
+Network identity/settings, source observations and owned-container lifecycle
+inputs remain bound; no lifecycle assertion is weakened. Fresh exact-head
+results and full Podman qualification remain pending. Source-replacement and lifecycle assertions must not be weakened
 to accommodate any candidate.
 
 On an isolated disposable Linux engine, build Dill with that candidate's

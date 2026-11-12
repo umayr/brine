@@ -21,13 +21,16 @@ rejected before invoking Dill if the recipe is missing or unsafe. Dill subproces
 receive a minimal explicit environment rather than the Brine server environment.
 
 Paired CI is configured to build Dill at the exact candidate commit
-`bfe4940051275272c86f9f209e49f926d07d893a`, record the built binary checksum,
+`258e73e58ba018931be57172908e8e64f433945e`, record the built binary checksum,
 and use its matching Pkl schema. The preceding pair (Brine `d87b846`, Dill
 `ffbca6c`, run 43319491835) passed Docker, including disposable mutation and the
 precisely checked retained-network partial cleanup. Podman selected crun 1.26
-and created the workload, but failed proof stability after stop/start. This
-interim pin adds test-only, MAC-verified field-path diagnostics, not a speculative
-production fix. Fresh exact-head results and full Podman qualification remain
+and created the workload, but failed proof stability after stop/start. Subsequent
+MAC-verified diagnostics at Dill `bfe4940` isolated runtime network attachments.
+This interim pin preserves the complete Podman network configuration while
+excluding its inspect report's transient container IP/MAC allocations, matching
+Docker's existing scope. Source observations and owned-container lifecycle inputs
+are unchanged. Fresh exact-head results and full Podman qualification remain
 pending. CI separately tests the unmodified 0.5.0 image as an incompatible
 negative case.
 No independently pinned binary checksum or compatible released Dill version is
