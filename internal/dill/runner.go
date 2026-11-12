@@ -9,17 +9,42 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/umayr/brine/internal/secretbindings"
 )
 
 // Runner shells out to the dill binary for stack lifecycle operations.
 // Stack configuration and parsing remain dill's responsibility.
 type Runner struct {
-	Binary string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
+	Binary    string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
+	PklBinary string // explicit operator-configured Pkl binary, if any
+
+	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
+	BeforeLegacyAction   func(context.Context, string) error
+	BeforeLegacyValidate func(context.Context, string) error
+	StrictActions        StrictActions
+
+	Coordinator secretbindings.Coordinator
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
+}
+
+// StrictActions routes all risky commands through the configured Alpha gate.
+// Brine callers hold the shared deployment lock across each invocation.
+type StrictActions interface {
+	Up(context.Context, string) error
+	Plan(context.Context, string) (*PlanResult, error)
+	Start(context.Context, string, bool) error
+	Validate(context.Context, string, *string) error
+}
+
+// LockStack coordinates Brine workspace and lifecycle operations for one stack.
+func (r *Runner) LockStack(name string) func() {
+	return r.Coordinator.Lock(secretbindings.DeploymentID(name))
 }
 
 // lockPath serialises lifecycle operations on the same stack so that a
@@ -92,17 +117,27 @@ func (p *PlanResult) ChangeCount() int {
 	return p.Summary.Create + p.Summary.Recreate + p.Summary.Remove
 }
 
-// command removes Brine's login credentials from every dill/Pkl subprocess.
-// Other inherited environment variables remain available to deployment code.
-func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, r.Binary, args...)
-	cmd.Env = make([]string, 0, len(os.Environ()))
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		if key == "BRINE_AUTH_PASSWORD" || key == "BRINE_API_TOKEN" || key == "BRINE_AUTH_USER" {
-			continue
+// executable resolves bare binary names only against the fixed subprocess PATH,
+// not the ambient Brine process PATH used by exec.LookPath.
+func (r *Runner) executable() string {
+	if strings.ContainsRune(r.Binary, filepath.Separator) {
+		return r.Binary
+	}
+	for _, dir := range []string{"/usr/local/bin", "/usr/bin", "/bin"} {
+		path := filepath.Join(dir, r.Binary)
+		if fi, err := os.Stat(path); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0111 != 0 {
+			return path
 		}
-		cmd.Env = append(cmd.Env, entry)
+	}
+	return filepath.Join("/usr/local/bin", r.Binary)
+}
+
+// command never inherits the Brine server process environment.
+func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, r.executable(), args...)
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+	if r.PklBinary != "" {
+		cmd.Env = append(cmd.Env, "DILL_PKL_PATH="+r.PklBinary)
 	}
 	return cmd
 }
@@ -132,6 +167,14 @@ func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if r.StrictActions != nil {
+		return r.StrictActions.Up(ctx, pklPath)
+	}
+	if r.BeforeLegacyAction != nil {
+		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
+			return err
+		}
+	}
 	return r.run(ctx, w, "-f", pklPath, "up")
 }
 
@@ -150,12 +193,28 @@ func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
 // Start starts previously stopped containers.
 func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if r.StrictActions != nil {
+		return r.StrictActions.Start(ctx, pklPath, false)
+	}
+	if r.BeforeLegacyAction != nil {
+		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
+			return err
+		}
+	}
 	return r.run(ctx, w, "-f", pklPath, "start")
 }
 
 // Restart stops then starts all containers.
 func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
+	if r.StrictActions != nil {
+		return r.StrictActions.Start(ctx, pklPath, true)
+	}
+	if r.BeforeLegacyAction != nil {
+		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
+			return err
+		}
+	}
 	return r.run(ctx, w, "-f", pklPath, "restart")
 }
 
@@ -187,6 +246,14 @@ func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) 
 // Plan returns a structured diff of what `dill up` would change.
 // Exit 0 = no changes, exit 1 = has changes (not an error), exit 2 = error.
 func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) {
+	if r.StrictActions != nil {
+		return r.StrictActions.Plan(ctx, pklPath)
+	}
+	if r.BeforeLegacyAction != nil {
+		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
+			return nil, err
+		}
+	}
 	out, err := r.capture(ctx, "-f", pklPath, "plan", "--format", "json")
 	if err != nil && !isExitCode(err, 1) {
 		if out != "" {
@@ -206,6 +273,14 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 // NOTE: dill exits 0 in both valid and invalid cases when --format json is used;
 // validity must be determined by parsing the JSON output, not the exit code.
 func (r *Runner) Validate(ctx context.Context, pklPath string) error {
+	if r.StrictActions != nil {
+		return r.StrictActions.Validate(ctx, pklPath, nil)
+	}
+	if r.BeforeLegacyValidate != nil {
+		if err := r.BeforeLegacyValidate(ctx, pklPath); err != nil {
+			return err
+		}
+	}
 	out, err := r.capture(ctx, "-f", pklPath, "validate", "--format", "json")
 	if err != nil {
 		// Unexpected non-zero exit (e.g. file not found). Fall back to raw output.
@@ -220,6 +295,14 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 // ValidateContent validates in-memory content using `dill validate --stdin`.
 // pklPath is used for directory context (PKL import resolution).
 func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) error {
+	if r.StrictActions != nil {
+		return r.StrictActions.Validate(ctx, pklPath, &content)
+	}
+	if r.BeforeLegacyValidate != nil {
+		if err := r.BeforeLegacyValidate(ctx, pklPath); err != nil {
+			return err
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd := r.command(ctx, "-f", pklPath, "validate", "--stdin", "--format", "json")
 	cmd.Stdin = strings.NewReader(content)

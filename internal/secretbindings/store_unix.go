@@ -101,6 +101,14 @@ func (s *Store) deployment(id string, create bool) (int, error) {
 		if err := unix.Mkdirat(int(s.root.Fd()), id, 0700); err != nil && err != unix.EEXIST {
 			return -1, ErrUnsafe
 		}
+	} else {
+		var st unix.Stat_t
+		if err := unix.Fstatat(int(s.root.Fd()), id, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			if err == unix.ENOENT {
+				return -1, os.ErrNotExist
+			}
+			return -1, ErrUnsafe
+		}
 	}
 	return openDirAt(int(s.root.Fd()), id, true)
 }
@@ -235,6 +243,19 @@ func (s *Store) Active(id, stack, target string) ([]byte, error) {
 	return s.readDocument(id, stack, target, "active.json")
 }
 
+// BindingPath returns a validated internal binding path for a coordinated Dill
+// invocation. The caller must hold the deployment lock until Dill exits.
+func (s *Store) BindingPath(id, stack, target string, draft bool) (string, error) {
+	name := "active.json"
+	if draft {
+		name = "draft.json"
+	}
+	if _, err := s.readDocument(id, stack, target, name); err != nil {
+		return "", err
+	}
+	return filepath.Join(s.path, id, name), nil
+}
+
 type preview struct {
 	Candidate json.RawMessage `json:"candidate"`
 	Proof     string          `json:"proof"`
@@ -357,7 +378,7 @@ func (s *Store) ConfirmPreview(id, stack, target, proof string, plan []byte, exi
 		return ErrStale
 	}
 	draft, err := readAt(fd, "draft.json", MaxDocument)
-	if err != nil || !bytes.Equal(draft, p.Candidate) || !validProof(proof) || subtle.ConstantTimeCompare([]byte(proof), []byte(p.Proof)) != 1 || !bytes.Equal(plan, p.Plan) || exit != p.Exit {
+	if err != nil || subtle.ConstantTimeCompare(draft, p.Candidate) != 1 || !validProof(proof) || subtle.ConstantTimeCompare([]byte(proof), []byte(p.Proof)) != 1 || subtle.ConstantTimeCompare(plan, p.Plan) != 1 || exit != p.Exit {
 		_ = removeAt(fd, "preview.json")
 		return ErrStale
 	}
@@ -376,6 +397,9 @@ func (s *Store) SecretEnabled(id string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fd, err := s.deployment(id, false)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}

@@ -7,6 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/umayr/brine/internal/agent"
@@ -15,6 +17,7 @@ import (
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/git"
+	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/server"
 	"github.com/umayr/brine/internal/store"
 )
@@ -37,6 +40,9 @@ func run() error {
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
 	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "path to dill binary")
+	flag.StringVar(&cfg.SecretTarget, "secret-target", "", "operator-selected Alpha target ID (enables strict secret mode with --secret-policy)")
+	flag.StringVar(&cfg.SecretPolicy, "secret-policy", "", "absolute path to operator-controlled Alpha secret policy")
+	flag.StringVar(&cfg.SecretPkl, "secret-pkl", "", "optional absolute path to operator-installed Pkl for Alpha secret mode")
 	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: serve templates and static files from the repository (run from repo root)")
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
@@ -97,9 +103,29 @@ func run() error {
 
 	// Initialise dill runner.
 	runner := dill.New(cfg.DillBin)
+	runner.PklBinary = cfg.SecretPkl
 
-	// Wire up local agent.
+	// Wire up local agent. Persisted restrictions continue to apply even when
+	// secret support is not configured for new operations.
 	ag := agent.NewLocalAgent(eng, runner)
+	secretState, err := openSecretState(cfg.DataDir, cfg.SecretTarget != "")
+	if err != nil {
+		return fmt.Errorf("secret state unavailable")
+	}
+	if secretState != nil {
+		defer secretState.Close()
+		ag.SetSecretRecordLookup(func(stack string) (bool, error) {
+			return secretState.SecretEnabled(secretbindings.DeploymentID(stack))
+		})
+	}
+	runner.BeforeLegacyAction = legacySecretGate(st, eng, secretState)
+	if secretState != nil {
+		runner.BeforeLegacyValidate = legacySecretRecordGate(st, secretState)
+	}
+	if cfg.SecretTarget != "" {
+		secretRunner := &dill.SecretRunner{Runner: runner, State: secretState, Coordinator: &runner.Coordinator, Engine: cfg.Engine, Socket: strings.TrimPrefix(cfg.EngineSocket, "unix://"), Policy: cfg.SecretPolicy, Target: cfg.SecretTarget, PklBinary: cfg.SecretPkl}
+		runner.StrictActions = &dill.StrictController{Secret: secretRunner, Resolve: stackPathResolver(st), LegacyGate: runner.BeforeLegacyAction}
+	}
 
 	// Initialise git runner.
 	gr := git.New()
@@ -110,6 +136,30 @@ func run() error {
 
 	srv := server.New(cfg, ag, st, rs, gr, authn)
 	return srv.Run(ctx)
+}
+
+// openSecretState keeps known-secret restrictions even if strict mode is later
+// disabled. Existing unsafe state is never silently ignored.
+func openSecretState(dataDir string, create bool) (*secretbindings.Store, error) {
+	data, err := filepath.Abs(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(data, "secret-state")
+	_, err = os.Lstat(root)
+	if os.IsNotExist(err) {
+		if !create {
+			return nil, nil
+		}
+		if err := os.Mkdir(root, 0700); err != nil {
+			return nil, err
+		}
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return secretbindings.Open(root, filepath.Join(data, "stacks"))
 }
 
 // buildAuth resolves credentials and constructs the authenticator. Explicit

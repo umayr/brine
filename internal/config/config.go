@@ -5,6 +5,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -15,6 +17,9 @@ type Config struct {
 	Engine       string // "docker" | "podman"
 	EngineSocket string // Docker-compatible engine host/socket, e.g. unix:///var/run/docker.sock
 	DillBin      string // path to dill binary
+	SecretTarget string // operator-selected target ID, enables strict secret mode with SecretPolicy
+	SecretPolicy string // absolute operator-controlled policy path
+	SecretPkl    string // optional absolute operator-installed Pkl binary
 	Dev          bool   // hot-reload templates in dev mode
 
 	// Authentication. Password/APIToken may be empty, in which case
@@ -57,6 +62,26 @@ func (c *Config) Validate() error {
 	}
 	if c.NoAuth && !ip.IsLoopback() {
 		return fmt.Errorf("--no-auth requires a loopback bind")
+	}
+	if c.SecretTarget != "" || c.SecretPolicy != "" || c.SecretPkl != "" {
+		if !regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`).MatchString(c.SecretTarget) || !filepath.IsAbs(c.SecretPolicy) || filepath.Clean(c.SecretPolicy) != c.SecretPolicy {
+			return fmt.Errorf("secret mode requires an explicit target and absolute policy path")
+		}
+		socket := strings.TrimPrefix(c.EngineSocket, "unix://")
+		if !filepath.IsAbs(socket) || filepath.Clean(socket) != socket {
+			return fmt.Errorf("secret mode requires an explicit absolute local engine socket")
+		}
+		if c.SecretPkl != "" && (!filepath.IsAbs(c.SecretPkl) || filepath.Clean(c.SecretPkl) != c.SecretPkl) {
+			return fmt.Errorf("secret Pkl path must be absolute")
+		}
+		data, err := filepath.Abs(c.DataDir)
+		if err != nil {
+			return fmt.Errorf("invalid data directory")
+		}
+		rel, err := filepath.Rel(data, c.SecretPolicy)
+		if err != nil || rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))) {
+			return fmt.Errorf("secret policy must be outside Brine data directory")
+		}
 	}
 	return nil
 }

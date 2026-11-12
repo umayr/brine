@@ -4,10 +4,21 @@ Brine's bundled Dill 0.5.0 does **not** support the Alpha file-secret contract.
 The reference editor, reviewed rotation and secret-enabled deployment workflow
 are not available in this build. Do not use this build to deploy secret-enabled
 recipes. Capability discovery in the source tree is a foundation, not an enabled
-feature or a readiness check. In particular, existing lifecycle routes are not
-secret-aware and do not yet enforce the required approval or start/restart gate.
-The preview-proof interface has been agreed, but its Dill implementation and
-Brine confirmation flow are still pending.
+feature or a readiness check. The reference UI is not yet available and paired
+Dill/runtime qualification is pending; do not use the implementation for
+secret-enabled deployments yet.
+
+Supplying both `--secret-target` and an absolute `--secret-policy`, together
+with an explicit local `--engine-socket`, selects strict mode. In strict mode
+all stack plan, up, start and restart operations require exact Alpha capability
+discovery, including for unmarked stacks; an old or malformed Dill receives an
+upgrade error. Optional `--secret-pkl` selects an absolute operator-installed
+Pkl binary. The policy must be outside Brine's data directory. Disabling these
+options preserves legacy compatibility, but is not Alpha secret support or a
+secret-safety guarantee; known secret-enabled deployment records and container
+markers still prohibit downgrade. Stop/down/teardown do not require capability
+discovery or source availability. Dill subprocesses receive a minimal explicit
+environment rather than the Brine server environment.
 
 The paired Dill candidate is not yet available or pinned. Once coordinated,
 paired CI must build Dill with `make build` at the exact candidate commit,

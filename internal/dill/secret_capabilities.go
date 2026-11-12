@@ -23,7 +23,7 @@ func (r *Runner) CheckSecretCapabilities(ctx context.Context, engine string) err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.Binary, "secret-capabilities", "--format", "json")
+	cmd := exec.CommandContext(ctx, r.executable(), "secret-capabilities", "--format", "json")
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
 	var output boundedCapabilityOutput
 	cmd.Stdout = &output
