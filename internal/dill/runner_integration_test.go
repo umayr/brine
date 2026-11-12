@@ -101,6 +101,7 @@ config {
 		t.Fatal(err)
 	}
 	runner := New(binary)
+	runner.PklBinary = pkl
 	assertInvalidJSON := func(t *testing.T, cmd *exec.Cmd) {
 		t.Helper()
 		out, err := cmd.Output()

@@ -232,7 +232,7 @@ func (s *SecretRunner) plan(ctx context.Context, id, stack, config string, draft
 		return nil, nil, "", 0, ErrSecretUnavailable
 	}
 	defer output.Close()
-	data, exit, err := s.capture(ctx, "-f", config, "--engine-socket", s.Socket, "plan", "--format", "json", "--secret-bindings", binding, "--proof-key-file", key, "--proof-file", output.Path())
+	data, exit, err := s.capture(ctx, "-f", config, "-p", stack, "--engine", s.Engine, "--engine-socket", s.Socket, "--secret-target", s.Target, "plan", "--format", "json", "--secret-bindings", binding, "--proof-key-file", key, "--proof-file", output.Path())
 	if err != nil {
 		return nil, nil, "", 0, err
 	}
@@ -312,7 +312,7 @@ func (s *SecretRunner) applyActive(ctx context.Context, id, stack, config string
 	if err != nil {
 		return ErrSecretUnavailable
 	}
-	_, exit, err := s.capture(ctx, "-f", config, "--engine-socket", s.Socket, "up", "--secret-bindings", binding)
+	_, exit, err := s.capture(ctx, "-f", config, "-p", stack, "--engine", s.Engine, "--engine-socket", s.Socket, "--secret-target", s.Target, "up", "--secret-bindings", binding)
 	if err != nil || exit != 0 {
 		return ErrSecretApplyFailed
 	}
@@ -386,7 +386,7 @@ func (s *SecretRunner) CheckLocked(ctx context.Context, id, stack, config string
 	if err != nil {
 		return ErrSecretUnavailable
 	}
-	data, exit, err := s.capture(ctx, "-f", config, "--engine-socket", s.Socket, "secrets", "check", "--secret-bindings", binding, "--format", "json")
+	data, exit, err := s.capture(ctx, "-f", config, "-p", stack, "--engine", s.Engine, "--engine-socket", s.Socket, "--secret-target", s.Target, "secrets", "check", "--secret-bindings", binding, "--format", "json")
 	if err != nil || exit != 0 {
 		return ErrSecretUnavailable
 	}

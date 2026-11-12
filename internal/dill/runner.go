@@ -19,8 +19,11 @@ import (
 // Runner shells out to the dill binary for stack lifecycle operations.
 // Stack configuration and parsing remain dill's responsibility.
 type Runner struct {
-	Binary    string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
-	PklBinary string // explicit operator-configured Pkl binary, if any
+	Binary       string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
+	PklBinary    string // explicit operator-configured Pkl binary, if any
+	Engine       string
+	Socket       string
+	ResolveStack func(string) (string, error)
 
 	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
 	BeforeLegacyAction   func(context.Context, string) error
@@ -164,6 +167,28 @@ func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 	return buf.String(), err
 }
 
+// lifecycleArgs binds Dill to Brine's trusted deployment identity and engine.
+func (r *Runner) lifecycleArgs(path string, args ...string) ([]string, error) {
+	if r.ResolveStack == nil || (r.Engine != "docker" && r.Engine != "podman") || !filepath.IsAbs(r.Socket) || filepath.Clean(r.Socket) != r.Socket {
+		return nil, errors.New("lifecycle requires an explicit local engine endpoint")
+	}
+	name, err := r.ResolveStack(path)
+	if err != nil || name == "" {
+		return nil, errors.New("deployment identity unavailable")
+	}
+	return append([]string{"-f", path, "-p", name, "--engine", r.Engine, "--engine-socket", r.Socket}, args...), nil
+}
+func (r *Runner) runLifecycle(ctx context.Context, w io.Writer, path string, args ...string) error {
+	argv, err := r.lifecycleArgs(path, args...)
+	if err != nil {
+		return err
+	}
+	if err = r.run(ctx, w, argv...); err != nil {
+		return errors.New("Dill lifecycle failed; an endpoint-pinning compatible Dill may be required")
+	}
+	return nil
+}
+
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
@@ -175,19 +200,19 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 			return err
 		}
 	}
-	return r.run(ctx, w, "-f", pklPath, "up")
+	return r.runLifecycle(ctx, w, pklPath, "up")
 }
 
 // Down stops and removes all containers in the stack.
 func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
-	return r.run(ctx, w, "-f", pklPath, "down")
+	return r.runLifecycle(ctx, w, pklPath, "down")
 }
 
 // Stop stops running containers without removing them.
 func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
 	defer r.lockPath(pklPath)()
-	return r.run(ctx, w, "-f", pklPath, "stop")
+	return r.runLifecycle(ctx, w, pklPath, "stop")
 }
 
 // Start starts previously stopped containers.
@@ -201,7 +226,7 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 			return err
 		}
 	}
-	return r.run(ctx, w, "-f", pklPath, "start")
+	return r.runLifecycle(ctx, w, pklPath, "start")
 }
 
 // Restart stops then starts all containers.
@@ -215,24 +240,28 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 			return err
 		}
 	}
-	return r.run(ctx, w, "-f", pklPath, "restart")
+	return r.runLifecycle(ctx, w, pklPath, "restart")
 }
 
 // Teardown removes containers, images, volumes, and the stack network.
 // Pass force=true to force-remove images referenced by other containers.
 func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
 	defer r.lockPath(pklPath)()
-	args := []string{"-f", pklPath, "teardown"}
+	args := []string{"teardown"}
 	if force {
 		args = append(args, "--force")
 	}
-	return r.run(ctx, w, args...)
+	return r.runLifecycle(ctx, w, pklPath, args...)
 }
 
 // PS lists containers in the stack using `dill ps --format json`.
 // Returns an empty slice if the stack is not deployed.
 func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) {
-	out, err := r.capture(ctx, "-f", pklPath, "ps", "--format", "json")
+	args, err := r.lifecycleArgs(pklPath, "ps", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.capture(ctx, args...)
 	if err != nil {
 		return nil, fmt.Errorf("dill ps: %w", err)
 	}
@@ -254,7 +283,11 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 			return nil, err
 		}
 	}
-	out, err := r.capture(ctx, "-f", pklPath, "plan", "--format", "json")
+	args, err := r.lifecycleArgs(pklPath, "plan", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.capture(ctx, args...)
 	if err != nil && !isExitCode(err, 1) {
 		if out != "" {
 			return nil, fmt.Errorf("%s", strings.TrimSpace(out))

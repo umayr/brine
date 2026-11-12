@@ -474,7 +474,11 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer h.lockStack(name)()
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		h.renderAlert(w, "error", "Repository directory unavailable")
+		return
+	}
 	if err := h.git.Clone(r.Context(), gitURL, branch, repoDir); err != nil {
 		h.renderAlert(w, "error", "git clone failed: "+err.Error())
 		return
@@ -496,7 +500,11 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", "Stack not found or not git-backed")
 		return
 	}
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		h.renderAlert(w, "error", "Repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)

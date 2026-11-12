@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
@@ -16,8 +17,16 @@ func stackPathResolver(st store.StackStore) func(string) (string, error) {
 			return "", dill.ErrSecretUnavailable
 		}
 		name := ""
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			return "", dill.ErrSecretUnavailable
+		}
 		for _, stack := range stacks {
-			if stack.PklPath == path {
+			match := stack.PklPath == path
+			if !match && filepath.Dir(stack.PklPath) == filepath.Dir(path) {
+				_, err := st.ReadFile(stack.Name, filepath.Base(path))
+				match = err == nil
+			}
+			if match {
 				if name != "" {
 					return "", dill.ErrSecretUnavailable
 				}

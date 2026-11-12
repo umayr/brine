@@ -450,7 +450,11 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "stack is not git-backed")
 		return
 	}
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
@@ -489,7 +493,11 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 		body.Message = "chore: update stack via brine"
 	}
 
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

@@ -31,6 +31,26 @@ func main() {
 	}
 }
 
+func normalizeDataDir(cfg *config.Config) error {
+	abs, err := filepath.Abs(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("invalid data directory")
+	}
+	cfg.DataDir = abs
+	return nil
+}
+
+func effectiveEngineHost(cfg *config.Config) string {
+	host := cfg.EngineSocket
+	if host == "" {
+		host = engine.DefaultHost(cfg.Engine)
+	}
+	if filepath.IsAbs(host) {
+		host = "unix://" + host
+	}
+	return host
+}
+
 func run() error {
 	cfg := config.Default()
 
@@ -62,6 +82,9 @@ func run() error {
 		return nil
 	}
 
+	if err := normalizeDataDir(cfg); err != nil {
+		return err
+	}
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
@@ -86,12 +109,10 @@ func run() error {
 
 	// Initialise container engine.
 	var eng engine.Engine
+	effectiveHost := effectiveEngineHost(cfg)
 	switch cfg.Engine {
 	case "docker", "podman":
-		host := cfg.EngineSocket
-		if host == "" {
-			host = engine.DefaultHost(cfg.Engine)
-		}
+		host := effectiveHost
 		eng, err = engine.NewDockerEngineWithHost(host)
 		if err != nil {
 			return fmt.Errorf("init %s engine (%s): %w", cfg.Engine, host, err)
@@ -104,6 +125,9 @@ func run() error {
 	// Initialise dill runner.
 	runner := dill.New(cfg.DillBin)
 	runner.PklBinary = cfg.SecretPkl
+	runner.Engine = cfg.Engine
+	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
+	runner.ResolveStack = stackPathResolver(st)
 
 	// Wire up local agent. Persisted restrictions continue to apply even when
 	// secret support is not configured for new operations.

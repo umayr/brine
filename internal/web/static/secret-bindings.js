@@ -58,7 +58,15 @@
   confirm.addEventListener('click', () => run(async () => {
     if (!token || dirty) throw new Error('Preview the saved draft again.');
     if (!window.confirm('Apply exactly this previewed reference change? Containers may be recreated.')) return;
-    const approved = token; invalidate(); await request('/confirm', 'POST', {preview_token:approved}); await refresh(); say('Approved references applied.');
+    const approved = token; invalidate();
+    try {
+      await request('/confirm', 'POST', {preview_token:approved});
+      await refresh(); say('Approved references applied.');
+    } catch (err) {
+      const failure = err.message || 'Confirmation failed.';
+      try { await refresh(); } catch { document.getElementById('secret-active').textContent = 'Active references unknown; reload before retrying.'; }
+      say(failure);
+    }
   }));
   run(refresh);
 })();

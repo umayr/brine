@@ -46,7 +46,7 @@ func (c *StrictController) Up(ctx context.Context, path string) error {
 	if c.LegacyGate == nil || c.LegacyGate(ctx, path) != nil {
 		return ErrSecretUnavailable
 	}
-	_, exit, err := c.Secret.capture(ctx, "-f", path, "--engine-socket", c.Secret.Socket, "up")
+	_, exit, err := c.Secret.capture(ctx, "-f", path, "-p", stack, "--engine", c.Secret.Engine, "--engine-socket", c.Secret.Socket, "--secret-target", c.Secret.Target, "up")
 	if err != nil || exit != 0 {
 		return ErrSecretApplyFailed
 	}
@@ -64,14 +64,14 @@ func (c *StrictController) Plan(ctx context.Context, path string) (*PlanResult, 
 	if c.LegacyGate == nil || c.LegacyGate(ctx, path) != nil {
 		return nil, ErrSecretUnavailable
 	}
-	data, exit, err := c.Secret.capture(ctx, "-f", path, "--engine-socket", c.Secret.Socket, "plan", "--format", "json")
+	data, exit, err := c.Secret.capture(ctx, "-f", path, "-p", stack, "--engine", c.Secret.Engine, "--engine-socket", c.Secret.Socket, "--secret-target", c.Secret.Target, "plan", "--format", "json")
 	if err != nil {
 		return nil, err
 	}
 	return parseSecretPlan(data, exit)
 }
 func (c *StrictController) Start(ctx context.Context, path string, restart bool) error {
-	_, _, enabled, err := c.context(ctx, path)
+	_, stack, enabled, err := c.context(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (c *StrictController) Start(ctx context.Context, path string, restart bool)
 	if restart {
 		command = "restart"
 	}
-	_, exit, err := c.Secret.capture(ctx, "-f", path, "--engine-socket", c.Secret.Socket, command)
+	_, exit, err := c.Secret.capture(ctx, "-f", path, "-p", stack, "--engine", c.Secret.Engine, "--engine-socket", c.Secret.Socket, "--secret-target", c.Secret.Target, command)
 	if err != nil || exit != 0 {
 		return ErrSecretUnavailable
 	}

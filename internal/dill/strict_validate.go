@@ -13,7 +13,7 @@ func (c *StrictController) Validate(ctx context.Context, path string, content *s
 	if err != nil {
 		return err
 	}
-	args := []string{"-f", path, "--engine-socket", c.Secret.Socket, "validate", "--format", "json"}
+	args := []string{"-f", path, "-p", stack, "--engine", c.Secret.Engine, "--engine-socket", c.Secret.Socket, "--secret-target", c.Secret.Target, "validate", "--format", "json"}
 	if enabled {
 		binding, err := c.Secret.State.BindingPath(id, stack, c.Secret.Target, false)
 		if err != nil {

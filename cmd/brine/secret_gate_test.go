@@ -44,6 +44,9 @@ func TestLegacySecretGateBlocksMutationButNotCleanup(t *testing.T) {
 	}
 	e := gateEngine{containers: []engine.ContainerInfo{{ID: "id", Stack: "demo", Labels: map[string]string{"dill.stack": "demo", "dill.service": "web", "dill.managed": "true", "dill.secret-enabled": "true"}}}}
 	r := dill.New(bin)
+	r.Engine = "docker"
+	r.Socket = "/synthetic/engine.sock"
+	r.ResolveStack = stackPathResolver(st)
 	r.BeforeLegacyAction = legacySecretGate(st, e, nil)
 	var out bytes.Buffer
 	ctx := context.Background()
