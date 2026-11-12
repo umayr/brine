@@ -101,8 +101,10 @@ func LoadOrCreate(dataDir, user, password, token string) (Credentials, bool, str
 		}
 		return creds, !exists, path, nil
 	}
-	// Tighten permissions on files created by older builds.
-	_ = os.Chmod(path, 0o600)
+	// Fail closed if an existing credential file cannot be made private.
+	if err := os.Chmod(path, 0o600); err != nil {
+		return Credentials{}, false, "", fmt.Errorf("chmod credentials: %w", err)
+	}
 	return creds, false, path, nil
 }
 

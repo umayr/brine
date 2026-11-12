@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -91,10 +92,25 @@ func (p *PlanResult) ChangeCount() int {
 	return p.Summary.Create + p.Summary.Recreate + p.Summary.Remove
 }
 
+// command removes Brine's login credentials from every dill/Pkl subprocess.
+// Other inherited environment variables remain available to deployment code.
+func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd.Env = make([]string, 0, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "BRINE_AUTH_PASSWORD" || key == "BRINE_API_TOKEN" || key == "BRINE_AUTH_USER" {
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	return cmd
+}
+
 // run executes the dill binary with the given arguments, streaming combined
 // stdout+stderr to w. Returns an error if the process exits non-zero.
 func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
-	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd := r.command(ctx, args...)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -106,7 +122,7 @@ func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
 // capture runs dill and returns combined output as a string.
 func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 	var buf bytes.Buffer
-	cmd := exec.CommandContext(ctx, r.Binary, args...)
+	cmd := r.command(ctx, args...)
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 	err := cmd.Run()
@@ -205,7 +221,7 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 // pklPath is used for directory context (PKL import resolution).
 func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) error {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, r.Binary, "-f", pklPath, "validate", "--stdin", "--format", "json")
+	cmd := r.command(ctx, "-f", pklPath, "validate", "--stdin", "--format", "json")
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -229,7 +245,7 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 // The pklPath is used for context (directory resolution of PKL imports).
 func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, r.Binary, "-f", pklPath, "fmt", "--stdin")
+	cmd := r.command(ctx, "-f", pklPath, "fmt", "--stdin")
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
