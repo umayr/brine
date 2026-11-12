@@ -45,6 +45,36 @@ jobs:
       - name: Test
         run: go test -race ./...
 
+  paired-alpha:
+    name: Paired Alpha / ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [docker, podman-rootless]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: brine
+      - uses: actions/checkout@v4
+        with:
+          repository: umayr/dill
+          ref: ff4d11aac9349536bba18b29fcb0c6de2a925e57
+          path: dill-candidate
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: brine/go.mod
+          cache-dependency-path: brine/go.sum
+      - name: Build exact pinned Podman source
+        if: matrix.mode == 'podman-rootless'
+        working-directory: dill-candidate
+        run: scripts/ci-build-podman-alpha.sh
+      - name: Run paired synthetic qualification on dedicated engine
+        env:
+          BRINE_DILL_CANDIDATE_REPO: ${{ github.workspace }}/dill-candidate
+        run: bash brine/scripts/ci-paired-alpha-secrets.sh '${{ matrix.mode }}'
+
   docker:
     name: Docker image
     runs-on: ubuntu-latest

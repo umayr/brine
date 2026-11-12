@@ -125,6 +125,21 @@ func TestCandidateDillSecretDisposableMutation(t *testing.T) {
 	write(source, []byte("synthetic-ci-only\n"), 0400)
 	source2 := filepath.Join(sourceDir, "synthetic-r2")
 	write(source2, []byte("synthetic-ci-rotation\n"), 0400)
+	assertOwnedSources := func() {
+		t.Helper()
+		markerPath := filepath.Join(root, ".brine-fixture-owner")
+		markerData, e := os.ReadFile(markerPath)
+		resolved, resolveErr := filepath.EvalSymlinks(sourceDir)
+		for _, path := range []string{root, sourceDir, source, source2, markerPath} {
+			var stat unix.Stat_t
+			if unix.Lstat(path, &stat) != nil || stat.Uid != uint32(os.Getuid()) || stat.Mode&unix.S_IFMT == unix.S_IFLNK {
+				t.Fatal("refusing non-owned or symlinked fixture")
+			}
+		}
+		if e != nil || string(markerData) != marker || resolveErr != nil || resolved != sourceDir || filepath.Dir(sourceDir) != root {
+			t.Fatal("refusing to alter non-owned fixture")
+		}
+	}
 	config := filepath.Join(workspace, "compose.pkl")
 	importPath := filepath.Join(workspace, "settings.pkl")
 	policyPath := filepath.Join(root, "policy.json")
@@ -139,6 +154,7 @@ config {
  services { ["app"] {
   image = %q
   pullPolicy = "never"
+  command = List("sleep", "600")
   labels { ["fixture-import"] = settings.label; ["fixture-config"] = "one" }
   secrets { new { name = "db"; target = "/run/secrets/db"; uid = %d; gid = %d; mode = 256 } }
  } }
@@ -276,6 +292,45 @@ config {
 		write(config, bytes.Replace(configBytes, []byte(`"fixture-config"] = "one"`), []byte(`"fixture-config"] = "two"`), 1), 0600)
 	}, func() { write(config, configBytes, 0600) })
 	checkStale("import", func() { write(importPath, []byte("label = \"two\"\n"), 0600) }, func() { write(importPath, settings, 0600) })
+	binding2 := bytes.Replace(binding, []byte(`"revision":"r1"`), []byte(`"revision":"r2"`), 1)
+	checkStale("binding", func() {
+		if e := state.SaveDraft(id, stack, "lab-a", binding2); e != nil {
+			t.Fatal(e)
+		}
+	}, func() {
+		if e := state.SaveDraft(id, stack, "lab-a", binding); e != nil {
+			t.Fatal(e)
+		}
+	})
+	// Fault injection is restricted to this freshly created, test-owned fixture.
+	// Preserve the old inode for restoration; the replacement has identical
+	// bytes, ownership and mode but a distinct file identity.
+	backup, replacement := source+".original", source+".replacement"
+	defer func() {
+		if _, e := os.Lstat(backup); e == nil {
+			if e = os.Rename(backup, source); e != nil {
+				t.Errorf("restore synthetic source: %v", e)
+			}
+		}
+	}()
+	checkStale("source identity", func() {
+		assertOwnedSources()
+		write(replacement, []byte("synthetic-ci-only\n"), 0400)
+		var old, next unix.Stat_t
+		if unix.Lstat(source, &old) != nil || unix.Lstat(replacement, &next) != nil || old.Uid != next.Uid || old.Gid != next.Gid || old.Mode != next.Mode || old.Ino == next.Ino || old.Nlink != 1 || next.Nlink != 1 {
+			t.Fatal("synthetic replacement metadata invalid")
+		}
+		if e := os.Rename(source, backup); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.Rename(replacement, source); e != nil {
+			t.Fatal(e)
+		}
+	}, func() {
+		if e := os.Rename(backup, source); e != nil {
+			t.Fatalf("restore synthetic source: %v", e)
+		}
+	})
 	second := src
 	second.ID = "other-source"
 	checkStale("policy", func() { write(policyPath, makePolicy([]policySource{src, src2, second}), 0600) }, func() { write(policyPath, policy, 0600) })
@@ -297,7 +352,6 @@ config {
 			t.Fatalf("restore fixture: %v", e)
 		}
 	})
-	binding2 := bytes.Replace(binding, []byte(`"revision":"r1"`), []byte(`"revision":"r2"`), 1)
 	if err = state.SaveDraft(id, stack, "lab-a", binding2); err != nil {
 		t.Fatal(err)
 	}
@@ -309,18 +363,7 @@ config {
 	}
 	assertMount(source2)
 	// Deliberate external disappearance injection on this test-owned source directory.
-	markerPath := filepath.Join(root, ".brine-fixture-owner")
-	markerData, err := os.ReadFile(markerPath)
-	resolved, resolveErr := filepath.EvalSymlinks(sourceDir)
-	for _, path := range []string{root, sourceDir, source, source2, markerPath} {
-		var stat unix.Stat_t
-		if unix.Lstat(path, &stat) != nil || stat.Uid != uint32(os.Getuid()) || stat.Mode&unix.S_IFMT == unix.S_IFLNK {
-			t.Fatal("refusing non-owned or symlinked fixture")
-		}
-	}
-	if err != nil || string(markerData) != marker || resolveErr != nil || resolved != sourceDir || filepath.Dir(sourceDir) != root {
-		t.Fatal("refusing to alter non-owned fixture")
-	}
+	assertOwnedSources()
 	missing := sourceDir + ".unavailable"
 	if err = os.Rename(sourceDir, missing); err != nil {
 		t.Fatal(err)

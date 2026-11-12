@@ -20,12 +20,15 @@ teardown requires a safe, readable recipe for image-selection semantics and is
 rejected before invoking Dill if the recipe is missing or unsafe. Dill subprocesses
 receive a minimal explicit environment rather than the Brine server environment.
 
-The paired Dill candidate is not yet available or pinned. Once coordinated,
-paired CI must build Dill with `make build` at the exact candidate commit,
-verify the transferred binary's checksum, use its matching Pkl schema and select
-it via Brine's `--dill` option. CI must separately test the unmodified 0.5.0
-image as an incompatible negative case. No compatible released Dill version or
-candidate checksum is claimed here.
+Paired CI is configured to build Dill at the exact candidate commit
+`ff4d11aac9349536bba18b29fcb0c6de2a925e57`, record the built binary checksum,
+and use its matching Pkl schema. The candidate must be published before that
+checkout can succeed, and the jobs have not yet qualified either engine. This
+interim candidate has known proof gaps under active Dill repair; the parent will
+update the exact pin after review. CI
+separately tests the unmodified 0.5.0 image as an incompatible negative case.
+No independently pinned binary checksum or compatible released Dill version is
+claimed here.
 
 The approved Alpha design uses externally provisioned immutable read-only host
 files on both Docker and Podman; native Podman secrets are deferred. Operator

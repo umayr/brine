@@ -1,8 +1,14 @@
-# Paired candidate checks (pending candidate pin)
+# Paired candidate checks (qualification pending)
 
 The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
-support. The CI Docker job tests that its capability command fails. The Go
-candidate test is opt-in and has **not** qualified either engine.
+support. The CI Docker job tests that its capability command fails. The paired CI
+configuration pins Dill commit `ff4d11aac9349536bba18b29fcb0c6de2a925e57`
+and builds it from source; the resulting binary SHA-256 is recorded and checked
+within each job. The jobs have **not yet run** and do not establish engine support. This is an
+interim pin: independent review found source-identity proof and proof-output
+workspace-boundary gaps in this candidate. The parent will update the exact pin
+after the paired Dill fix is reviewed; the new source-replacement assertion
+must not be weakened to accommodate this interim candidate.
 
 On an isolated disposable Linux engine, build Dill with that candidate's
 `make build`, and use the candidate's own Pkl schema in a synthetic config.
@@ -34,9 +40,9 @@ prove workload reads, rotation, namespace mapping, mount enforcement or cleanup.
 The fixture config must explicitly import the schema using its absolute
 `file://` URI. The harness checks the checkout commit, tracked cleanliness and
 schema against that commit; it cannot establish the binary's build provenance
-from its checksum alone. Final paired CI must
-pin that commit and artifact checksum and run the contract's full engine and
-browser matrix. No checksum or candidate is pinned until coordination completes.
+from its checksum alone. The CI job records the locally built artifact checksum and verifies it in both
+harnesses; this is not an independently pinned prebuilt artifact checksum. The
+Dill commit must be published before the exact-SHA checkout can succeed.
 
 ## Optional disposable mutation harness
 
@@ -69,7 +75,8 @@ before test fixture disposal. This deliberate test fault injection is not produc
 behavior. A failed test may leave disposable engine resources requiring CI
 cleanup; it must never run against a shared or production engine. Passing this
 harness is not a substitute for workload-read, namespace/security, browser and
-full paired Linux qualification. No candidate has yet been pinned or tested.
+full paired Linux qualification. The pinned candidate has not yet been tested
+by these Brine CI jobs.
 
 ## Legacy lifecycle compatibility
 
@@ -105,3 +112,34 @@ Pkl executable and an evaluation marker. Teardown retains its distinct image-sel
 semantics and requires a safe, readable recipe; Brine rejects it before invoking
 Dill when that recipe is unavailable or unsafe. This is not a claim of
 recipe-independent full teardown qualification.
+
+
+## Paired CI boundary and coverage
+
+The `paired-alpha` CI matrix uses disposable GitHub Ubuntu Linux Docker and
+rootless Podman jobs only. It checks out Dill by the exact commit above. The
+Podman job runs that checkout's source-pinned Podman 5.0.0 build script. The
+Brine wrapper sources the pinned Dill `ci-alpha-secrets.sh` script, retaining
+its EXIT trap, so Dill's own exact-peer SO_PEERPIDFD, protected configuration,
+non-root UID/GID mapping and real host-file qualification runs on the dedicated
+daemon before the Brine harnesses run against that same live socket. The
+wrapper separately proves the namespace maps container UID/GID 0 to its test
+fixture owner. It records the built candidate checksum, and explicitly fails
+if either selected Brine test skips. No local or production engine is used.
+
+Coverage is layered, not a release claim. The pinned Dill suite exercises real
+non-root mapped reads, read-only mount behavior, foreign-UID denial, rotation,
+source fault and pre-mutation cases, marker/lifecycle and proof behavior. The
+Brine real-candidate harnesses cover read-only status/preview, checked apply and
+rotation with mount inspection, stale config/import/binding/policy/source-identity/live-state
+confirmation, and source-disappearance stop/down with a Pkl execution marker.
+Brine API callback failure/status and marked legacy-downgrade paths currently
+have synthetic unit/browser tests only, not a paired real-engine API/browser
+test. Brine's own harness does not independently prove workload reads, foreign
+UID denial, or Docker/Podman namespace enforcement; those are exercised by the
+separate Dill suite. Missing/symlinked recipe route behavior is also synthetic;
+the paired stop/down checks exercise a missing secret source, not the full HTTP
+route with an unsafe recipe. The mutation harness uses container UID/GID 0
+mapped to its own synthetic source owner; the Dill suite separately tests
+non-root mapped ownership. These gaps and the exact job results require review
+before any support claim.
