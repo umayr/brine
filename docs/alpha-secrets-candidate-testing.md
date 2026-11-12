@@ -2,7 +2,7 @@
 
 The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
 support. The CI Docker job tests that its capability command fails. The paired CI
-configuration pins Dill commit `9a266b5aef55bbf4e16674178af35ed8c2b565e2`
+configuration pins Dill commit `20ef7a7d5f00d608841846e05af5491908b7d72a`
 and builds it from source; the resulting binary SHA-256 is recorded and checked
 within each job. The jobs have **not yet run** and do not establish engine support. This is an
 interim pin: it contains fixes for the source-identity proof and proof-output

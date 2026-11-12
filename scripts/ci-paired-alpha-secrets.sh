@@ -5,7 +5,7 @@ set -euo pipefail
 [[ ${GITHUB_ACTIONS:-} == true && $(uname -s) == Linux ]] || { echo 'Disposable Linux CI only' >&2; exit 1; }
 mode=${1:?docker or podman-rootless}
 case "$mode" in docker|podman-rootless) ;; *) exit 1 ;; esac
-readonly commit=9a266b5aef55bbf4e16674178af35ed8c2b565e2
+readonly commit=20ef7a7d5f00d608841846e05af5491908b7d72a
 brine=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 candidate=${BRINE_DILL_CANDIDATE_REPO:?absolute pinned candidate checkout required}
 [[ $candidate = /* && $(git -C "$candidate" rev-parse HEAD) == "$commit" ]] || { echo 'Incorrect Dill candidate' >&2; exit 1; }
