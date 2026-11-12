@@ -161,9 +161,6 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if !h.ensureRuntimeEngine(w, stack) {
-		return
-	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -178,9 +175,6 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if !h.ensureRuntimeEngine(w, stack) {
 		return
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
@@ -241,6 +235,10 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if _, err := h.store.ReadPkl(stack.Name); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "teardown requires a safe recipe; stop and down remain available")
 		return
 	}
 	if !h.ensureRuntimeEngine(w, stack) {

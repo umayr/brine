@@ -37,14 +37,12 @@
     <div class="flex items-center gap-1 border-l border-line pl-1.5 ml-0.5">
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Stop containers and remove them"
         onclick="confirmAction('Run down', 'Stop and remove containers for {{.Stack.Name}}?', () => runAction('down', '{{.Stack.Name}}'))"
-        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="square" class="w-3.5 h-3.5"></i>
         Down
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Pause containers"
         onclick="runAction('stop', '{{.Stack.Name}}')"
-        {{if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="pause" class="w-3.5 h-3.5"></i>
         Stop
@@ -100,7 +98,7 @@
   <div class="ui-notice ui-notice-warning rounded-panel shadow-sm items-start">
     <div>
       <div class="font-semibold">Engine mismatch</div>
-      <div class="text-sm">{{.EngineAlignment.Warning}} Lifecycle actions are disabled until the file matches the runtime engine.</div>
+      <div class="text-sm">{{.EngineAlignment.Warning}} Deploy, start, restart and plan are disabled until the file matches the runtime engine.</div>
     </div>
   </div>
   {{end}}
