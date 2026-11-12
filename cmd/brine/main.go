@@ -32,6 +32,7 @@ func run() error {
 	cfg := config.Default()
 
 	flag.StringVar(&cfg.Port, "port", cfg.Port, "HTTP listen port")
+	flag.StringVar(&cfg.Bind, "bind", cfg.Bind, "HTTP listen IP (default loopback)")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "directory for storing stack configs")
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
@@ -54,6 +55,11 @@ func run() error {
 		fmt.Println(version)
 		return nil
 	}
+
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	log.Printf("warning: container engine socket access can grant host-level privileges; use an isolated target")
 
 	authn, err := buildAuth(cfg)
 	if err != nil {
@@ -121,10 +127,7 @@ func buildAuth(cfg *config.Config) (*auth.Authenticator, error) {
 	}
 	if created {
 		log.Printf("auth enabled: generated credentials at %s", path)
-		log.Printf("  username:  %s", creds.User)
-		log.Printf("  password:  %s", creds.Password)
-		log.Printf("  api token: %s", creds.APIToken)
-		log.Printf("  (store these now; the password is not printed again)")
+		log.Printf("  read credentials from the private file; they are not printed in logs")
 	} else if path != "" {
 		log.Printf("auth enabled: using credentials from %s", path)
 	} else {

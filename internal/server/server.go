@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -69,7 +70,10 @@ func (s *Server) Run(ctx context.Context) error {
 	// Start the GitOps syncer in the background.
 	go s.syncer.Run(ctx)
 
-	addr := fmt.Sprintf(":%s", s.cfg.Port)
+	if err := s.cfg.Validate(); err != nil {
+		return err
+	}
+	addr := net.JoinHostPort(s.cfg.Bind, s.cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      s.router,
@@ -80,7 +84,7 @@ func (s *Server) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Printf("brine listening on http://localhost%s\n", addr)
+		fmt.Printf("brine listening on http://%s\n", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 		}

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"time"
@@ -8,6 +10,7 @@ import (
 
 type Config struct {
 	Port         string
+	Bind         string // literal listen address
 	DataDir      string
 	Engine       string // "docker" | "podman"
 	EngineSocket string // Docker-compatible engine host/socket, e.g. unix:///var/run/docker.sock
@@ -31,6 +34,7 @@ func Default() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
 		Port:    "8080",
+		Bind:    "127.0.0.1",
 		DataDir: filepath.Join(home, ".brine"),
 		Engine:  "docker",
 		DillBin: "dill",
@@ -43,6 +47,18 @@ func Default() *Config {
 		RequestTimeout: 30 * time.Second,
 		DeployTimeout:  30 * time.Minute,
 	}
+}
+
+// Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
+func (c *Config) Validate() error {
+	ip := net.ParseIP(c.Bind)
+	if ip == nil {
+		return fmt.Errorf("bind must be a literal IP address")
+	}
+	if c.NoAuth && !ip.IsLoopback() {
+		return fmt.Errorf("--no-auth requires a loopback bind")
+	}
+	return nil
 }
 
 func envOr(key, fallback string) string {

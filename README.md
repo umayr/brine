@@ -47,8 +47,8 @@ make build
 ./bin/brine --dill /path/to/dill
 ```
 
-On first start Brine generates an admin password and API token, prints them once, and
-writes them to `~/.brine/credentials.json` (mode `0600`):
+On first start Brine generates an admin password and API token and writes them
+to `~/.brine/credentials.json` (mode `0600`); they are not printed to logs:
 
 ```sh
 cat ~/.brine/credentials.json
@@ -67,24 +67,25 @@ The image bundles Brine, Dill (v0.5.0), and Pkl (0.31.1):
 ```sh
 docker build -t brine .
 docker run -d --name brine \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v brine-data:/data \
   -e BRINE_AUTH_PASSWORD='choose-something' \
-  brine
+  brine --bind 0.0.0.0
 ```
 
-Check `docker logs brine` for the generated credentials if you did not set a password.
+The container must bind its internal interface; publish only to host loopback.
+Read generated credentials from the private data volume, not container logs.
 
 For Podman, mount its socket and override the engine flags:
 
 ```sh
 docker run -d --name brine \
-  -p 8080:8080 \
+  -p 127.0.0.1:8080:8080 \
   -v /run/user/1000/podman/podman.sock:/run/podman/podman.sock \
   -v brine-data:/data \
   -e BRINE_AUTH_PASSWORD='choose-something' \
-  brine --engine podman --engine-socket unix:///run/podman/podman.sock
+  brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
 Build args: `DILL_VERSION` (default `0.5.0`), `PKL_VERSION` (default `0.31.1`),
@@ -141,6 +142,7 @@ development; it is explicitly unsafe on a network.
 | Flag | Environment | Default | Description |
 |---|---|---|---|
 | `--port` | | `8080` | HTTP listen port |
+| `--bind` | | `127.0.0.1` | Literal listen IP; no-auth requires loopback |
 | `--data-dir` | | `~/.brine` | Stack files, recipes, credentials |
 | `--engine` | | `docker` | `docker` or `podman` |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
@@ -155,6 +157,30 @@ development; it is explicitly unsafe on a network.
 | `--deploy-timeout` | | `30m` | Timeout for deploy/teardown/git commands |
 | `--dev` | | `false` | Re-parse templates on every request |
 | `--version` | | | Print the version |
+
+## Isolated Alpha operation
+
+Use a dedicated local Docker target and a new private data directory (`mkdir -m 700`),
+not an existing Portainer/hl engine or state directory. Keep authentication and
+CSRF enabled; bind Brine to loopback. For LAN access, retain loopback upstream and
+use a correctly configured TLS reverse proxy with `--secure-cookies`, restricting
+proxy access to the operator. Engine socket access is effectively host-level control.
+
+Use only synthetic canaries, unique stack/container/volume names and unused ports;
+use disposable isolated data, one operator and one writer/controller. Do not touch
+existing Portainer/hl stacks, Watchtower/Autoheal labels, DNS/Caddy configuration,
+or production credentials. Record an expiry and explicitly clean up only the named
+Alpha resources and its private data after checking their identity. No SSO, RBAC,
+remote enrollment, production binding provider, vault or late-bound secret provider
+is provided.
+
+Brine strips its named authentication environment variables from Dill subprocesses,
+but other inherited environment values can be visible to deployment tooling and Pkl.
+Dill/Pkl run with the server user's filesystem privileges; credentials and stack data
+are not a sandbox boundary. Errors, engine logs, streams and stored outcomes can
+contain deployment values; use synthetic secrets only and protect logs/state. Do not
+put login or API credentials in deployment data. Future mutation/history paths have
+not been security-qualified by this Alpha slice.
 
 ## Data directory
 

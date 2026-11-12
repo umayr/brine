@@ -504,7 +504,7 @@ var loginTemplate = template.Must(template.New("login").Parse(`<!DOCTYPE html>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <button type="submit">Sign in</button>
     </form>
-    <p class="login-hint">First run? Credentials are in <span class="mono">~/.brine/credentials.json</span> (or were printed at startup).</p>
+    <p class="login-hint">First run? Credentials are in <span class="mono">~/.brine/credentials.json</span> (or your configured data directory).</p>
   </main>
 </body>
 </html>
