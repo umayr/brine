@@ -11,6 +11,7 @@ candidate=${BRINE_DILL_CANDIDATE_REPO:?absolute pinned candidate checkout requir
 [[ $candidate = /* && $(git -C "$candidate" rev-parse HEAD) == "$commit" ]] || { echo 'Incorrect Dill candidate' >&2; exit 1; }
 [[ -z $(git -C "$candidate" status --porcelain) ]] || { echo 'Candidate checkout is not clean' >&2; exit 1; }
 (cd "$brine" && go test -c -o "$RUNNER_TEMP/brine-alpha.test" ./internal/dill)
+python3 "$brine/scripts/test-check-alpha-fixture-home.py"
 # Dill's script builds its candidate and exact engine, validates SO_PEERPIDFD
 # mappings, and executes its own qualification. Its EXIT trap owns the daemon.
 cd "$candidate"
@@ -68,8 +69,16 @@ for name, value in [('policy.json',policy),('binding.json',binding)]:
 for name in ['compose.pkl','policy.json','binding.json']:
     (root / name).chmod(0o600)
 PY
-home=$HOME
-if [[ $operator == 0 ]]; then home=/root; fi
+# Diagnose the former test HOME without printing paths or contents. A default
+# ACL on any ancestor is rejected by Dill even when its mode looks safe.
+if [[ $operator != 0 ]]; then
+ echo 'Original operator HOME ancestry (metadata only):'
+ run_operator /usr/bin/python3 "$brine/scripts/check-alpha-fixture-home.py" report "$HOME"
+fi
+home="$base/brine-home"
+run_operator mkdir -m 0700 "$home"
+echo 'Protected fixture HOME ancestry (metadata only):'
+run_operator /usr/bin/python3 "$brine/scripts/check-alpha-fixture-home.py" require "$home"
 common=(PATH=/usr/bin:/usr/local/bin:/bin LANG=C LC_ALL=C HOME="$home"
  GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$candidate"
  BRINE_DILL_CANDIDATE="$binary" BRINE_DILL_CANDIDATE_COMMIT="$commit"

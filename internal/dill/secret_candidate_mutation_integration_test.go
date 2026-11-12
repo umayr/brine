@@ -292,6 +292,7 @@ config {
 	preview := func() string {
 		t.Helper()
 		if _, e := s.Preview(ctx, id, stack, config); e != nil {
+			candidateCheckDiagnostic(t, ctx, s, id, stack, config)
 			t.Fatalf("preview failed: %v", e)
 		}
 		p, e := state.Preview(id, stack, "lab-a")

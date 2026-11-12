@@ -137,7 +137,14 @@ its EXIT trap, so Dill's own exact-peer SO_PEERPIDFD, protected configuration,
 non-root UID/GID mapping and real host-file qualification runs on the dedicated
 daemon before the Brine harnesses run against that same live socket. The
 wrapper separately proves the namespace maps container UID/GID 0 to its test
-fixture owner. It records the built candidate checksum, and explicitly fails
+fixture owner. Brine's test process gets a fresh operator-owned mode-0700
+HOME beneath the protected dedicated fixture root; this is separate from each
+Dill subprocess's fresh isolated runtime HOME. CI checks ownership, mode,
+no-symlink ancestry and absence of access/default ACLs, and reports only
+bounded metadata. The earlier rootless run failed before mutation; its log
+showed a default ACL on `/home`, which Dill rejects for private-file ancestry.
+The protected HOME change has not yet been qualified by a paired rerun.
+It records the built candidate checksum, and explicitly fails
 if either selected Brine test skips. No local or production engine is used.
 
 Coverage is layered, not a release claim. The pinned Dill suite exercises real

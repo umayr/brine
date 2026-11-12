@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,9 +115,41 @@ func TestCandidateDillSecretReadOnlyIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	if err = s.CheckDraft(ctx, id, stack, config); err != nil {
+		candidateCheckDiagnostic(t, ctx, s, id, stack, config)
 		t.Fatal("candidate status failed")
 	}
 	if _, err = s.Preview(ctx, id, stack, config); err != nil {
 		t.Fatal("candidate preview failed")
 	}
+}
+
+// candidateCheckDiagnostic emits only bounded phase results from synthetic CI
+// fixtures; it never prints subprocess output, paths, bindings or proofs.
+func candidateCheckDiagnostic(t *testing.T, ctx context.Context, s *SecretRunner, id string, stack, config string) {
+	t.Helper()
+	if err := s.Runner.CheckSecretCapabilities(ctx, s.Engine); err != nil {
+		t.Log("synthetic status diagnostic: capability=failed")
+		return
+	}
+	binding, err := s.State.BindingPath(id, stack, s.Target, true)
+	if err != nil {
+		t.Log("synthetic status diagnostic: binding=failed")
+		return
+	}
+	data, exit, err := s.capture(ctx, "-f", config, "-p", stack, "--engine", s.Engine, "--engine-socket", s.Socket, "--secret-target", s.Target, "secrets", "check", "--secret-bindings", binding, "--format", "json")
+	if err != nil {
+		t.Log("synthetic status diagnostic: subprocess=failed")
+		return
+	}
+	m, parseErr := strictObject(data, "contract", "status")
+	if parseErr != nil {
+		t.Logf("synthetic status diagnostic: exit=%d response=invalid", exit)
+		return
+	}
+	var contract, status string
+	if json.Unmarshal(m["contract"], &contract) != nil || json.Unmarshal(m["status"], &status) != nil {
+		t.Logf("synthetic status diagnostic: exit=%d response=invalid", exit)
+		return
+	}
+	t.Logf("synthetic status diagnostic: exit=%d contract_match=%t available=%t", exit, contract == "dill.alpha-secrets/1", status == "available")
 }
