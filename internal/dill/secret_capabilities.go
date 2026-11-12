@@ -28,23 +28,23 @@ func (r *Runner) CheckSecretCapabilities(ctx context.Context, engine string) err
 	var output boundedCapabilityOutput
 	cmd.Stdout = &output
 	cmd.WaitDelay = time.Second
-	if err := cmd.Run(); err != nil || !validSecretCapabilities(output.Bytes(), engine) {
+	if err := cmd.Run(); err != nil || output.buf.Len() > 8192 || !validSecretCapabilities(output.buf.Bytes(), engine) {
 		return ErrSecretCapabilities
 	}
 	return nil
 }
 
-type boundedCapabilityOutput struct{ bytes.Buffer }
+type boundedCapabilityOutput struct{ buf bytes.Buffer }
 
 func (b *boundedCapabilityOutput) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 8192 {
+	if b.buf.Len()+len(p) > 8192 {
 		return 0, errors.New("capability output too large")
 	}
-	return b.Buffer.Write(p)
+	return b.buf.Write(p)
 }
 
 func validSecretCapabilities(data []byte, engine string) bool {
-	if !utf8.Valid(data) {
+	if len(data) > 8192 || !utf8.Valid(data) {
 		return false
 	}
 	// Token decoding makes duplicate keys an error instead of accepting the last
@@ -56,7 +56,7 @@ func validSecretCapabilities(data []byte, engine string) bool {
 	}
 	seen := make(map[string]bool)
 	var contract, bindings, policy string
-	var engines []string
+	var engines []json.RawMessage
 	for dec.More() {
 		tok, err = dec.Token()
 		key, ok := tok.(string)
@@ -89,10 +89,15 @@ func validSecretCapabilities(data []byte, engine string) bool {
 	if len(seen) != 4 || contract != "dill.alpha-secrets/1" || bindings != "dill.secret-bindings/1" || policy != "dill.secret-policy/1" {
 		return false
 	}
-	for _, item := range engines {
+	found := false
+	for _, raw := range engines {
+		var item string
+		if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &item) != nil {
+			return false
+		}
 		if item == engine+"-host-file" {
-			return true
+			found = true
 		}
 	}
-	return false
+	return found
 }

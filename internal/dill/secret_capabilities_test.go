@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,8 @@ func TestSecretCapabilitiesStrictDiscovery(t *testing.T) {
 		{"extra", `{"contract":"dill.alpha-secrets/1","bindings":"dill.secret-bindings/1","policy":"dill.secret-policy/1","engines":["docker-host-file"],"other":1}`, "docker", false},
 		{"trailing", valid + ` {}`, "docker", false}, {"wrong-engine", valid, "other", false},
 		{"invalid-utf8", valid + "\xff", "docker", false},
+		{"null-engine", strings.Replace(valid, `"podman-host-file"`, `null`, 1), "docker", false},
+		{"non-string-engine", strings.Replace(valid, `"podman-host-file"`, `3`, 1), "docker", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := validSecretCapabilities([]byte(tc.data), tc.engine); got != tc.want {
