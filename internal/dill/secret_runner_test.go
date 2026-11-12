@@ -79,7 +79,11 @@ exit 2
 	if _, err = os.Stat(log); !os.IsNotExist(err) {
 		t.Fatal("preview applied")
 	}
-	if err = s.ConfirmAndApply(ctx, id, "demo", config); err != nil {
+	snapshot, err := st.Preview(id, "demo", "lab-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ConfirmAndApply(ctx, id, "demo", config, snapshot.Token); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.CheckActive(ctx, id, "demo", config); err != nil {
@@ -119,7 +123,11 @@ exit 2
 	if err = os.WriteFile(bin, []byte(failedScript), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.ConfirmAndApply(ctx, id, "demo", config); err != ErrSecretApplyFailed {
+	snapshot, err = st.Preview(id, "demo", "lab-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ConfirmAndApply(ctx, id, "demo", config, snapshot.Token); err != ErrSecretApplyFailed {
 		t.Fatalf("failed apply: %v", err)
 	}
 	active, err := st.Active(id, "demo", "lab-a")

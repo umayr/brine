@@ -259,6 +259,7 @@ func (s *Store) BindingPath(id, stack, target string, draft bool) (string, error
 type preview struct {
 	Candidate json.RawMessage `json:"candidate"`
 	Proof     string          `json:"proof"`
+	Token     string          `json:"token"`
 	Plan      []byte          `json:"plan"`
 	Exit      int             `json:"exit"`
 }
@@ -269,7 +270,7 @@ func validProof(p string) bool {
 }
 func validatePreview(p preview, stack, target string) (preview, error) {
 	b, err := documentBytes(p.Candidate, stack, target)
-	if err != nil || !validProof(p.Proof) || len(p.Plan) == 0 || len(p.Plan) > 256*1024 || !json.Valid(p.Plan) || (p.Exit != 0 && p.Exit != 1) {
+	if err != nil || !validProof(p.Proof) || !validProof(p.Token) || subtle.ConstantTimeCompare([]byte(p.Proof), []byte(p.Token)) == 1 || len(p.Plan) == 0 || len(p.Plan) > 256*1024 || !json.Valid(p.Plan) || (p.Exit != 0 && p.Exit != 1) {
 		return preview{}, ErrInvalid
 	}
 	p.Candidate = b
@@ -277,7 +278,7 @@ func validatePreview(p preview, stack, target string) (preview, error) {
 }
 
 func parsePreview(data []byte, stack, target string) (preview, error) {
-	m, err := object(data, "candidate", "proof", "plan", "exit")
+	m, err := object(data, "candidate", "proof", "token", "plan", "exit")
 	if err != nil || string(m["exit"]) == "null" {
 		return preview{}, ErrInvalid
 	}
@@ -294,6 +295,7 @@ type PreviewSnapshot struct {
 	Candidate []byte `json:"-"`
 	Plan      []byte `json:"-"`
 	Exit      int    `json:"-"`
+	Token     string `json:"-"`
 }
 
 // Preview retrieves the saved candidate and plan only while the draft still
@@ -318,13 +320,13 @@ func (s *Store) Preview(id, stack, target string) (PreviewSnapshot, error) {
 	if err != nil || !bytes.Equal(draft, p.Candidate) {
 		return PreviewSnapshot{}, ErrStale
 	}
-	return PreviewSnapshot{Candidate: p.Candidate, Plan: p.Plan, Exit: p.Exit}, nil
+	return PreviewSnapshot{Candidate: p.Candidate, Plan: p.Plan, Exit: p.Exit, Token: p.Token}, nil
 }
 
 // SavePreview privately records the plan and exact current draft; it never
 // activates a binding. Callers hold the shared deployment coordinator lock.
-func (s *Store) SavePreview(id, stack, target string, candidate []byte, proof string, plan []byte, exit int) error {
-	p, err := validatePreview(preview{Candidate: candidate, Proof: proof, Plan: plan, Exit: exit}, stack, target)
+func (s *Store) SavePreview(id, stack, target string, candidate []byte, proof, token string, plan []byte, exit int) error {
+	p, err := validatePreview(preview{Candidate: candidate, Proof: proof, Token: token, Plan: plan, Exit: exit}, stack, target)
 	if err != nil {
 		return err
 	}
@@ -360,7 +362,7 @@ func (s *Store) InvalidatePreview(id string) error {
 
 // ConfirmPreview requires freshly recomputed proof and plan, and activates only
 // the privately saved candidate, never the caller's draft. It does not run Dill.
-func (s *Store) ConfirmPreview(id, stack, target, proof string, plan []byte, exit int) error {
+func (s *Store) ConfirmPreview(id, stack, target, proof, token string, plan []byte, exit int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fd, err := s.deployment(id, false)
@@ -375,6 +377,9 @@ func (s *Store) ConfirmPreview(id, stack, target, proof string, plan []byte, exi
 	p, err := parsePreview(data, stack, target)
 	if err != nil {
 		_ = removeAt(fd, "preview.json")
+		return ErrStale
+	}
+	if !validProof(token) || subtle.ConstantTimeCompare([]byte(token), []byte(p.Token)) != 1 {
 		return ErrStale
 	}
 	draft, err := readAt(fd, "draft.json", MaxDocument)

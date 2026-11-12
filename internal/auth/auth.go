@@ -210,6 +210,12 @@ func localDevRequest(r *http.Request) bool {
 	return true
 }
 
+// Authenticated reports an authenticated session or bearer token, excluding no-auth mode.
+func Authenticated(r *http.Request) bool {
+	info, ok := r.Context().Value(ctxKey{}).(requestInfo)
+	return ok && (info.method == "cookie" || info.method == "bearer")
+}
+
 // CSRFFor returns the CSRF token for the current session, or "" when the
 // request was authenticated with a bearer token or auth is disabled.
 func (a *Authenticator) CSRFFor(r *http.Request) string {

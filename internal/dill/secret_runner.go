@@ -5,6 +5,8 @@ package dill
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -256,19 +258,38 @@ func (s *SecretRunner) Preview(ctx context.Context, id, stack, config string) (*
 	}
 	unlock := s.Coordinator.Lock(id)
 	defer unlock()
+	plan, _, err := s.PreviewLocked(ctx, id, stack, config)
+	return plan, err
+}
+
+// PreviewLocked requires the shared deployment coordinator lock.
+func (s *SecretRunner) PreviewLocked(ctx context.Context, id, stack, config string) (*PlanResult, string, error) {
+	if !s.valid() {
+		return nil, "", ErrSecretUnavailable
+	}
 	candidate, err := s.State.Draft(id, stack, s.Target)
 	if err != nil {
-		return nil, ErrSecretUnavailable
+		return nil, "", ErrSecretUnavailable
 	}
 	plan, data, proof, exit, err := s.plan(ctx, id, stack, config, true)
 	if err != nil {
 		_ = s.State.InvalidatePreview(id)
-		return nil, err
+		return nil, "", err
 	}
-	if err = s.State.SavePreview(id, stack, s.Target, candidate, proof, data, exit); err != nil {
-		return nil, ErrSecretUnavailable
+	var random [32]byte
+	if _, err = rand.Read(random[:]); err != nil {
+		_ = s.State.InvalidatePreview(id)
+		return nil, "", ErrSecretUnavailable
 	}
-	return plan, nil
+	token := base64.RawURLEncoding.EncodeToString(random[:])
+	if subtle.ConstantTimeCompare([]byte(token), []byte(proof)) == 1 {
+		_ = s.State.InvalidatePreview(id)
+		return nil, "", ErrSecretUnavailable
+	}
+	if err = s.State.SavePreview(id, stack, s.Target, candidate, proof, token, data, exit); err != nil {
+		return nil, "", ErrSecretUnavailable
+	}
+	return plan, token, nil
 }
 
 // ApplyActive deploys only an already-approved active binding, never the draft.
@@ -300,19 +321,34 @@ func (s *SecretRunner) applyActive(ctx context.Context, id, stack, config string
 
 // ConfirmAndApply repeats the candidate plan while locked, activates exactly
 // the saved preview after constant-time proof comparison, then runs checked up.
-func (s *SecretRunner) ConfirmAndApply(ctx context.Context, id, stack, config string) error {
+func (s *SecretRunner) ConfirmAndApply(ctx context.Context, id, stack, config, token string) error {
 	if !s.valid() {
 		return ErrSecretUnavailable
 	}
 	unlock := s.Coordinator.Lock(id)
 	defer unlock()
+	return s.ConfirmAndApplyLocked(ctx, id, stack, config, token)
+}
+
+// ConfirmAndApplyLocked requires the shared deployment coordinator lock.
+func (s *SecretRunner) ConfirmAndApplyLocked(ctx context.Context, id, stack, config, token string) error {
+	if !s.valid() {
+		return ErrSecretUnavailable
+	}
+	snapshot, err := s.State.Preview(id, stack, s.Target)
+	if err != nil || subtle.ConstantTimeCompare([]byte(token), []byte(snapshot.Token)) != 1 {
+		return secretbindings.ErrStale
+	}
 	_, data, proof, exit, err := s.plan(ctx, id, stack, config, true)
 	if err != nil {
 		_ = s.State.InvalidatePreview(id)
 		return err
 	}
-	if err = s.State.ConfirmPreview(id, stack, s.Target, proof, data, exit); err != nil {
-		return ErrSecretUnavailable
+	if err = s.State.ConfirmPreview(id, stack, s.Target, proof, token, data, exit); err != nil {
+		if errors.Is(err, secretbindings.ErrStale) {
+			return secretbindings.ErrStale
+		}
+		return ErrSecretApplyFailed
 	}
 	return s.applyActive(ctx, id, stack, config)
 }
@@ -335,6 +371,14 @@ func (s *SecretRunner) check(ctx context.Context, id, stack, config string, draf
 	}
 	unlock := s.Coordinator.Lock(id)
 	defer unlock()
+	return s.CheckLocked(ctx, id, stack, config, draft)
+}
+
+// CheckLocked requires the shared deployment coordinator lock.
+func (s *SecretRunner) CheckLocked(ctx context.Context, id, stack, config string, draft bool) error {
+	if !s.valid() || !filepath.IsAbs(config) {
+		return ErrSecretUnavailable
+	}
 	if err := s.Runner.CheckSecretCapabilities(ctx, s.Engine); err != nil {
 		return err
 	}

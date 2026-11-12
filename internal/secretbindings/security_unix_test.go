@@ -25,8 +25,9 @@ func TestPreviewKeyRotationInvalidates(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
+	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
 	plan := []byte(`{"changes":[]}`)
-	if err = s.SavePreview("demo", "demo", "lab-a", doc, p, plan, 0); err != nil {
+	if err = s.SavePreview("demo", "demo", "lab-a", doc, p, token, plan, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.RotateProofKey("demo"); err != nil {
@@ -36,7 +37,7 @@ func TestPreviewKeyRotationInvalidates(t *testing.T) {
 	if err != nil || bytes.Equal(old, next) {
 		t.Fatal("key did not rotate")
 	}
-	if err = s.ConfirmPreview("demo", "demo", "lab-a", p, plan, 0); !errors.Is(err, ErrStale) {
+	if err = s.ConfirmPreview("demo", "demo", "lab-a", p, token, plan, 0); !errors.Is(err, ErrStale) {
 		t.Fatal("old preview accepted")
 	}
 	path, err := s.ProofKeyPath("demo")

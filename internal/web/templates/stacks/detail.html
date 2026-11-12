@@ -132,6 +132,27 @@
   <!-- Plan result (populated on demand) -->
   <div id="plan-result"></div>
 
+  <section id="secret-bindings" class="ui-panel p-5 space-y-3" data-stack="{{.Stack.Name}}" aria-labelledby="secret-bindings-title">
+    <h2 id="secret-bindings-title" class="font-semibold">File secret references</h2>
+    <p class="text-sm text-muted">References only: never enter secret values or host paths. Provision source files and policy externally. Saving a draft does not rotate a running workload.</p>
+    <p id="secret-message" role="status" aria-live="polite" class="text-sm">Checking availability…</p>
+    <div id="secret-editor" hidden>
+      <div class="text-sm">Active references</div><pre id="secret-active" class="text-xs whitespace-pre-wrap"></pre>
+      <div class="text-sm font-semibold">Draft references</div>
+      <div id="secret-rows" class="space-y-2"></div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" id="secret-add" class="ui-button ui-button-ghost ui-button-sm">Add reference</button>
+        <button type="button" id="secret-save" class="ui-button ui-button-outline ui-button-sm">Save draft</button>
+        <button type="button" id="secret-status" class="ui-button ui-button-ghost ui-button-sm">Check draft availability</button>
+        <button type="button" id="secret-active-status" class="ui-button ui-button-ghost ui-button-sm">Check active availability</button>
+        <button type="button" id="secret-preview" class="ui-button ui-button-primary ui-button-sm">Preview draft</button>
+        <button type="button" id="secret-confirm" class="ui-button ui-button-danger ui-button-sm" disabled>Confirm and apply preview</button>
+      </div>
+      <pre id="secret-plan" class="text-xs whitespace-pre-wrap" aria-label="Secret reference plan"></pre>
+    </div>
+  </section>
+  <script src="/static/secret-bindings.js" defer></script>
+
   <!-- Action output terminal -->
   <div id="action-output" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">

@@ -1,12 +1,10 @@
 # Alpha file secrets: implementation status
 
 Brine's bundled Dill 0.5.0 does **not** support the Alpha file-secret contract.
-The reference editor, reviewed rotation and secret-enabled deployment workflow
-are not available in this build. Do not use this build to deploy secret-enabled
-recipes. Capability discovery in the source tree is a foundation, not an enabled
-feature or a readiness check. The reference UI is not yet available and paired
-Dill/runtime qualification is pending; do not use the implementation for
-secret-enabled deployments yet.
+The reference editor, review and confirmation paths exist for paired testing,
+but the bundled binary cannot run them. Paired Dill/runtime qualification is
+pending; do not use this build to deploy secret-enabled recipes. Capability
+discovery checks interface compatibility, not target readiness.
 
 Supplying both `--secret-target` and an absolute `--secret-policy`, together
 with an explicit local `--engine-socket`, selects strict mode. In strict mode

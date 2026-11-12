@@ -52,8 +52,9 @@ func TestStoreDraftPreviewActiveIsolation(t *testing.T) {
 		t.Fatal("cross-deployment read")
 	}
 	proof := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 32))
+	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))
 	plan := []byte("{ \"changes\": [] }")
-	if err := s.SavePreview("deployment-a", "demo", "lab-a", doc, proof, plan, 1); err != nil {
+	if err := s.SavePreview("deployment-a", "demo", "lab-a", doc, proof, token, plan, 1); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := s.Preview("deployment-a", "demo", "lab-a")
@@ -64,16 +65,16 @@ func TestStoreDraftPreviewActiveIsolation(t *testing.T) {
 	if err != nil || strings.Contains(string(serialized), proof) || strings.Contains(string(serialized), "db-prod") {
 		t.Fatal("private preview serialized")
 	}
-	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, []byte(`{}`), 1); !errors.Is(err, ErrStale) {
+	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, token, []byte(`{}`), 1); !errors.Is(err, ErrStale) {
 		t.Fatalf("changed plan: %v", err)
 	}
-	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, plan, 1); !errors.Is(err, ErrStale) {
+	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, token, plan, 1); !errors.Is(err, ErrStale) {
 		t.Fatalf("preview not invalidated: %v", err)
 	}
-	if err := s.SavePreview("deployment-a", "demo", "lab-a", doc, proof, plan, 1); err != nil {
+	if err := s.SavePreview("deployment-a", "demo", "lab-a", doc, proof, token, plan, 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, plan, 1); err != nil {
+	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, token, plan, 1); err != nil {
 		t.Fatal(err)
 	}
 	active, err := s.Active("deployment-a", "demo", "lab-a")
@@ -100,7 +101,7 @@ func TestStoreDraftPreviewActiveIsolation(t *testing.T) {
 	if err != nil || !bytes.Equal(active, after) {
 		t.Fatalf("draft altered active: %v", err)
 	}
-	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, plan, 1); !errors.Is(err, ErrStale) {
+	if err := s.ConfirmPreview("deployment-a", "demo", "lab-a", proof, token, plan, 1); !errors.Is(err, ErrStale) {
 		t.Fatalf("stale preview: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "draft.json")); !errors.Is(err, os.ErrNotExist) {
