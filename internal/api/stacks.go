@@ -41,6 +41,7 @@ func (h *stackHandler) list(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -65,6 +66,7 @@ func (h *stackHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and pkl_content are required")
 		return
 	}
+	defer h.lockStack(req.Name)()
 	stack, err := h.store.Create(req.Name, pkl.WithStackName(req.PklContent, req.Name))
 	if err != nil {
 		status := http.StatusBadRequest
@@ -83,6 +85,7 @@ type updateRequest struct {
 
 func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -98,6 +101,7 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -131,6 +135,7 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -150,12 +155,10 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if !h.ensureRuntimeEngine(w, stack) {
 		return
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
@@ -168,12 +171,10 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if !h.ensureRuntimeEngine(w, stack) {
 		return
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
@@ -186,6 +187,7 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -204,6 +206,7 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -226,11 +229,16 @@ type teardownRequest struct {
 
 func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	var req teardownRequest
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if _, err := h.store.ReadPkl(stack.Name); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "teardown requires a safe recipe; stop and down remain available")
 		return
 	}
 	if !h.ensureRuntimeEngine(w, stack) {
@@ -246,6 +254,7 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -264,6 +273,7 @@ func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -278,6 +288,7 @@ func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) containers(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	all, err := h.agent.Engine().ListContainers(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -296,6 +307,7 @@ func (h *stackHandler) containers(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) listFiles(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	files, err := h.store.Files(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -306,6 +318,7 @@ func (h *stackHandler) listFiles(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	filename := chi.URLParam(r, "filename")
 	content, err := h.store.ReadFile(name, filename)
 	if err != nil {
@@ -317,6 +330,7 @@ func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	filename := chi.URLParam(r, "filename")
 	var body struct {
 		Content string `json:"content"`
@@ -334,6 +348,7 @@ func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	filename := chi.URLParam(r, "filename")
 	if err := h.store.DeleteFile(name, filename); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -344,6 +359,7 @@ func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) setEntrypoint(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	var body struct {
 		Filename string `json:"filename"`
 	}
@@ -388,6 +404,7 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clone.
+	defer h.lockStack(req.Name)()
 	ctx := r.Context()
 	if err := h.git.Clone(ctx, req.Git.URL, req.Git.Branch, repoDir); err != nil {
 		writeError(w, http.StatusBadGateway, "git clone: "+err.Error())
@@ -405,6 +422,7 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 // gitInfo returns the git source configuration and sync status.
 func (h *stackHandler) gitInfo(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -420,6 +438,7 @@ func (h *stackHandler) gitInfo(w http.ResponseWriter, r *http.Request) {
 // gitPull fetches and merges from origin.
 func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -429,7 +448,11 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "stack is not git-backed")
 		return
 	}
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
@@ -446,6 +469,7 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 // gitPush commits local changes and pushes to origin. Streams output.
 func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -467,7 +491,11 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 		body.Message = "chore: update stack via brine"
 	}
 
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -513,6 +541,7 @@ func (h *stackHandler) ensureRuntimeEngine(w http.ResponseWriter, stack *store.S
 // gitUpdateSource updates the git source configuration (branch, folder, auto_deploy, etc.).
 func (h *stackHandler) gitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -554,4 +583,12 @@ func (h *stackHandler) gitUpdateSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, &src)
+}
+
+// lockStack shares the same coordinator with Git sync and secret previews.
+func (h *stackHandler) lockStack(name string) func() {
+	if h.agent == nil || h.agent.Dill() == nil {
+		return func() {}
+	}
+	return h.agent.Dill().LockStack(name)
 }

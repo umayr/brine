@@ -58,6 +58,7 @@ config {
 
 func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -109,6 +110,7 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -197,6 +199,7 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	defer h.lockStack(name)()
 	entrypointContent = pkl.WithStackName(entrypointContent, name)
 
 	if _, err := h.store.Create(name, entrypointContent); err != nil {
@@ -221,6 +224,7 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -244,6 +248,7 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderAlert(w, "error", "Stack not found")
@@ -279,6 +284,7 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -312,6 +318,7 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderAlert(w, "error", "Stack not found")
@@ -337,6 +344,7 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderPartial(w, r, "stack-containers", nil)
@@ -367,6 +375,7 @@ func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -387,6 +396,7 @@ func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	filename := chi.URLParam(r, "filename")
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
@@ -402,6 +412,7 @@ func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	filename := chi.URLParam(r, "filename")
 	if err := h.store.DeleteFile(name, filename); err != nil {
 		h.renderAlert(w, "error", err.Error())
@@ -413,6 +424,7 @@ func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackSetEntrypoint(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -461,7 +473,12 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 		PollInterval: pollInterval,
 	}
 
-	repoDir, _ := h.store.RepoDir(name)
+	defer h.lockStack(name)()
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		h.renderAlert(w, "error", "Repository directory unavailable")
+		return
+	}
 	if err := h.git.Clone(r.Context(), gitURL, branch, repoDir); err != nil {
 		h.renderAlert(w, "error", "git clone failed: "+err.Error())
 		return
@@ -477,12 +494,17 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 // stackGitPull pulls from origin and shows the result.
 func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil || stack.Git == nil {
 		h.renderAlert(w, "error", "Stack not found or not git-backed")
 		return
 	}
-	repoDir, _ := h.store.RepoDir(name)
+	repoDir, err := h.store.RepoDir(name)
+	if err != nil {
+		h.renderAlert(w, "error", "Repository directory unavailable")
+		return
+	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	changed, err := h.git.Pull(ctx, repoDir)
@@ -503,6 +525,7 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 // stackGitUpdateSource saves updated git source settings.
 func (h *Handler) stackGitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
+	defer h.lockStack(name)()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -545,4 +568,11 @@ func htmlEscape(s string) string {
 		`"`, "&#34;",
 	)
 	return replacer.Replace(s)
+}
+
+func (h *Handler) lockStack(name string) func() {
+	if h.agent == nil || h.agent.Dill() == nil {
+		return func() {}
+	}
+	return h.agent.Dill().LockStack(name)
 }

@@ -36,6 +36,8 @@ func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 			r.Post("/stacks/{name}/teardown", sh.teardown)
 			r.Post("/stacks/{name}/git/pull", sh.gitPull)
 			r.Post("/stacks/{name}/git/push", sh.gitPush)
+			r.Post("/stacks/{name}/secret-bindings/preview", sh.secretPreview)
+			r.Post("/stacks/{name}/secret-bindings/confirm", sh.secretConfirm)
 		})
 
 		// Everything else is short-lived.
@@ -54,6 +56,10 @@ func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 					r.Get("/plan", sh.plan)
 					r.Get("/validate", sh.validate)
 					r.Get("/containers", sh.containers)
+					r.Get("/secret-bindings", sh.secretBindingsGet)
+					r.Put("/secret-bindings", sh.secretBindingsPut)
+					r.Post("/secret-bindings/status", sh.secretStatus)
+					r.Get("/secret-bindings/status", sh.secretStatus)
 
 					// Multi-file management
 					r.Get("/files", sh.listFiles)

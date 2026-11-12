@@ -101,6 +101,7 @@ config {
 		t.Fatal(err)
 	}
 	runner := New(binary)
+	runner.PklBinary = pkl
 	assertInvalidJSON := func(t *testing.T, cmd *exec.Cmd) {
 		t.Helper()
 		out, err := cmd.Output()
@@ -115,6 +116,35 @@ config {
 			t.Fatalf("unexpected invalid validation JSON: %q, %v", out, err)
 		}
 	}
+	t.Run("PrivateHome", func(t *testing.T) {
+		operatorHome := t.TempDir()
+		t.Setenv("HOME", operatorHome)
+		if err := os.WriteFile(filepath.Join(operatorHome, "credential-canary"), []byte("synthetic"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		log := filepath.Join(dir, "runtime-home")
+		wrapper := filepath.Join(dir, "real-dill-wrapper")
+		quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+		script := "#!/bin/sh\nprintf '%s' \"$HOME\" > " + quote(log) + "\nexec " + quote(binary) + " \"$@\"\n"
+		if err := os.WriteFile(wrapper, []byte(script), 0700); err != nil {
+			t.Fatal(err)
+		}
+		r := New(wrapper)
+		r.PklBinary = pkl
+		if err := r.Validate(ctx, path); err != nil {
+			t.Fatalf("released validation with isolated HOME: %v", err)
+		}
+		home, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(home) == 0 || string(home) == operatorHome {
+			t.Fatal("operator HOME inherited")
+		}
+		if _, err := os.Stat(string(home)); !os.IsNotExist(err) {
+			t.Fatal("runtime HOME not removed")
+		}
+	})
 	t.Run("Validate", func(t *testing.T) {
 		if err := runner.Validate(ctx, path); err != nil {
 			t.Fatalf("valid file: %v", err)

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // FSStore is a filesystem-backed StackStore.
@@ -22,10 +24,16 @@ type FSStore struct {
 // NewFSStore creates an FSStore rooted at dataDir, creating the stacks
 // subdirectory if it does not already exist.
 func NewFSStore(dataDir string) (*FSStore, error) {
+	if info, err := os.Lstat(dataDir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("unsafe data directory")
+	}
 	if err := mkdirPrivate(dataDir); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	stacksDir := filepath.Join(dataDir, "stacks")
+	if info, err := os.Lstat(stacksDir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("unsafe stacks directory")
+	}
 	if err := mkdirPrivate(stacksDir); err != nil {
 		return nil, fmt.Errorf("create stacks dir: %w", err)
 	}
@@ -70,7 +78,12 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 	if err := ValidateStackName(name); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(s.metaPath(name))
+	fd, err := s.stackFD(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(fd)
+	data, err := readWorkspaceFile(fd, "meta.json")
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +111,12 @@ func (s *FSStore) writeMeta(stack *Stack) error {
 	if err != nil {
 		return err
 	}
-	return writeFilePrivate(s.metaPath(stack.Name), data)
+	fd, err := s.stackFD(stack.Name)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(fd)
+	return writeWorkspaceFile(fd, "meta.json", data)
 }
 
 func (s *FSStore) List() ([]*Stack, error) {
@@ -187,8 +205,12 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 		return nil, fmt.Errorf("stack %q is read-only (git-backed)", name)
 	}
 	ep := entrypointOrDefault(stack.Entrypoint)
-	epPath := filepath.Join(s.filesDir(name, stack.Git), ep)
-	if err := writeFilePrivate(epPath, []byte(pklContent)); err != nil {
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	if err := writeWorkspaceFile(fd, ep, []byte(pklContent)); err != nil {
 		return nil, fmt.Errorf("write pkl: %w", err)
 	}
 	stack.UpdatedAt = time.Now()
@@ -221,7 +243,12 @@ func (s *FSStore) ReadPkl(name string) (string, error) {
 		return "", fmt.Errorf("stack %q not found", name)
 	}
 	ep := entrypointOrDefault(stack.Entrypoint)
-	data, err := os.ReadFile(filepath.Join(s.filesDir(name, stack.Git), ep))
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return "", fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	data, err := readWorkspaceFile(fd, ep)
 	if err != nil {
 		return "", fmt.Errorf("read pkl for %q: %w", name, err)
 	}
@@ -239,8 +266,13 @@ func (s *FSStore) Files(name string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("stack %q not found", name)
 	}
-	dir := s.filesDir(name, stack.Git)
-	entries, err := os.ReadDir(dir)
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe workspace")
+	}
+	dir := os.NewFile(uintptr(fd), "workspace")
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -250,6 +282,11 @@ func (s *FSStore) Files(name string) ([]string, error) {
 	var files []string
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pkl") {
+			f, err := openWorkspaceFile(fd, e.Name(), unix.O_RDONLY)
+			if err != nil {
+				continue
+			}
+			f.Close()
 			files = append(files, e.Name())
 		}
 	}
@@ -270,7 +307,12 @@ func (s *FSStore) ReadFile(name, filename string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("stack %q not found", name)
 	}
-	data, err := os.ReadFile(filepath.Join(s.filesDir(name, stack.Git), filename))
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return "", fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	data, err := readWorkspaceFile(fd, filename)
 	if err != nil {
 		return "", fmt.Errorf("read file %q: %w", filename, err)
 	}
@@ -294,7 +336,12 @@ func (s *FSStore) WriteFile(name, filename, content string) error {
 	if stack.Git != nil && stack.Git.ReadOnly {
 		return fmt.Errorf("stack %q is read-only (git-backed)", name)
 	}
-	if err := writeFilePrivate(filepath.Join(s.filesDir(name, stack.Git), filename), []byte(content)); err != nil {
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	if err := writeWorkspaceFile(fd, filename, []byte(content)); err != nil {
 		return fmt.Errorf("write file %q: %w", filename, err)
 	}
 	stack.UpdatedAt = time.Now()
@@ -321,7 +368,17 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 	if entrypointOrDefault(stack.Entrypoint) == filename {
 		return fmt.Errorf("cannot delete the entrypoint file %q", filename)
 	}
-	return os.Remove(filepath.Join(s.filesDir(name, stack.Git), filename))
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	f, err := openWorkspaceFile(fd, filename, unix.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return unix.Unlinkat(fd, filename, 0)
 }
 
 // SetEntrypoint changes the entrypoint file for a stack.
@@ -342,9 +399,16 @@ func (s *FSStore) SetEntrypoint(name, filename string) error {
 		return fmt.Errorf("stack %q is read-only (git-backed)", name)
 	}
 	dir := s.filesDir(name, stack.Git)
-	if _, err := os.Stat(filepath.Join(dir, filename)); err != nil {
+	fd, err := s.workspaceFD(name, stack.Git)
+	if err != nil {
+		return fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
+	f, err := openWorkspaceFile(fd, filename, unix.O_RDONLY)
+	if err != nil {
 		return fmt.Errorf("file %q does not exist in stack", filename)
 	}
+	f.Close()
 	stack.Entrypoint = filename
 	stack.PklPath = filepath.Join(dir, filename)
 	stack.UpdatedAt = time.Now()
@@ -376,16 +440,24 @@ func (s *FSStore) CreateFromGit(name string, src *GitSource, entrypoint string) 
 	if _, err := os.Stat(s.metaPath(name)); err == nil {
 		return nil, fmt.Errorf("stack %q already exists", name)
 	}
-	if err := mkdirPrivate(s.stackDir(name)); err != nil {
-		return nil, fmt.Errorf("create stack dir: %w", err)
+	stackFD, err := s.stackFD(name)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe stack directory")
 	}
+	unix.Close(stackFD)
 	filesDir := s.filesDir(name, src)
 	pklPath := filepath.Join(filesDir, entrypoint)
 	// Verify the entrypoint exists in the cloned repo.
-	if _, err := os.Stat(pklPath); err != nil {
-		_ = os.RemoveAll(s.stackDir(name))
-		return nil, fmt.Errorf("entrypoint %q not found in repo (folder: %q)", entrypoint, src.Folder)
+	fd, err := s.workspaceFD(name, src)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe workspace")
 	}
+	f, err := openWorkspaceFile(fd, entrypoint, unix.O_RDONLY)
+	unix.Close(fd)
+	if err != nil {
+		return nil, fmt.Errorf("unsafe entrypoint")
+	}
+	f.Close()
 	now := time.Now()
 	stack := &Stack{
 		Name:       name,
@@ -444,6 +516,11 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 	if stack.Git == nil {
 		return fmt.Errorf("stack %q is not git-backed", name)
 	}
+	fd, err := s.workspaceFD(name, src)
+	if err != nil {
+		return fmt.Errorf("unsafe workspace")
+	}
+	defer unix.Close(fd)
 	// Preserve status fields; only update config fields.
 	src.LastSyncAt = stack.Git.LastSyncAt
 	src.LastCommit = stack.Git.LastCommit
@@ -458,6 +535,21 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 func (s *FSStore) RepoDir(name string) (string, error) {
 	if err := ValidateStackName(name); err != nil {
 		return "", err
+	}
+	fd, err := s.stackFD(name)
+	if os.IsNotExist(err) {
+		return s.repoDir(name), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("unsafe stack directory")
+	}
+	defer unix.Close(fd)
+	repo, err := unix.Openat(fd, "repo", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("unsafe repository directory")
+	}
+	if err == nil {
+		unix.Close(repo)
 	}
 	return s.repoDir(name), nil
 }

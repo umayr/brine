@@ -33,11 +33,25 @@ type LocalAgent struct {
 
 // NewLocalAgent creates a LocalAgent with the given engine and dill runner.
 func NewLocalAgent(eng engine.Engine, runner *dill.Runner) *LocalAgent {
+	if eng != nil {
+		guard := &engine.LifecycleGuard{Engine: eng}
+		if runner != nil {
+			guard.LockStack = runner.LockStack
+		}
+		eng = guard
+	}
 	return &LocalAgent{
 		id:     "local",
 		name:   "local",
 		eng:    eng,
 		runner: runner,
+	}
+}
+
+// SetSecretRecordLookup configures trusted persisted classification at startup.
+func (a *LocalAgent) SetSecretRecordLookup(lookup func(string) (bool, error)) {
+	if guard, ok := a.eng.(*engine.LifecycleGuard); ok {
+		guard.SecretEnabled = lookup
 	}
 }
 
