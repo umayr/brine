@@ -71,6 +71,12 @@ go test -count=1 -run TestCandidateDillSecretDisposableMutation ./internal/dill
 It exercises checked application and rotation, read-only host mount inspection,
 stale config/import/policy/live-state confirmation, and cleanup after deliberately
 renaming its own synthetic source directory to simulate external disappearance.
+Down is expected to remove all owned containers while retaining the exact owned
+network and returning a nonzero resource error; the harness checks the complete
+synthetic output and network identity rather than reporting down as successful.
+Deferred fixture cleanup accepts only that same verified retention outcome (or
+ordinary successful cleanup if the network was never created). The disposable
+daemon EXIT teardown can remove the retained network.
 The directory is restored even on failure; source bytes and modes are checked
 before test fixture disposal. This deliberate test fault injection is not product
 behavior. A failed test may leave disposable engine resources requiring CI

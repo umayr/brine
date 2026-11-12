@@ -21,11 +21,29 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 	"github.com/umayr/brine/internal/secretbindings"
 	"golang.org/x/sys/unix"
 )
+
+// expectedRetainedNetworkOutput recognizes only the pinned candidate's complete
+// synthetic down output, including its optional single fixture progress line.
+func expectedRetainedNetworkOutput(engine, stack, output string, err error) bool {
+	if err == nil || (engine != "docker" && engine != "podman") {
+		return false
+	}
+	engineName := "Docker"
+	if engine == "podman" {
+		engineName = "Podman"
+	}
+	message := fmt.Sprintf("remove network (resource may be retained) %q (id ): network %q retained: %s resolves deletion targets as names or IDs and cannot guarantee identity-safe removal; remove manually after verifying ownership", stack, stack, engineName)
+	fatal := fmt.Sprintf("ERRO fatal err=%q\n", message)
+	progress := fmt.Sprintf("  %-14s %s\n", "removing", "app")
+	return output == fatal || output == progress+fatal
+}
 
 // This test MUTATES an explicitly disposable, pre-provisioned Linux engine.
 // It creates its own private synthetic sources and never uses caller source paths.
@@ -211,19 +229,47 @@ config {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	defer func() {
-		var out bytes.Buffer
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cleanupCancel()
-		if e := runner.Down(cleanupCtx, config, &out); e != nil {
-			t.Errorf("disposable stack cleanup failed: %v", e)
-		}
-	}()
 	cli, err := client.NewClientWithOpts(client.WithHost("unix://"+socket), client.WithAPIVersionNegotiation())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer cli.Close()
+	inspectNetwork := func(c context.Context) (network.Inspect, error) {
+		return cli.NetworkInspect(c, stack, network.InspectOptions{})
+	}
+	ownedNetwork := func(n network.Inspect) bool {
+		return n.ID != "" && n.Name == stack && n.Labels["dill.managed"] == "true" && n.Labels["dill.stack"] == stack
+	}
+	noOwnedContainers := func(c context.Context) error {
+		items, e := cli.ContainerList(c, container.ListOptions{All: true})
+		if e != nil {
+			return e
+		}
+		for _, item := range items {
+			if item.Labels["dill.managed"] == "true" && item.Labels["dill.stack"] == stack {
+				return fmt.Errorf("owned fixture container remains: %s", item.ID)
+			}
+		}
+		return nil
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		before, beforeErr := inspectNetwork(cleanupCtx)
+		var out bytes.Buffer
+		e := runner.Down(cleanupCtx, config, &out)
+		if cleanupCtx.Err() == nil && e == nil && errdefs.IsNotFound(beforeErr) && (out.String() == "" || out.String() == fmt.Sprintf("  %-14s %s\n", "removing", "app")) {
+			if containersErr := noOwnedContainers(cleanupCtx); containersErr != nil {
+				t.Errorf("disposable cleanup: %v", containersErr)
+			}
+			return
+		}
+		after, afterErr := inspectNetwork(cleanupCtx)
+		containersErr := noOwnedContainers(cleanupCtx)
+		if cleanupCtx.Err() != nil || beforeErr != nil || !ownedNetwork(before) || !expectedRetainedNetworkOutput(engine, stack, out.String(), e) || afterErr != nil || !ownedNetwork(after) || before.ID != after.ID || containersErr != nil {
+			t.Errorf("disposable cleanup failed (network before=%v after=%v, containers=%v, down=%v, output=%q)", beforeErr, afterErr, containersErr, e, boundedSyntheticOutput(out.String()))
+		}
+	}()
 	assertMount := func(expected string) {
 		t.Helper()
 		info, e := cli.ContainerInspect(ctx, stack+"_app")
@@ -362,6 +408,10 @@ config {
 		t.Fatalf("rotated source unavailable: %v", err)
 	}
 	assertMount(source2)
+	beforeNetwork, err := inspectNetwork(ctx)
+	if err != nil || !ownedNetwork(beforeNetwork) {
+		t.Fatal("fixture network missing or not owned")
+	}
 	// Deliberate external disappearance injection on this test-owned source directory.
 	assertOwnedSources()
 	missing := sourceDir + ".unavailable"
@@ -382,12 +432,16 @@ config {
 	runner.PklBinary = unavailablePkl
 	err = runner.Down(ctx, config, &output)
 	runner.PklBinary = pkl
-	if err != nil {
-		t.Fatalf("cleanup with missing source and unavailable Pkl failed: %v", err)
+	if ctx.Err() != nil || !expectedRetainedNetworkOutput(engine, stack, output.String(), err) {
+		t.Fatalf("unexpected cleanup outcome: %v; output=%q", err, boundedSyntheticOutput(output.String()))
 	}
 	assertNoPkl()
-	if _, err = cli.ContainerInspect(ctx, stack+"_app"); !errdefs.IsNotFound(err) {
-		t.Fatal("fixture container remains after cleanup")
+	if err = noOwnedContainers(ctx); err != nil {
+		t.Fatalf("cleanup left owned containers: %v", err)
+	}
+	afterNetwork, err := inspectNetwork(ctx)
+	if err != nil || !ownedNetwork(afterNetwork) || afterNetwork.ID != beforeNetwork.ID {
+		t.Fatal("owned network identity was not retained")
 	}
 	for _, item := range []struct{ name, content string }{{"synthetic", "synthetic-ci-only\n"}, {"synthetic-r2", "synthetic-ci-rotation\n"}} {
 		path := filepath.Join(missing, item.name)
@@ -400,4 +454,12 @@ config {
 	if err = os.Rename(missing, sourceDir); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Outputs here are from the synthetic-only fixture, never a production workload.
+func boundedSyntheticOutput(s string) string {
+	if len(s) > 4096 {
+		return s[:4096] + "..."
+	}
+	return s
 }
