@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os/exec"
 	"time"
 	"unicode/utf8"
 )
@@ -23,11 +22,13 @@ func (r *Runner) CheckSecretCapabilities(ctx context.Context, engine string) err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.executable(), "secret-capabilities", "--format", "json")
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+	cmd, cleanup, err := r.command(ctx, "secret-capabilities", "--format", "json")
+	if err != nil {
+		return ErrSecretCapabilities
+	}
+	defer cleanup()
 	var output boundedCapabilityOutput
 	cmd.Stdout = &output
-	cmd.WaitDelay = time.Second
 	if err := cmd.Run(); err != nil || output.buf.Len() > 8192 || !validSecretCapabilities(output.buf.Bytes(), engine) {
 		return ErrSecretCapabilities
 	}

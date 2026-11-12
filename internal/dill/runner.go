@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/umayr/brine/internal/secretbindings"
 )
@@ -135,20 +136,38 @@ func (r *Runner) executable() string {
 	return filepath.Join("/usr/local/bin", r.Binary)
 }
 
-// command never inherits the Brine server process environment.
-func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
+// command gives each invocation a private, empty home rather than exposing the
+// server operator's credentials or Pkl configuration. The caller must clean it
+// up after the subprocess exits, including on start failure or cancellation.
+func (r *Runner) command(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
+	home, err := os.MkdirTemp("", "brine-dill-home-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create private Dill runtime home: %w", err)
+	}
+	absoluteHome, err := filepath.Abs(home)
+	if err != nil {
+		_ = os.RemoveAll(home)
+		return nil, nil, fmt.Errorf("resolve private Dill runtime home: %w", err)
+	}
+	home = absoluteHome
+	cleanup := func() { _ = os.RemoveAll(home) }
 	cmd := exec.CommandContext(ctx, r.executable(), args...)
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C"}
+	cmd.WaitDelay = time.Second
+	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C", "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config"), "XDG_CACHE_HOME=" + filepath.Join(home, "cache")}
 	if r.PklBinary != "" {
 		cmd.Env = append(cmd.Env, "DILL_PKL_PATH="+r.PklBinary)
 	}
-	return cmd
+	return cmd, cleanup, nil
 }
 
 // run executes the dill binary with the given arguments, streaming combined
 // stdout+stderr to w. Returns an error if the process exits non-zero.
 func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
-	cmd := r.command(ctx, args...)
+	cmd, cleanup, err := r.command(ctx, args...)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -160,10 +179,14 @@ func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
 // capture runs dill and returns combined output as a string.
 func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 	var buf bytes.Buffer
-	cmd := r.command(ctx, args...)
+	cmd, cleanup, err := r.command(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	err := cmd.Run()
+	err = cmd.Run()
 	return buf.String(), err
 }
 
@@ -337,7 +360,11 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	cmd := r.command(ctx, "-f", pklPath, "validate", "--stdin", "--format", "json")
+	cmd, cleanup, err := r.command(ctx, "-f", pklPath, "validate", "--stdin", "--format", "json")
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -361,7 +388,11 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 // The pklPath is used for context (directory resolution of PKL imports).
 func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, error) {
 	var stdout, stderr bytes.Buffer
-	cmd := r.command(ctx, "-f", pklPath, "fmt", "--stdin")
+	cmd, cleanup, err := r.command(ctx, "-f", pklPath, "fmt", "--stdin")
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

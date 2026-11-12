@@ -35,14 +35,22 @@ type SecretRunner struct {
 func (s *SecretRunner) valid() bool {
 	return s != nil && s.Runner != nil && s.State != nil && s.Coordinator != nil && (s.Engine == "docker" || s.Engine == "podman") && filepath.IsAbs(s.Socket) && filepath.Clean(s.Socket) == s.Socket && filepath.IsAbs(s.Policy) && filepath.Clean(s.Policy) == s.Policy && (s.PklBinary == "" || filepath.IsAbs(s.PklBinary))
 }
-func (s *SecretRunner) command(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, s.Runner.executable(), args...)
-	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C", "DILL_SECRET_POLICY=" + s.Policy}
+func (s *SecretRunner) command(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
+	cmd, cleanup, err := s.Runner.command(ctx, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	cmd.Env = append(cmd.Env, "DILL_SECRET_POLICY="+s.Policy)
 	if s.PklBinary != "" {
+		for i, entry := range cmd.Env {
+			if strings.HasPrefix(entry, "DILL_PKL_PATH=") {
+				cmd.Env = append(cmd.Env[:i], cmd.Env[i+1:]...)
+				break
+			}
+		}
 		cmd.Env = append(cmd.Env, "DILL_PKL_PATH="+s.PklBinary)
 	}
-	cmd.WaitDelay = time.Second
-	return cmd
+	return cmd, cleanup, nil
 }
 
 type secretOutput struct {
@@ -64,13 +72,17 @@ func (s *SecretRunner) capture(ctx context.Context, args ...string) ([]byte, int
 func (s *SecretRunner) captureInput(ctx context.Context, input *string, args ...string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
-	cmd := s.command(ctx, args...)
+	cmd, cleanup, err := s.command(ctx, args...)
+	if err != nil {
+		return nil, 0, ErrSecretUnavailable
+	}
+	defer cleanup()
 	if input != nil {
 		cmd.Stdin = strings.NewReader(*input)
 	}
 	out := secretOutput{max: 256 * 1024}
 	cmd.Stdout = &out
-	err := cmd.Run()
+	err = cmd.Run()
 	if out.overflow || ctx.Err() != nil {
 		return nil, 0, ErrSecretUnavailable
 	}

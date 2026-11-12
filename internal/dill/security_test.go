@@ -13,7 +13,11 @@ func TestCommandDoesNotInheritServerCredentials(t *testing.T) {
 		t.Setenv(key, "synthetic-auth-canary")
 	}
 	t.Setenv("BRINE_SYNTHETIC_DEPLOYMENT", "synthetic-deployment-canary")
-	cmd := New("dill").command(context.Background(), "validate")
+	cmd, cleanup, err := New("dill").command(context.Background(), "validate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
 	env := strings.Join(cmd.Env, "\n")
 	if strings.Contains(env, "synthetic-auth-canary") {
 		t.Fatal("server credentials inherited")
@@ -30,7 +34,11 @@ func TestBareBinaryDoesNotResolveFromAmbientPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir)
-	cmd := New("synthetic-dill").command(context.Background())
+	cmd, cleanup, err := New("synthetic-dill").command(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
 	if cmd.Path == path {
 		t.Fatal("binary resolved through ambient PATH")
 	}
