@@ -131,6 +131,10 @@ func (a *Authenticator) Enabled() bool { return a != nil && !a.noAuth }
 func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if a == nil || a.noAuth {
+			if !localDevRequest(r) {
+				http.Error(w, "no-auth requests require a local host and same origin", http.StatusForbidden)
+				return
+			}
 			next.ServeHTTP(w, r.WithContext(withInfo(r.Context(), requestInfo{method: "none", user: "dev"})))
 			return
 		}
@@ -178,6 +182,32 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 		http.Error(w, "authentication required", http.StatusUnauthorized)
 	})
+}
+
+// localDevRequest limits browser access in no-auth mode. Loopback binding alone
+// does not prevent DNS rebinding or cross-origin requests from a victim browser.
+// This is defense in depth, not a replacement for authentication or a proxy ACL.
+func localDevRequest(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	} else {
+		host = strings.Trim(host, "[]")
+	}
+	ip := net.ParseIP(host)
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return false
+	}
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !strings.EqualFold(u.Host, r.Host) || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // CSRFFor returns the CSRF token for the current session, or "" when the
@@ -415,7 +445,7 @@ func (a *Authenticator) clearAttempts(ip string) {
 
 func isPublicPath(path string) bool {
 	switch path {
-	case "/login", "/logout", "/api/health", "/favicon.ico", "/robots.txt":
+	case "/login", "/api/health", "/favicon.ico", "/robots.txt":
 		return true
 	}
 	return strings.HasPrefix(path, "/static/")

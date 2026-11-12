@@ -34,8 +34,8 @@ type Server struct {
 // New wires up all dependencies and returns a ready-to-run server.
 func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, authn *auth.Authenticator) *Server {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	// Do not trust client-supplied forwarding headers for login rate limiting.
+	// Do not log request URLs: query strings may contain sensitive data.
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.CleanPath)
 
@@ -43,7 +43,7 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 	// and the health endpoint.
 	r.Use(authn.Middleware)
 
-	// Login/logout are public paths handled before the authentication check.
+	// Login is public; logout requires authentication and CSRF for sessions.
 	r.Get("/login", authn.HandleLogin)
 	r.Post("/login", authn.HandleLogin)
 	r.Post("/logout", authn.HandleLogout)
@@ -67,12 +67,11 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 
 // Run starts the HTTP server and the GitOps syncer, blocking until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
-	// Start the GitOps syncer in the background.
-	go s.syncer.Run(ctx)
-
 	if err := s.cfg.Validate(); err != nil {
 		return err
 	}
+	// Do not start background mutations until the configuration is validated.
+	go s.syncer.Run(ctx)
 	addr := net.JoinHostPort(s.cfg.Bind, s.cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,

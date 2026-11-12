@@ -222,7 +222,7 @@ func TestNoAuth(t *testing.T) {
 	a := newTestAuth(t, Config{NoAuth: true})
 	h := protectedHandler(a)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/stacks", nil))
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/stacks", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("no-auth POST = %d, want 200", rec.Code)
 	}

@@ -135,7 +135,10 @@ Podman instead, adjust `User`, `Group`, `ExecStart`, and the socket in the unit.
   `--secure-cookies` to the `ExecStart` line.
 
 `--no-auth` disables authentication and CSRF. Use it only on localhost during
-development; it is explicitly unsafe on a network.
+development; it is explicitly unsafe on a network. Never publish or proxy a
+no-auth instance, including through a reverse proxy bound to a LAN interface.
+Loopback binding and browser-origin checks are defense in depth, not authentication;
+local processes and non-browser clients can still control it.
 
 ## Configuration
 
