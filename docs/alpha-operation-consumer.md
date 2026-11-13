@@ -7,6 +7,11 @@ has NOT RUN; qualification remains pending.** Synthetic tests are not engine or
 host evidence. No production use, host provisioning or resource creation is
 performed by this integration.
 
+Optional [S1 private request history](alpha-operation-history.md) retains the existing
+mutation stream and adds authenticated GET by Brine request ID. It requires explicit
+`--operation-state-dir`, is source **UNBOUND**, and does not expand these qualification
+claims or enable any action. Outside that opt-in the behavior below is unchanged.
+
 ## Exact candidate and trust boundary
 
 The reviewed Dill candidate is main

@@ -106,7 +106,7 @@
       },
       summary() {
         const value = status.invocation, r = value?.receipt;
-        const lines = ['Invocation: ' + status.result, 'Current action only; not durable history. Copy operation ID before leaving. Reload/disconnect never authorizes replay.'];
+        const lines = ['Invocation: ' + status.result, 'Current stream only; not durable history. If configured, save the separate Brine request ID for authenticated status lookup. Copy Dill operation ID before leaving. Reload/disconnect never authorizes replay.'];
         if (r) {
           lines.push('Operation ID: ' + r.operationId, 'Outcome: ' + r.outcome, 'Effects: ' + r.effects,
             'Process exit: ' + value.exitCode, 'Endpoint selector digest (not daemon identity): ' + (r.target?.endpointDigest || 'unavailable'),
@@ -119,6 +119,50 @@
         return lines.join('\n');
       },
     };
+  }
+
+  // Explicit one-shot authenticated lookup only: never poll or replay a POST.
+  function operationLookup(doc, parent, id = '') {
+    let panel = doc.getElementById('operation-lookup');
+    if (!panel) {
+      panel = doc.createElement('div');
+      panel.id = 'operation-lookup';
+      const label = doc.createElement('label');
+      label.textContent = 'Brine request ID (durable lookup, when explicitly configured): ';
+      const input = doc.createElement('input');
+      input.id = 'operation-request-id'; input.type = 'text'; input.maxLength = 35;
+      input.setAttribute('aria-label', 'Brine request ID');
+      const button = doc.createElement('button');
+      button.type = 'button'; button.textContent = 'Look up status';
+      const output = doc.createElement('pre');
+      output.setAttribute('role', 'status');
+      label.appendChild(input); panel.appendChild(label); panel.appendChild(button); panel.appendChild(output);
+      button.addEventListener('click', async () => {
+        if (!/^br_[a-f0-9]{32}$/.test(input.value)) { output.textContent = 'Enter an exact Brine request ID.'; return; }
+        const requestID = input.value;
+        button.disabled = true;
+        try {
+          const res = await root.fetch('/api/operations/' + requestID, {method: 'GET', credentials: 'same-origin', headers: typeof root.brineHeaders === 'function' ? root.brineHeaders() : {}});
+          if (!res.ok) throw new Error('lookup unavailable');
+          const record = await res.json();
+          if (record.version !== 'brine.operation/1' || record.requestId !== requestID) throw new Error('invalid lookup');
+          const invocation = record.invocation, receipt = invocation?.receipt;
+          output.textContent = ['Brine request ID: ' + requestID, 'Phase: ' + record.phase, 'Invocation status: ' + record.status,
+            'History persistence: ' + record.persistence, 'HTTP delivery: ' + record.delivery + ' (no browser acknowledgement)',
+            'Reason: ' + record.reason, 'Source binding: UNBOUND (no immutable source claim)',
+            'Dill operation ID: ' + (record.dillOperationId || 'not received'), 'Process exit: ' + (invocation?.exitCode ?? 'not observed'),
+            'Outcome: ' + (receipt?.outcome || 'unknown'), 'Effects: ' + (receipt?.effects || 'unknown'),
+            'Inspect before any new attempt. Lookup never replays or acknowledges an operation.'].join('\n');
+        } catch { output.textContent = 'Status lookup unavailable. Authentication or private history may be unavailable; inspect before retrying. No operation was submitted.'; }
+        finally { button.disabled = false; }
+      });
+      parent.appendChild(panel);
+    }
+    if (/^br_[a-f0-9]{32}$/.test(id)) {
+      doc.getElementById('operation-request-id').value = id;
+      panel.querySelector('pre').textContent = 'Brine request ID: ' + id + '\nSave this ID. Use Look up status after disconnect; do not resubmit.';
+    }
+    return panel;
   }
 
   function createFileFields(doc, name) {
@@ -151,7 +195,7 @@
     return Number.isFinite(milliseconds) ? milliseconds : fallback;
   }
 
-  const api = { createStreamStatus, createFileFields, filterLogLines, duration };
+  const api = { createStreamStatus, operationLookup, createFileFields, filterLogLines, duration };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.BrineUI = api;
 })(typeof window === 'undefined' ? globalThis : window);

@@ -31,6 +31,11 @@ it talks to the container engine directly for container and image views.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
 
+Opt-in authenticated qualified Alpha can retain [S1 private request/receipt history](docs/alpha-operation-history.md)
+with `--operation-state-dir`: existing mutation streaming plus authenticated GET,
+not a queue or immutable source approval. Native app qualification is **NOT RUN**;
+legacy behavior outside this opt-in is unchanged.
+
 ## Requirements
 
 - Go 1.26+ to build from source

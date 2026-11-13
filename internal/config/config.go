@@ -23,6 +23,7 @@ type Config struct {
 	SecretTarget         string // operator-selected target ID, enables strict secret mode with SecretPolicy
 	SecretPolicy         string // absolute operator-controlled policy path
 	SecretPkl            string // optional absolute operator-installed Pkl binary
+	OperationStateDir    string // explicit S1 opt-in, private neutral request history
 	CoordinationStateDir string // preexisting private shared operator state, never stack data
 	CoordinationLayout   string // explicit native-local-docker-v1 operator assertion
 	CoordinationDaemonID string // independently provisioned expected daemon ID
@@ -70,6 +71,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("Alpha profile requires authentication, including on loopback")
 	}
 	if err := c.validateCoordination(); err != nil {
+		return err
+	}
+	if err := c.validateOperationHistory(); err != nil {
 		return err
 	}
 	ip := net.ParseIP(c.Bind)

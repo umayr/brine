@@ -14,16 +14,19 @@ type pageData struct {
 	User                string
 	AuthEnabled         bool
 	QualifiedOperations bool // configuration only, never readiness/attestation
+	OperationHistory    bool // explicit S1 configuration only, never source approval
 }
 
 type runtimePageData interface {
 	setRuntimeEngine(string)
 	setTarget(target.Identity)
 	setQualifiedOperations(bool)
+	setOperationHistory(bool)
 }
 
 func (p *pageData) setTarget(identity target.Identity)     { p.Target = identity }
 func (p *pageData) setQualifiedOperations(configured bool) { p.QualifiedOperations = configured }
+func (p *pageData) setOperationHistory(configured bool)    { p.OperationHistory = configured }
 
 func (p *pageData) setRuntimeEngine(engine string) {
 	p.RuntimeEngine = engine

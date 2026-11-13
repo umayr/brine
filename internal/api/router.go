@@ -7,12 +7,16 @@ import (
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/store"
 )
 
 // Mount registers all /api/* routes on r.
-func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration) {
+func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, histories ...*operationhistory.Store) {
 	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout}
+	if len(histories) > 0 {
+		sh.history = histories[0]
+	}
 	ch := &containerHandler{agent: ag}
 	ih := &imageHandler{agent: ag}
 	rh := &recipeHandler{store: rs}
@@ -43,6 +47,7 @@ func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 		// Everything else is short-lived.
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.Timeout(timeouts.Default))
+			r.Get("/operations/{id}", sh.operationGet)
 
 			// Stacks
 			r.Route("/stacks", func(r chi.Router) {

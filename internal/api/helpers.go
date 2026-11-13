@@ -23,19 +23,25 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 // see streaming output immediately instead of waiting for the command to finish.
 type flushWriter struct {
 	http.ResponseWriter
-	flusher http.Flusher
+	err error
 }
 
 func newFlushWriter(w http.ResponseWriter) *flushWriter {
 	fw := &flushWriter{ResponseWriter: w}
-	fw.flusher, _ = w.(http.Flusher)
 	return fw
 }
 
 func (fw *flushWriter) Write(p []byte) (int, error) {
 	n, err := fw.ResponseWriter.Write(p)
-	if fw.flusher != nil {
-		fw.flusher.Flush()
+	if err != nil {
+		fw.err = err
 	}
+	fw.flush()
 	return n, err
+}
+
+func (fw *flushWriter) flush() {
+	if err := http.NewResponseController(fw.ResponseWriter).Flush(); err != nil && err != http.ErrNotSupported {
+		fw.err = err
+	}
 }
