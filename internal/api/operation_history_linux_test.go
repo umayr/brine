@@ -24,6 +24,15 @@ import (
 )
 
 func TestDurableStreamDisconnectIndependentGETNoReplay(t *testing.T) {
+	durableStreamHistoryCase(t, false)
+}
+
+func TestDurableStreamTerminalPersistenceFaultNoMarkerKnownGETRestartUnknown(t *testing.T) {
+	durableStreamHistoryCase(t, true)
+}
+
+func durableStreamHistoryCase(t *testing.T, terminalFault bool) {
+	t.Helper()
 	t.Setenv("PRIVATE_ENV_SENTINEL", "PRIVATE_ENV_SENTINEL")
 	home, e := os.UserHomeDir()
 	if e != nil {
@@ -114,7 +123,10 @@ func TestDurableStreamDisconnectIndependentGETNoReplay(t *testing.T) {
 	if e != nil || !strings.Contains(string(disk), `"phase":"running"`) {
 		t.Fatal("child without durable accepted+started record", e)
 	}
-	response.Body.Close() // Independent client, no cancellation of engine owner.
+	defer response.Body.Close()
+	if !terminalFault {
+		response.Body.Close()
+	} // Independent client, no cancellation of engine owner.
 	lookup := func() operationhistory.Record {
 		get, _ := http.NewRequest("GET", server.URL+"/api/operations/"+id, nil)
 		get.Header.Set("Authorization", "Bearer PRIVATE_TOKEN_SENTINEL")
@@ -141,14 +153,49 @@ func TestDurableStreamDisconnectIndependentGETNoReplay(t *testing.T) {
 	if v := lookup(); v.Phase != "running" || v.DillOperationID != nil {
 		t.Fatal("invented running completion")
 	}
+	// Inject only after a real positive accepted/running/GET and child-ready
+	// control. Unsafe root mode makes terminal persistence fail before rename.
+	if terminalFault {
+		if e = os.Chmod(history, 0500); e != nil {
+			t.Fatal(e)
+		}
+		unavailable, _ := http.NewRequest("GET", server.URL+"/api/operations/"+id, nil)
+		unavailable.Header.Set("Authorization", "Bearer PRIVATE_TOKEN_SENTINEL")
+		interim, e := http.DefaultClient.Do(unavailable)
+		if e != nil {
+			t.Fatal(e)
+		}
+		interim.Body.Close()
+		if interim.StatusCode != http.StatusServiceUnavailable {
+			t.Fatal("unsafe running history did not fail closed", interim.StatusCode)
+		}
+	}
 	if e = os.WriteFile(release, []byte("release"), 0600); e != nil {
 		t.Fatal(e)
+	}
+	if terminalFault {
+		// While the injected root is unsafe and the child is still running,
+		// lookup correctly returns 503. Wait for the completed stream before
+		// requiring the known terminal failed_inspect overlay to exist.
+		body, e := io.ReadAll(response.Body)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if strings.Contains(string(body), dill.OperationMarker) {
+			t.Fatal("failed history emitted terminal marker", string(body))
+		}
+		if !strings.Contains(string(body), "[brine:error]") || !strings.Contains(string(body), "Operation history persistence failed") {
+			t.Fatal("fixed history error missing", string(body))
+		}
 	}
 	for {
 		v := lookup()
 		if v.Phase == "terminal" {
-			if v.Invocation.Receipt.Outcome != "succeeded" || v.Invocation.Receipt.Effects != "complete" || v.Status != "succeeded" {
-				t.Fatal("disconnect changed axes")
+			if v.Invocation.Receipt.Outcome != "succeeded" || v.Invocation.Receipt.Effects != "complete" || v.Status != "succeeded" || v.Invocation.ExitCode != 0 {
+				t.Fatal("transport/history failure changed engine axes")
+			}
+			if terminalFault && (v.Persistence != "failed_inspect" || v.Reason != "history_failure_requires_inspection" || v.DillOperationID == nil || *v.DillOperationID != receipt.OperationID) {
+				t.Fatal("known receipt failure lookup lost", v)
 			}
 			break
 		}
@@ -160,6 +207,29 @@ func TestDurableStreamDisconnectIndependentGETNoReplay(t *testing.T) {
 	finalRecord, e := os.ReadFile(filepath.Join(history, id+".json"))
 	if e != nil || strings.Contains(string(finalRecord), "PRIVATE_") {
 		t.Fatal("private history sentinel leak", e)
+	}
+	if terminalFault {
+		var pending operationhistory.Record
+		if json.Unmarshal(finalRecord, &pending) != nil || pending.Phase != "running" || pending.Invocation != nil || pending.DillOperationID != nil {
+			t.Fatal("invented durable terminal after failed commit", string(finalRecord))
+		}
+		// Restore the injected test-only mode to exercise restart of the unchanged
+		// pending durable record; production never repairs this root automatically.
+		if e = os.Chmod(history, 0700); e != nil {
+			t.Fatal(e)
+		}
+		if e = s.Close(); e != nil {
+			t.Fatal(e)
+		}
+		restarted, e := operationhistory.Open(history, data, coord)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer restarted.Close()
+		recovered, e := restarted.Get(id)
+		if e != nil || recovered.Phase != "unknown" || recovered.Status != "unknown" || recovered.Reason != "restart_requires_inspection" || recovered.Invocation != nil || recovered.DillOperationID != nil || recovered.EndObservedAt != nil || recovered.RecoveryObservedAt == nil {
+			t.Fatal("restart fabricated terminal", recovered, e)
+		}
 	}
 	bytes, e := os.ReadFile(calls)
 	if e != nil || strings.Count(string(bytes), "call") != 2 {

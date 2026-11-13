@@ -171,7 +171,10 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 		if observer != nil && observer.Terminal(terminal) != nil {
 			historyFailed = true
 		}
-		if w != nil {
+		// A callback attempt is not a durable commit. Never expose a terminal
+		// marker when required history failed; retain known axes in the typed
+		// error and authenticated failed_inspect lookup instead.
+		if w != nil && !historyFailed {
 			data, _ := json.Marshal(terminal)
 			if _, e := io.WriteString(w, OperationMarker+string(data)+"\n"); e != nil {
 				deliveryFailed = true
@@ -190,6 +193,7 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 		}
 	}()
 	if r.RequireOperationObserver && !oneOf(op, "validate", "plan") && observer == nil {
+		historyFailed = true
 		return terminal, ErrOperationContract
 	}
 	if observer != nil && observer.Started() != nil {

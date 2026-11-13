@@ -5,6 +5,8 @@ import "context"
 // OperationObserver belongs to one durably accepted request, never to shared
 // Runner state. Started must succeed before discovery or any operation child.
 // Terminal receives only adapter-validated axes, before any HTTP marker write.
+// A nil Terminal error attests successful durable publication; any history error
+// suppresses the terminal marker rather than presenting an attempted commit.
 type OperationObserver interface {
 	Started() error
 	Terminal(OperationInvocation) error
