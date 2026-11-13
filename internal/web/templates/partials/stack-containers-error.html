@@ -1,0 +1,13 @@
+<div class="px-5 py-8 text-center">
+  <div role="alert" class="text-error">Stack container inventory is unavailable.</div>
+  <p class="text-muted text-sm mt-2">{{.Message}} No empty inventory has been confirmed.</p>
+  <button type="button" id="stack-containers-retry" class="ui-button ui-button-ghost ui-button-sm mt-2"
+    hx-get="/web/stacks/{{.Name}}/containers"
+    hx-target="#stack-containers"
+    hx-swap="innerHTML"
+    hx-sync="#stack-containers:replace"
+    hx-request='{"timeout":10000}'
+    hx-disabled-elt="this"
+    aria-label="Retry stack container inventory"
+  >Retry</button>
+</div>
