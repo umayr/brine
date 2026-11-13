@@ -184,6 +184,7 @@ func (h *Handler) withGlobalTemplateData(r *http.Request, data any) any {
 		page.setRuntimeEngine(runtimeEngine)
 		if h.agent != nil && h.agent.Dill() != nil {
 			page.setTarget(h.agent.Dill().TargetIdentity())
+			page.setQualifiedOperations(h.agent.Dill().QualifiedOperationConfigured())
 		}
 	}
 	if page, ok := data.(authPageData); ok && h.auth != nil {

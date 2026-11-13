@@ -136,6 +136,16 @@ func TestTwoEndpointChangedPullAndAlphaBackgroundBoundary(t *testing.T) {
 				r.CheckSource = func(string) error { checked = true; return nil }
 				NewSyncer(st, &Runner{Binary: gitBin}, r, 10*time.Second).sync(context.Background(), "demo")
 				data, err := os.ReadFile(trace)
+				if profile == "alpha" {
+					if !os.IsNotExist(err) || checked {
+						t.Fatalf("Alpha background source or deploy accessed: %q %v checked=%v", data, err, checked)
+					}
+					updated, e := st.Get("demo")
+					if e != nil || updated.Git.LastSyncAt != nil {
+						t.Fatalf("Alpha background status changed: %+v %v", updated, e)
+					}
+					return
+				}
 				if err != nil || string(data) != "old\npull\nnew\n" {
 					t.Fatalf("changed HEAD not exercised: %q %v", data, err)
 				}

@@ -1,4 +1,20 @@
-{{if .Changes}}
+{{if .Operation}}
+<section class="ui-panel p-5 space-y-3" aria-label="Operation plan receipt">
+  <h2 class="font-semibold">Read-only operation plan</h2>
+  <p class="text-sm text-muted">Received bounded digest observations, not raw service names, field differences, source approval or a saved executable plan. This read-only receipt does not qualify the daemon.</p>
+  <dl class="text-xs font-mono break-words space-y-1">
+    <div>Operation ID: {{.Operation.OperationID}}</div>
+    <div>Outcome: {{.Operation.Outcome}} · Effects: {{.Operation.Effects}}</div>
+    <div>Changes detected: {{.Operation.ChangesDetected}}</div>
+    {{with .Operation.Target}}<div>Endpoint selector digest (not daemon identity): {{.EndpointDigest}}</div>
+    {{if .QualifiedIdentityDigest}}<div>Qualified identity digest (received): {{.QualifiedIdentityDigest}}</div>{{else}}<div>Qualified identity: not received</div>{{end}}{{end}}
+  </dl>
+  <div class="text-sm">{{.Summary.Create}} create · {{.Summary.Recreate}} recreate · {{.Summary.Remove}} remove · {{.Summary.Noop}} noop</div>
+  {{range .Operation.Resources}}<div class="text-xs font-mono break-words">{{.Kind}} · {{.Action}} · {{.Effect}} · {{.IdentityDigest}}</div>{{end}}
+  {{if .Operation.ResourcesTruncated}}<p class="ui-notice ui-notice-warning">Resource observations truncated; this is not a complete inventory.</p>{{end}}
+  {{range .Operation.Errors}}<p class="ui-notice ui-notice-error">{{.Code}}: {{.Message}}</p>{{end}}
+</section>
+{{else if .Changes}}
 <div class="bg-panel rounded-panel shadow-sm">
   <div class="flex items-center justify-between px-5 py-4 border-b border-line">
     <div class="flex items-center gap-3">

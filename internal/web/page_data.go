@@ -7,20 +7,23 @@ import (
 )
 
 type pageData struct {
-	Page          string
-	RuntimeEngine string
-	Target        target.Identity
-	CSRF          string
-	User          string
-	AuthEnabled   bool
+	Page                string
+	RuntimeEngine       string
+	Target              target.Identity
+	CSRF                string
+	User                string
+	AuthEnabled         bool
+	QualifiedOperations bool // configuration only, never readiness/attestation
 }
 
 type runtimePageData interface {
 	setRuntimeEngine(string)
 	setTarget(target.Identity)
+	setQualifiedOperations(bool)
 }
 
-func (p *pageData) setTarget(identity target.Identity) { p.Target = identity }
+func (p *pageData) setTarget(identity target.Identity)     { p.Target = identity }
+func (p *pageData) setQualifiedOperations(configured bool) { p.QualifiedOperations = configured }
 
 func (p *pageData) setRuntimeEngine(engine string) {
 	p.RuntimeEngine = engine

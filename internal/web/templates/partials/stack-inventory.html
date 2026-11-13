@@ -18,7 +18,7 @@
             <div class="flex items-center gap-2">
               <a id="stack-inventory-open-{{.Name}}" href="/stacks/{{.Name}}" class="font-mono font-semibold stack-link">{{.Name}}</a>
               {{if .Git}}
-                {{if .Git.AutoDeploy}}<span class="ui-status ui-status-info ui-status-xs">auto</span>{{end}}
+                {{if .Git.AutoDeploy}}<span class="ui-status ui-status-info ui-status-xs" title="Saved preference only; background auto-deploy is disabled in Alpha">auto configured</span>{{end}}
               {{end}}
             </div>
           </td>

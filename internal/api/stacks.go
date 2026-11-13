@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/engine"
 	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
@@ -23,6 +24,18 @@ type stackHandler struct {
 	git           *gitpkg.Runner
 	runtimeEngine string
 	deployTimeout time.Duration
+}
+
+// Defense in depth for mounted API routers: a configured qualified client must
+// never run through an unauthenticated synthetic or development route.
+func (h *stackHandler) qualifiedActionAllowed(w http.ResponseWriter, r *http.Request) bool {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() && !auth.Authenticated(r) {
+		writeError(w, http.StatusUnauthorized, "qualified operations require authentication")
+		return false
+	}
+	return true
 }
 
 type stackResponse struct {
@@ -100,6 +113,10 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
+	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() {
+		writeError(w, http.StatusConflict, "qualified stack deletion is deferred: preserve source and operation recovery context; use explicit Down and inspect its receipt")
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -134,6 +151,9 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -154,6 +174,9 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -170,6 +193,9 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -186,6 +212,9 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -205,6 +234,9 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -228,6 +260,9 @@ type teardownRequest struct {
 }
 
 func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	var req teardownRequest
@@ -253,6 +288,9 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -272,6 +310,9 @@ func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedActionAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)

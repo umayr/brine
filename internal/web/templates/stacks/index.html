@@ -12,6 +12,8 @@
 
 {{define "content"}}
 <div class="index-page">
+  {{if eq .Target.Profile "alpha"}}<p class="ui-notice ui-notice-warning">Alpha background Git pull/auto-deploy is disabled, regardless of saved settings. Configuration is not daemon qualification.</p>{{end}}
+  {{if .QualifiedOperations}}<p class="text-sm text-muted">Qualified manual operations only; stack deletion is deferred. Current-action receipt below is not durable history.</p><pre id="operation-summary" class="ui-panel p-4 text-xs whitespace-pre-wrap break-words" role="status" hidden></pre>{{end}}
   <div id="stack-inventory" hx-get="/web/stacks" hx-trigger="load, every 5s, refresh-stacks" hx-swap="innerHTML" hx-sync="this:drop"
     hx-on::send-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
     hx-on::response-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }">
@@ -48,12 +50,13 @@ async function deployStack(name, btn) {
   stackActions.set(name, 'deploy');
   updateStackActions();
   showToast('Deploying ' + name + '…', 'info');
+  const qualified = document.getElementById('operation-summary') !== null;
   try {
     const res = await fetch(`/api/stacks/${name}/up`, { method: 'POST', headers: brineHeaders() });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    const stream = BrineUI.createStreamStatus();
+    const stream = BrineUI.createStreamStatus({qualified, operation: 'up', stack: name});
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -61,13 +64,24 @@ async function deployStack(name, btn) {
       stream.push(chunk);
     }
     stream.push(decoder.decode());
-    if (stream.status.error || !stream.status.done) {
+    if (qualified) {
+      stream.finish();
+      const summary = document.getElementById('operation-summary');
+      summary.hidden = false;
+      summary.textContent = stream.summary();
+      showToast('Deploy ' + stream.status.result + ': ' + name, stream.status.result === 'succeeded' ? 'success' : 'error');
+    } else if (stream.status.error || !stream.status.done) {
       showToast('Deploy failed: ' + name, 'error');
     } else {
       showToast('Deploy complete: ' + name, 'success');
     }
   } catch {
-    showToast('Deploy failed', 'error');
+    if (qualified) {
+      const summary = document.getElementById('operation-summary');
+      summary.hidden = false;
+      summary.textContent = 'Invocation: unknown. No complete validated terminal receipt. Inspect offline coordination state and resources; do not automatically retry.';
+    }
+    showToast(qualified ? 'Deploy unknown; inspect offline' : 'Deploy failed', 'error');
   } finally {
     stackActions.delete(name);
     updateStackActions();
