@@ -87,7 +87,7 @@ func DecodeOperationInvocation(data []byte) (*OperationInvocation, error) {
 		if v.Status != "unknown" {
 			return nil, ErrOperationContract
 		}
-	} else if v.ExitCode < 0 || invocationStatus(v.Receipt, v.ExitCode) != v.Status {
+	} else if v.ExitCode < 0 || !validOperationExit(v.Receipt, v.ExitCode) || invocationStatus(v.Receipt, v.ExitCode) != v.Status {
 		return nil, ErrOperationContract
 	}
 	return &v, nil

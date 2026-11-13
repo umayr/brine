@@ -13,7 +13,7 @@ const maxOperationOutput = 2 * 1024 * 1024
 
 var operationIDPattern = regexp.MustCompile(`^op_[0-9a-f]{32}$`)
 var operationDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
-var operationStackPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+var operationStackPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
 var operationNames = []string{"validate", "plan", "diff", "up", "down", "stop", "start", "restart", "rm", "teardown"}
 var qualifiedOperationNames = []string{"up", "down", "stop", "start", "restart", "rm"}
 var operationFeatures = []string{"explicitLocalSelector", "attended", "redactedSummary", "conservativeEffects"}
@@ -136,7 +136,7 @@ func validOperationDiscovery(data []byte, qualified bool) bool {
 	return !qualified || has
 }
 func operationLine(data []byte, max int) bool {
-	return len(data) > 1 && len(data) <= max && data[len(data)-1] == '\n' && bytes.Count(data, []byte{'\n'}) == 1 && bytes.Count(data, []byte{'\r'}) == 0 && utf8.Valid(data)
+	return len(data) > 2 && len(data) <= max && data[0] == '{' && data[len(data)-2] == '}' && data[len(data)-1] == '\n' && bytes.Count(data, []byte{'\n'}) == 1 && bytes.Count(data, []byte{'\r'}) == 0 && utf8.Valid(data)
 }
 
 func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
@@ -208,10 +208,13 @@ func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
 	if r.Operation == "" && !(r.Outcome == "invalid_input" && len(r.Errors) > 0 && r.Errors[0].Code == "UNSUPPORTED_OPERATION") {
 		return nil, ErrOperationContract
 	}
-	if oneOf(r.Operation, "plan", "diff", "validate") && r.Effects != "none" {
+	if oneOf(r.Operation, "plan", "diff", "validate") && r.Effects != "none" && !(r.Outcome == "unknown" && r.Effects == "unknown") {
 		return nil, ErrOperationContract
 	}
 	if r.Outcome == "changes" && (!oneOf(r.Operation, "plan", "diff") || !r.ChangesDetected) {
+		return nil, ErrOperationContract
+	}
+	if r.Outcome == "succeeded" && !oneOf(r.Effects, "none", "complete") {
 		return nil, ErrOperationContract
 	}
 	if r.Outcome == "unknown" && r.Effects != "unknown" {
@@ -219,8 +222,34 @@ func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
 	}
 	return &r, nil
 }
+func validOperationExit(r *OperationReceipt, exit int) bool {
+	release := false
+	for _, diagnostic := range r.Errors {
+		if diagnostic.Code == "COORDINATION_RELEASE_FAILED" {
+			release = true
+		}
+	}
+	switch r.Outcome {
+	case "succeeded":
+		return (exit == 0 && len(r.Errors) == 0) || (exit == 1 && release)
+	case "changes":
+		want := 0
+		if r.Operation == "plan" {
+			want = 1
+		}
+		return (exit == want && len(r.Errors) == 0) || (exit == 1 && release)
+	case "invalid_input":
+		return exit == 2 && len(r.Errors) > 0
+	case "failed", "unknown":
+		return exit == 1 && len(r.Errors) > 0
+	case "cancelled":
+		return (exit == 0 && r.Effects == "none" && len(r.Errors) == 0) || (exit == 1 && len(r.Errors) > 0)
+	}
+	return false
+}
+
 func invocationStatus(r *OperationReceipt, exit int) string {
-	if exit < 0 || exit > 255 {
+	if !validOperationExit(r, exit) {
 		return "unknown"
 	}
 	switch r.Outcome {

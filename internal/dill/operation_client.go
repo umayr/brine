@@ -76,23 +76,29 @@ type operationOutput struct {
 	buf      bytes.Buffer
 	max      int
 	overflow bool
+	cancel   context.CancelFunc
 }
 
 func (o *operationOutput) Write(p []byte) (int, error) {
 	if len(p) > o.max-o.buf.Len() {
 		o.overflow = true
+		if o.cancel != nil {
+			o.cancel()
+		}
 		return 0, ErrOperationContract
 	}
 	return o.buf.Write(p)
 }
 func (r *Runner) operationCapture(ctx context.Context, max int, args ...string) ([]byte, *int, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cmd, cleanup, e := r.command(ctx, args...)
 	if e != nil {
 		return nil, nil, ErrOperationContract
 	}
 	defer cleanup()
-	out := operationOutput{max: max}
-	diagnostics := operationOutput{max: 8192}
+	out := operationOutput{max: max, cancel: cancel}
+	diagnostics := operationOutput{max: 8192, cancel: cancel}
 	cmd.Stdout = &out
 	cmd.Stderr = &diagnostics
 	e = cmd.Run()
@@ -197,6 +203,9 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 	if op == "validate" {
 		guard = r.BeforeLegacyValidate
 	}
+	if r.StrictActions != nil && guard == nil {
+		return terminal, ErrOperationContract
+	}
 	if guard != nil && guard(ctx, path) != nil {
 		return terminal, ErrOperationContract
 	}
@@ -230,7 +239,7 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 	}
 	status := invocationStatus(receipt, *exit)
 	// A process/receipt disagreement is not a validated terminal result.
-	if status == "unknown" && receipt.Outcome != "unknown" {
+	if !validOperationExit(receipt, *exit) {
 		return terminal, ErrOperationContract
 	}
 	terminal.Receipt = receipt
