@@ -313,6 +313,14 @@ func validPreflightErrors(r *PreflightResult) bool {
 	if oneOf(primary, "INVALID_ARGUMENTS", "UNSUPPORTED_OPERATION", "UNSUPPORTED_CONTRACT", "UNSUPPORTED_FORMAT", "INVALID_TARGET", "UNSUPPORTED_PREFLIGHT") {
 		return !cleanup && r.Target == nil && r.Outcome == "invalid_input" && r.CoordinationEffects == "none"
 	}
+	// An unavailable action is valid only for static rejection above or the
+	// genuine global early privacy guard. Later stages/cleanup need a known
+	// action; never manufacture one from diagnostics or context.
+	if r.Operation == "" {
+		return primary == "SECRET_UNAVAILABLE" && len(r.Errors) == 1 &&
+			r.Outcome == "failed" && r.CoordinationEffects == "none" &&
+			r.Target == nil && r.Stack == ""
+	}
 	// Evaluation/qualification cannot claim actual qualification or state
 	// cleanup. A transport close can fail before state was ever attempted.
 	if oneOf(primary, "EVALUATION_FAILED", "QUALIFICATION_FAILED") {
