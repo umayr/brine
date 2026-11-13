@@ -116,17 +116,27 @@ func TestOperationSubprocessCancellationStartAndOverflow(t *testing.T) {
 			if mode == "stderr-overflow" {
 				extra = "/usr/bin/head -c 9000 /dev/zero >&2; exec /bin/sleep 30"
 			}
-			r, _ := consumerScript(t, consumerDiscovery(false), nil, 0, extra)
+			r, log := consumerScript(t, consumerDiscovery(false), nil, 0, extra)
 			if mode == "start" {
 				r.Binary = "/must-not-run"
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			deadline := 3 * time.Second
+			if mode == "cancel" {
+				deadline = time.Second
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), deadline)
 			defer cancel()
 			var out bytes.Buffer
 			start := time.Now()
 			terminal, e := r.operation(ctx, "/synthetic/config.pkl", "plan", &out)
-			if time.Since(start) > 3*time.Second {
-				t.Fatal("unbounded subprocess")
+			if time.Since(start) > 2*time.Second {
+				t.Fatal("overflow did not promptly terminate subprocess, or cancellation was unbounded")
+			}
+			if mode != "start" {
+				calls, _ := os.ReadFile(log)
+				if strings.Count(string(calls), "\n") != 2 {
+					t.Fatalf("test did not reach action process: %s", calls)
+				}
 			}
 			if e == nil || terminal.Receipt != nil || terminal.Status != "unknown" {
 				t.Fatal("uncertain invocation accepted")
