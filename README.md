@@ -180,8 +180,10 @@ Alpha resources and its private data after checking their identity. No SSO, RBAC
 remote enrollment, production binding provider, vault or late-bound secret provider
 is provided.
 
-Brine strips its named authentication environment variables from Dill subprocesses,
-but other inherited environment values can be visible to deployment tooling and Pkl.
+Brine gives both legacy and strict Dill subprocesses a minimal explicit environment
+(PATH/locale, isolated private HOME/XDG directories, and configured Pkl/policy paths),
+not the inherited service environment or its login/API credentials. This does not
+isolate Git subprocesses, which still inherit the service environment (see below).
 Dill/Pkl run with the server user's filesystem privileges; credentials and stack data
 are not a sandbox boundary. Errors, engine logs, streams and stored outcomes can
 contain deployment values; use synthetic secrets only and protect logs/state. Do not
