@@ -33,7 +33,7 @@ func credentialDirSafe(fd int, private bool) bool {
 	if st.Uid != 0 && st.Uid != uint32(os.Geteuid()) {
 		return false
 	}
-	return st.Mode&0022 == 0 && (!private || (st.Uid == uint32(os.Geteuid()) && st.Mode&07777 == 0700))
+	return st.Mode&0022 == 0 && (!private || (st.Uid == uint32(os.Geteuid()) && st.Mode&07777 == 0700)) && credentialACLSafe(fd)
 }
 
 func openCredentialState(path string) (*credentialState, error) {
@@ -83,6 +83,9 @@ func credentialFileSafe(st *unix.Stat_t) bool {
 }
 
 func (s *credentialState) read() ([]byte, bool, error) {
+	if !credentialDirSafe(int(s.dir.Fd()), true) {
+		return nil, false, errCredentialState
+	}
 	fd, err := unix.Openat(int(s.dir.Fd()), "credentials.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
 	if err == unix.ENOENT {
 		return nil, false, nil
@@ -93,11 +96,11 @@ func (s *credentialState) read() ([]byte, bool, error) {
 	f := os.NewFile(uintptr(fd), "credentials")
 	defer f.Close()
 	var before, after unix.Stat_t
-	if unix.Fstat(fd, &before) != nil || !credentialFileSafe(&before) {
+	if unix.Fstat(fd, &before) != nil || !credentialFileSafe(&before) || !credentialACLSafe(fd) {
 		return nil, false, errCredentialState
 	}
 	data, err := io.ReadAll(io.LimitReader(f, 64*1024+1))
-	if err != nil || len(data) > 64*1024 || unix.Fstat(fd, &after) != nil || !credentialFileSafe(&after) || before.Size != after.Size || before.Mtim != after.Mtim {
+	if err != nil || len(data) > 64*1024 || unix.Fstat(fd, &after) != nil || !credentialFileSafe(&after) || before.Size != after.Size || before.Mtim != after.Mtim || !credentialACLSafe(fd) {
 		return nil, false, errCredentialState
 	}
 	s.loaded = &after
@@ -113,10 +116,22 @@ func (s *credentialState) unchanged() bool {
 	if s.loaded == nil {
 		return err == unix.ENOENT
 	}
-	return err == nil && credentialFileSafe(&st) && st.Dev == s.loaded.Dev && st.Ino == s.loaded.Ino && st.Size == s.loaded.Size && st.Mtim == s.loaded.Mtim
+	if err != nil || !credentialFileSafe(&st) || st.Dev != s.loaded.Dev || st.Ino != s.loaded.Ino || st.Size != s.loaded.Size || st.Mtim != s.loaded.Mtim {
+		return false
+	}
+	fd, err := unix.Openat(int(s.dir.Fd()), "credentials.json", unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return false
+	}
+	defer unix.Close(fd)
+	var opened unix.Stat_t
+	return unix.Fstat(fd, &opened) == nil && credentialFileSafe(&opened) && opened.Dev == st.Dev && opened.Ino == st.Ino && credentialACLSafe(fd)
 }
 
 func (s *credentialState) write(data []byte) error {
+	if !credentialDirSafe(int(s.dir.Fd()), true) {
+		return errCredentialState
+	}
 	n, err := randomSecret(18)
 	if err != nil {
 		return errCredentialState
@@ -130,16 +145,7 @@ func (s *credentialState) write(data []byte) error {
 	f := os.NewFile(uintptr(fd), "credential temporary file")
 	defer f.Close()
 	defer unix.Unlinkat(dir, name, 0)
-	// Only this exclusively-created descriptor may be chmodded (e.g. restrictive
-	// umask). Never repair preexisting directories/files, or external link targets.
-	if unix.Fchmod(fd, 0600) != nil {
-		return errCredentialState
-	}
-	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || !credentialFileSafe(&st) {
-		return errCredentialState
-	}
-	if _, err = f.Write(data); err != nil || f.Sync() != nil || !s.unchanged() {
+	if writeCredentialTemporary(f, data) != nil || !s.unchanged() {
 		return errCredentialState
 	}
 	if s.loaded == nil {
@@ -152,6 +158,26 @@ func (s *credentialState) write(data []byte) error {
 		return errCredentialState
 	}
 	if unix.Fsync(dir) != nil {
+		return errCredentialState
+	}
+	return nil
+}
+
+// Called only for an exclusively-created private temporary descriptor. Check
+// inherited ACLs BEFORE any sensitive bytes, not only after publish/chmod. We
+// never strip existing ACLs or repair a preexisting/external credential target.
+func writeCredentialTemporary(f *os.File, data []byte) error {
+	fd := int(f.Fd())
+	var st unix.Stat_t
+	if unix.Fstat(fd, &st) != nil || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Uid != uint32(os.Geteuid()) || st.Nlink != 1 || !credentialACLSafe(fd) {
+		return errCredentialState
+	}
+	// Only this new descriptor may be chmodded to accommodate a restrictive
+	// umask. Chmod does not remove Darwin/default-inherited ACL grants.
+	if unix.Fchmod(fd, 0600) != nil || unix.Fstat(fd, &st) != nil || !credentialFileSafe(&st) || !credentialACLSafe(fd) {
+		return errCredentialState
+	}
+	if _, err := f.Write(data); err != nil || f.Sync() != nil {
 		return errCredentialState
 	}
 	return nil

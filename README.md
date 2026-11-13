@@ -192,6 +192,16 @@ not been security-qualified by this Alpha slice.
 
 ## Data directory
 
+Persisted credentials require a canonical, service-owned mode-0700 state directory
+and a regular, service-owned, single-link mode-0600 credential file. Symlinks,
+group/world-writable ancestors (including sticky temporary directories), and ACLs
+that expand or inherit access are rejected rather than silently repaired. macOS
+permits deny-only ACLs; Linux rejects extended access and default POSIX ACLs.
+Provision a private state directory without inherited grants before startup; mode
+bits alone do not neutralize ACLs. Uninspectable ACLs fail closed. File-backed
+credential handling is supported on Linux/macOS; other platforms require explicit
+credentials instead of an insecure filesystem fallback.
+
 ```
 ~/.brine/
   credentials.json          # 0600
