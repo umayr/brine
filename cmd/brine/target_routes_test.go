@@ -145,6 +145,13 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 		t.Fatal("Alpha accepted ambient endpoint")
 	}
 	cfg.EngineSocket = sockets[1]
+	if profile == "alpha" {
+		cfg.NoAuth = true
+		if cfg.Validate() == nil {
+			t.Fatal("Alpha accepted unauthenticated startup")
+		}
+		cfg.NoAuth = false
+	}
 	if err = cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +184,12 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 	defer eng.Close()
 	runner.BeforeLegacyAction = legacySecretGate(st, eng, nil)
 	ag := agent.NewLocalAgent(eng, runner)
-	authn, err := auth.New(auth.Config{NoAuth: true})
+	authn, err := auth.New(auth.Config{User: "admin", Password: "synthetic-target-password", APIToken: "synthetic-target-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := chi.NewRouter()
+	router.Use(authn.Middleware)
 	api.Mount(router, ag, st, nil, nil, kind, httpx.Timeouts{}, 10*time.Second)
 	web.Mount(router, web.New(ag, st, nil, nil, kind, false, authn, 10*time.Second), httpx.Timeouts{})
 	call := func(method, path, body string) *httptest.ResponseRecorder {
@@ -189,8 +197,18 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer synthetic-target-token")
 		router.ServeHTTP(w, req)
 		return w
+	}
+	// Alpha cleanup is still a mutation and must not be accessible without
+	// authentication merely because it bypasses source/secret negotiation.
+	for _, action := range []string{"stop", "down", "up"} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest("POST", "/api/stacks/demo/"+action, nil))
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated %s: %d %s", action, w.Code, w.Body.String())
+		}
 	}
 	for _, path := range []string{"/stacks/demo", "/containers/ordinary", "/images"} {
 		w := call("GET", path, "")

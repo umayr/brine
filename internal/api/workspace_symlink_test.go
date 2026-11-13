@@ -181,7 +181,10 @@ func TestGitPullCanRepairMissingOrSymlinkedEntrypoint(t *testing.T) {
 				t.Fatal(err)
 			}
 			r := chi.NewRouter()
-			Mount(r, nil, st, nil, git, "docker", httpx.Timeouts{}, time.Second)
+			// This fixture verifies safe source repair, not process-start
+			// latency. Concurrent normal/race suites exhausted the old 1s
+			// budget (git status killed at 1.01s). Keep every safety assertion.
+			Mount(r, nil, st, nil, git, "docker", httpx.Timeouts{}, 10*time.Second)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest("POST", "/api/stacks/demo/git/pull", nil))
 			if w.Code != 200 {

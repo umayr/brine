@@ -12,7 +12,10 @@ SDK observations and the Dill runner.
 `--profile alpha --engine docker --engine-socket /absolute/disposable.sock`
 (or `--engine podman`, or `unix:///absolute/disposable.sock`) selects the explicit
 boundary. Alpha rejects an omitted, relative, noncanonical or remote socket and
-unknown engine/profile. It does not derive target identity from a recipe,
+unknown engine/profile. Alpha also requires authentication, even on loopback;
+`--profile alpha --no-auth` is rejected before any startup side effects. Legacy
+loopback `--no-auth` compatibility remains outside this profile. It does not
+derive target identity from a recipe,
 container label, ambient environment or a Dill capability document. Configuration
 validation does not open the socket or certify that it exists or is ready.
 

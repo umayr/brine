@@ -63,6 +63,9 @@ func (c *Config) Validate() error {
 	if err := target.ValidateProfile(c.Profile, c.Engine, c.EngineSocket); err != nil {
 		return err
 	}
+	if c.Profile == target.Alpha && c.NoAuth {
+		return fmt.Errorf("Alpha profile requires authentication, including on loopback")
+	}
 	ip := net.ParseIP(c.Bind)
 	if ip == nil {
 		return fmt.Errorf("bind must be a literal IP address")
