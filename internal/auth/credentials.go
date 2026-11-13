@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -40,16 +39,19 @@ func LoadOrCreate(dataDir, user, password, token string) (Credentials, bool, str
 		return Credentials{User: user, Password: password, APIToken: token}, false, "", nil
 	}
 	path := CredentialsPath(dataDir)
-
+	state, err := openCredentialState(dataDir)
+	if err != nil {
+		return Credentials{}, false, "", err
+	}
+	defer state.close()
+	data, exists, err := state.read()
+	if err != nil {
+		return Credentials{}, false, "", err
+	}
 	var creds Credentials
-	exists := false
-	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &creds); err != nil {
-			return Credentials{}, false, "", fmt.Errorf("parse %s: %w", path, err)
-		}
-		exists = true
-	} else if !os.IsNotExist(err) {
-		return Credentials{}, false, "", fmt.Errorf("read %s: %w", path, err)
+	if exists && json.Unmarshal(data, &creds) != nil {
+		// Neither filesystem paths nor document contents belong in diagnostics.
+		return Credentials{}, false, "", fmt.Errorf("invalid credential document")
 	}
 
 	// Explicit flags/env win over the file.
@@ -86,33 +88,16 @@ func LoadOrCreate(dataDir, user, password, token string) (Credentials, bool, str
 
 	// Persist when the file is new or when we filled in a missing secret.
 	if !exists || generated {
-		if err := os.MkdirAll(dataDir, 0o700); err != nil {
-			return Credentials{}, false, "", fmt.Errorf("create data dir: %w", err)
-		}
-		if err := os.Chmod(dataDir, 0o700); err != nil {
-			return Credentials{}, false, "", fmt.Errorf("chmod data dir: %w", err)
-		}
 		data, err := json.MarshalIndent(creds, "", "  ")
 		if err != nil {
 			return Credentials{}, false, "", err
 		}
-		if err := writePrivate(path, append(data, '\n')); err != nil {
-			return Credentials{}, false, "", fmt.Errorf("write credentials: %w", err)
+		if err := state.write(append(data, '\n')); err != nil {
+			return Credentials{}, false, "", err
 		}
 		return creds, !exists, path, nil
 	}
-	// Fail closed if an existing credential file cannot be made private.
-	if err := os.Chmod(path, 0o600); err != nil {
-		return Credentials{}, false, "", fmt.Errorf("chmod credentials: %w", err)
-	}
 	return creds, false, path, nil
-}
-
-func writePrivate(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return err
-	}
-	return os.Chmod(path, 0o600)
 }
 
 func randomSecret(n int) (string, error) {

@@ -301,8 +301,28 @@ func TestSafeNext(t *testing.T) {
 	}
 }
 
+// Unlike ambient TempDir (/tmp on Linux, often a /var symlink on macOS), the
+// service HOME fixture has the safe ancestry required for persistent secrets.
+func credentialTestDir(t *testing.T) string {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(home, ".brine-credentials-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 func TestLoadOrCreateCredentials(t *testing.T) {
-	dataDir := filepath.Join(t.TempDir(), "data")
+	dataDir := filepath.Join(credentialTestDir(t), "data")
 	creds, created, path, err := LoadOrCreate(dataDir, "", "", "")
 	if err != nil {
 		t.Fatalf("LoadOrCreate: %v", err)
@@ -339,7 +359,7 @@ func TestLoadOrCreateCredentials(t *testing.T) {
 	}
 
 	// Explicit credentials do not need a file.
-	explicitDir := filepath.Join(t.TempDir(), "data")
+	explicitDir := filepath.Join(credentialTestDir(t), "data")
 	c, created, p, err := LoadOrCreate(explicitDir, "me", "pw", "tok")
 	if err != nil {
 		t.Fatal(err)

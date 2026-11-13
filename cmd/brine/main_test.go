@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -16,8 +17,23 @@ func TestGeneratedCredentialsNotLogged(t *testing.T) {
 	old := log.Writer()
 	log.SetOutput(&output)
 	defer log.SetOutput(old)
+	// Persistent credentials reject writable/symlinked temp ancestry; use a
+	// canonical, private service-HOME fixture just like real default state.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err = filepath.EvalSymlinks(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir, err := os.MkdirTemp(home, ".brine-startup-credentials-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dataDir) })
 	cfg := config.Default()
-	cfg.DataDir = t.TempDir()
+	cfg.DataDir = dataDir
 	cfg.AuthPassword = ""
 	cfg.APIToken = ""
 	if _, err := buildAuth(cfg); err != nil {
