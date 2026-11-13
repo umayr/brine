@@ -35,9 +35,10 @@ it talks to the container engine directly for container and image views.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.5.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
-- Alpha file-secret mode requires Dill v0.7.0 and its matching schema; the legacy
-  v0.5.0 minimum above does not provide that contract. See the
+- A `dill` binary (v0.7.0) on `PATH`, or pass `--dill /path/to/dill`.
+  Older binaries that cannot accept explicit stack/engine/socket flags are
+  rejected for lifecycle and validation; Brine does not retry against defaults.
+- Alpha file-secret mode also requires the matching v0.7.0 schema. See the
   [qualification status](docs/alpha-secrets-status.md) for platform and testing limits.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
@@ -151,6 +152,7 @@ local processes and non-browser clients can still control it.
 | `--bind` | | `127.0.0.1` | Literal listen IP; no-auth requires loopback |
 | `--data-dir` | | `~/.brine` | Stack files, recipes, credentials |
 | `--engine` | | `docker` | `docker` or `podman` |
+| `--profile` | | `legacy` | `alpha` requires auth and an explicit local socket; unqualified engine writes are blocked, except pinned stack stop/down cleanup. See [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
 | `--dill` | | `dill` | Path to the Dill binary |
 | `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
