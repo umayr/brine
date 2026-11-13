@@ -1,0 +1,35 @@
+name: Pinned operation contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  operation-contract:
+    name: b3 CLI / Brine read-only synthetic compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: brine
+      - uses: actions/checkout@v4
+        with:
+          repository: umayr/dill
+          ref: b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
+          path: dill-operation-candidate
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: brine/go.mod
+          cache: false
+      - name: Exact clean source, schema, fixtures, SDK read-only compatibility
+        env:
+          BRINE_OPERATION_ISOLATED: "1"
+          BRINE_OPERATION_CANDIDATE_REPO: ${{ github.workspace }}/dill-operation-candidate
+        run: bash brine/scripts/ci-operation-contract.sh
+      # No real engine command, socket, provisioning or qualified mutation.
+      # Existing paired-secret candidate258 qualification remains independent.
