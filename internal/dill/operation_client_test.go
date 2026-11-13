@@ -106,42 +106,103 @@ func TestOperationDiscoveryFailureNeverDispatches(t *testing.T) {
 func TestOperationSubprocessCancellationStartAndOverflow(t *testing.T) {
 	for _, mode := range []string{"cancel", "stdout-overflow", "stderr-overflow", "start"} {
 		t.Run(mode, func(t *testing.T) {
-			extra := ""
-			if mode == "cancel" {
-				extra = "exec /bin/sleep 30"
+			barrier := t.TempDir()
+			ready := filepath.Join(barrier, "ready")
+			release := filepath.Join(barrier, "release")
+			// Discovery does not execute this branch. The action explicitly
+			// witnesses readiness, then waits for the parent to release its burst.
+			// Without capture cancellation the final exec sleeps for 30 seconds.
+			extra := "printf ready > '" + ready + "'\n"
+			if mode != "cancel" {
+				extra += "while [ ! -f '" + release + "' ]; do /bin/sleep 0.01; done\n"
 			}
 			if mode == "stdout-overflow" {
-				extra = "/usr/bin/head -c 2200000 /dev/zero; exec /bin/sleep 30"
+				extra += "/usr/bin/head -c 2200000 /dev/zero\n"
 			}
 			if mode == "stderr-overflow" {
-				extra = "/usr/bin/head -c 9000 /dev/zero >&2; exec /bin/sleep 30"
+				extra += "/usr/bin/head -c 9000 /dev/zero >&2\n"
 			}
+			extra += "exec /bin/sleep 30"
 			r, log := consumerScript(t, consumerDiscovery(false), nil, 0, extra)
 			if mode == "start" {
 				r.Binary = "/must-not-run"
 			}
-			deadline := 3 * time.Second
-			if mode == "cancel" {
-				deadline = time.Second
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), deadline)
+			// Startup/discovery get an independent safety budget, not the
+			// post-readiness termination budget measured below.
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			var out bytes.Buffer
-			start := time.Now()
-			terminal, e := r.operation(ctx, "/synthetic/config.pkl", "plan", &out)
-			if time.Since(start) > 2*time.Second {
-				t.Fatal("overflow did not promptly terminate subprocess, or cancellation was unbounded")
+			type result struct {
+				terminal OperationInvocation
+				err      error
+				output   string
 			}
+			done := make(chan result, 1)
+			go func() {
+				var out bytes.Buffer
+				terminal, err := r.operation(ctx, "/synthetic/config.pkl", "plan", &out)
+				done <- result{terminal: terminal, err: err, output: out.String()}
+			}()
+			// Always settle the subprocess/goroutine if a readiness/assertion
+			// failure occurs, including the deliberately broken negative control.
+			settled := false
+			defer func() {
+				cancel()
+				if !settled {
+					select {
+					case <-done:
+					case <-time.After(5 * time.Second):
+						t.Error("subprocess did not settle after cleanup cancellation")
+					}
+				}
+			}()
 			if mode != "start" {
-				calls, _ := os.ReadFile(log)
-				if strings.Count(string(calls), "\n") != 2 {
-					t.Fatalf("test did not reach action process: %s", calls)
+				ticker := time.NewTicker(5 * time.Millisecond)
+				defer ticker.Stop()
+			waitReady:
+				for {
+					if data, err := os.ReadFile(ready); err == nil && string(data) == "ready" {
+						break
+					}
+					select {
+					case got := <-done:
+						settled = true
+						t.Fatalf("action exited before readiness: %v", got.err)
+					case <-ctx.Done():
+						t.Fatal("action readiness deadline exceeded")
+					case <-ticker.C:
+						continue waitReady
+					}
+				}
+				calls, err := os.ReadFile(log)
+				if err != nil || strings.Count(string(calls), "\n") != 2 {
+					t.Fatalf("readiness did not witness exactly discovery and action: %s (%v)", calls, err)
 				}
 			}
-			if e == nil || terminal.Receipt != nil || terminal.Status != "unknown" {
+			// Measure only from the explicit cancellation or burst release,
+			// excluding process startup and discovery under parallel/race load.
+			started := time.Now()
+			if mode == "cancel" {
+				cancel()
+			}
+			if mode == "stdout-overflow" || mode == "stderr-overflow" {
+				if err := os.WriteFile(release, []byte("release"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var got result
+			select {
+			case got = <-done:
+				settled = true
+			case <-time.After(5 * time.Second):
+				t.Fatal("action did not terminate promptly after cancellation or overflow release")
+			}
+			if time.Since(started) > 5*time.Second {
+				t.Fatal("post-readiness termination budget exceeded")
+			}
+			if got.err == nil || got.terminal.Receipt != nil || got.terminal.Status != "unknown" {
 				t.Fatal("uncertain invocation accepted")
 			}
-			if strings.Contains(out.String(), "PRIVATE") {
+			if strings.Contains(got.output, "PRIVATE") {
 				t.Fatal("raw leak")
 			}
 		})
