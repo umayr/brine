@@ -184,7 +184,25 @@ func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
 		case "image":
 			valid = oneOf(x.Action, "pull", "remove", "intent.removeCandidate")
 		}
-		if !valid || (strings.HasPrefix(x.Action, "intent.") && x.Effect != "none") {
+		intent := strings.HasPrefix(x.Action, "intent.")
+		if !valid || (intent && x.Effect != "none") {
+			return nil, ErrOperationContract
+		}
+		// At the pinned producer, only Planned/Intent emit effect=none.
+		// Begin records mutation attempts as unknown before delegation, and
+		// changes them to complete only after an acknowledged success.
+		if x.Kind != "service" && !intent && x.Effect == "none" {
+			return nil, ErrOperationContract
+		}
+		// Recorder.Finish retains all attempt counters even when observations
+		// truncate. A visible uncertain call cannot coexist with known aggregate
+		// effects; a visible completed call cannot coexist with no attempts.
+		// The converse is deliberately NOT required: close/commit failure or
+		// truncation can yield aggregate unknown without a visible unknown.
+		if (x.Effect == "unknown" && r.Effects != "unknown") || (x.Effect == "complete" && r.Effects == "none") {
+			return nil, ErrOperationContract
+		}
+		if r.Operation == "validate" || (oneOf(r.Operation, "plan", "diff") && x.Kind != "service") {
 			return nil, ErrOperationContract
 		}
 	}
