@@ -318,6 +318,13 @@ func credentialTestDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
+	// Fail at fixture setup, not as a vacuous negative security assertion. Never
+	// repair ambient HOME/ancestor modes or ACLs to make a fixture acceptable.
+	s, err := openCredentialState(dir)
+	if err != nil {
+		t.Fatalf("credential fixture precondition: provision canonical ACL-free HOME ancestry (CI: scripts/ci-test-go.sh): %v", err)
+	}
+	s.close()
 	return dir
 }
 

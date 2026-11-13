@@ -37,7 +37,7 @@ func TestGeneratedCredentialsNotLogged(t *testing.T) {
 	cfg.AuthPassword = ""
 	cfg.APIToken = ""
 	if _, err := buildAuth(cfg); err != nil {
-		t.Fatal(err)
+		t.Fatalf("startup credential fixture requires canonical ACL-free HOME ancestry (CI: scripts/ci-test-go.sh): %v", err)
 	}
 	raw, err := os.ReadFile(cfg.DataDir + "/credentials.json")
 	if err != nil {

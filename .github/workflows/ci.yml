@@ -43,7 +43,8 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Test
-        run: go test -race ./...
+        # Credential fixtures require ACL-free canonical ancestry, not runner HOME.
+        run: bash scripts/ci-test-go.sh
 
   paired-alpha:
     name: Paired Alpha / ${{ matrix.mode }}
