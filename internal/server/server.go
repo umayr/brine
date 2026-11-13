@@ -16,6 +16,7 @@ import (
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/web"
 )
@@ -32,7 +33,7 @@ type Server struct {
 }
 
 // New wires up all dependencies and returns a ready-to-run server.
-func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, authn *auth.Authenticator) *Server {
+func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, authn *auth.Authenticator, histories ...*operationhistory.Store) *Server {
 	r := chi.NewRouter()
 	// Do not trust client-supplied forwarding headers for login rate limiting.
 	// Do not log request URLs: query strings may contain sensitive data.
@@ -54,7 +55,7 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 	}
 
 	// API routes
-	api.Mount(r, ag, st, rs, gr, cfg.Engine, timeouts, cfg.DeployTimeout)
+	api.Mount(r, ag, st, rs, gr, cfg.Engine, timeouts, cfg.DeployTimeout, histories...)
 
 	// Web / HTMX routes
 	h := web.New(ag, st, rs, gr, cfg.Engine, cfg.Dev, authn, cfg.DeployTimeout)

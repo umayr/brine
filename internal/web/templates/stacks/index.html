@@ -13,7 +13,7 @@
 {{define "content"}}
 <div class="index-page">
   {{if eq .Target.Profile "alpha"}}<p class="ui-notice ui-notice-warning">Alpha background Git pull/auto-deploy is disabled, regardless of saved settings. Configuration is not daemon qualification.</p>{{end}}
-  {{if .QualifiedOperations}}<p class="text-sm text-muted">Qualified manual operations only; stack deletion is deferred. Current-action receipt below is not durable history.</p><pre id="operation-summary" class="ui-panel p-4 text-xs whitespace-pre-wrap break-words" role="status" hidden></pre>{{end}}
+  {{if .QualifiedOperations}}<p class="text-sm text-muted">Qualified manual operations only; stack deletion is deferred. Current-action receipt below is not durable history.</p><pre id="operation-summary" data-operation-history="{{.OperationHistory}}" class="ui-panel p-4 text-xs whitespace-pre-wrap break-words" role="status" hidden></pre>{{end}}
   <div id="stack-inventory" hx-get="/web/stacks" hx-trigger="load, every 5s, refresh-stacks" hx-swap="innerHTML" hx-sync="this:drop"
     hx-on::send-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }"
     hx-on::response-error="if (event.detail.elt === this) { this.innerHTML = document.getElementById('stacks-request-error').innerHTML; htmx.process(this.querySelector('button')); }">
@@ -25,6 +25,9 @@
 
 <script>
 const stackActions = new Map();
+if (document.getElementById('operation-summary')?.dataset.operationHistory === 'true') {
+  BrineUI.operationLookup(document, document.getElementById('operation-summary').parentNode);
+}
 const stackButtonMarkup = new WeakMap();
 
 function updateStackActions() {
@@ -51,8 +54,11 @@ async function deployStack(name, btn) {
   updateStackActions();
   showToast('Deploying ' + name + '…', 'info');
   const qualified = document.getElementById('operation-summary') !== null;
+  if (qualified && document.getElementById('operation-summary').dataset.operationHistory === 'true') BrineUI.operationLookup(document, document.getElementById('operation-summary').parentNode);
   try {
     const res = await fetch(`/api/stacks/${name}/up`, { method: 'POST', headers: brineHeaders() });
+    const requestID = qualified ? (res.headers.get('X-Brine-Request-ID') || '') : '';
+    if (qualified && /^br_[a-f0-9]{32}$/.test(requestID)) BrineUI.operationLookup(document, document.getElementById('operation-summary').parentNode, requestID);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

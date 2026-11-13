@@ -17,6 +17,7 @@ import (
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/git"
+	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/server"
 	"github.com/umayr/brine/internal/store"
@@ -61,6 +62,7 @@ func run() error {
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
 	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "operator-selected Dill binary (bundled v0.7.0 is incompatible with qualified operations)")
+	flag.StringVar(&cfg.OperationStateDir, "operation-state-dir", "", "S1 opt-in: preexisting canonical private0700 neutral request history outside data and coordination state")
 	flag.StringVar(&cfg.CoordinationStateDir, "coordination-state-dir", "", "preexisting canonical shared owner-only0700 state outside Brine data (no automatic provisioning)")
 	flag.StringVar(&cfg.CoordinationLayout, "coordination-layout", "", "explicit operator assertion: native-local-docker-v1 only")
 	flag.StringVar(&cfg.CoordinationDaemonID, "coordination-daemon-id", "", "independently provisioned expected Docker daemon ID; never discovered from the selected socket")
@@ -88,7 +90,7 @@ func run() error {
 
 	var emptyCoordinationOption bool
 	flag.Visit(func(f *flag.Flag) {
-		if strings.HasPrefix(f.Name, "coordination-") && f.Value.String() == "" {
+		if (strings.HasPrefix(f.Name, "coordination-") || f.Name == "operation-state-dir") && f.Value.String() == "" {
 			emptyCoordinationOption = true
 		}
 	})
@@ -102,6 +104,16 @@ func run() error {
 		return err
 	}
 	log.Printf("warning: container engine socket access can grant host-level privileges; use an isolated target")
+
+	var history *operationhistory.Store
+	if cfg.OperationStateDir != "" {
+		var err error
+		history, err = operationhistory.Open(cfg.OperationStateDir, cfg.DataDir, cfg.CoordinationStateDir)
+		if err != nil {
+			return fmt.Errorf("operation history unavailable; inspect private state")
+		}
+		defer history.Close()
+	}
 
 	authn, err := buildAuth(cfg)
 	if err != nil {
@@ -143,6 +155,7 @@ func run() error {
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)
 	runner.CheckSource = stackSourceCheck(st)
+	runner.RequireOperationObserver = history != nil
 	if cfg.QualifiedOperations() {
 		runner.QualifiedOperation = &dill.QualifiedOperationConfig{StateDir: cfg.CoordinationStateDir, Layout: cfg.CoordinationLayout, DaemonID: cfg.CoordinationDaemonID}
 	}
@@ -176,7 +189,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := server.New(cfg, ag, st, rs, gr, authn)
+	srv := server.New(cfg, ag, st, rs, gr, authn, history)
 	return srv.Run(ctx)
 }
 

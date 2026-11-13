@@ -35,6 +35,8 @@ type Runner struct {
 
 	// Once set, every supported mutation uses the qualified CLI contract or fails.
 	QualifiedOperation *QualifiedOperationConfig
+	// Opt-in S1 requires a per-request durable observer for supported mutations.
+	RequireOperationObserver bool
 
 	Coordinator secretbindings.Coordinator
 

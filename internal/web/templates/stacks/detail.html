@@ -164,7 +164,7 @@
   {{end}}
 
   <!-- Action output terminal -->
-  <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
+  <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" data-operation-history="{{.OperationHistory}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
       <span id="action-title" class="font-mono text-xs">output</span>
       <button aria-label="Close action output" onclick="document.getElementById('action-output').classList.add('hidden')"
@@ -428,6 +428,9 @@ function doPush(name) {
   runAction('git/push', name, 'POST', JSON.stringify({message}), 'application/json');
 }
 
+if (document.getElementById('action-output')?.dataset.operationHistory === 'true') {
+  BrineUI.operationLookup(document, document.getElementById('action-output').parentNode);
+}
 async function runAction(action, name, method, body, contentType) {
   const output = document.getElementById('action-output');
   const log = document.getElementById('action-log');
@@ -437,6 +440,7 @@ async function runAction(action, name, method, body, contentType) {
   const started = Date.now();
   const qualified = output.dataset?.qualifiedOperations === 'true' && ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
   let operationStream;
+  if (qualified && output.dataset.operationHistory === 'true') BrineUI.operationLookup(document, output.parentNode);
 
   if (['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action)) {
     // Lifecycle actions can invalidate a plan even if they fail partway through.
@@ -459,6 +463,8 @@ async function runAction(action, name, method, body, contentType) {
       body: body,
       headers: brineHeaders(contentType ? {'Content-Type': contentType} : {}),
     });
+    const requestID = qualified ? (res.headers.get('X-Brine-Request-ID') || '') : '';
+    if (qualified && /^br_[a-f0-9]{32}$/.test(requestID)) BrineUI.operationLookup(document, output.parentNode, requestID);
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || `${res.status} ${res.statusText}`);

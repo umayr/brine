@@ -14,11 +14,13 @@ import (
 	"github.com/umayr/brine/internal/engine"
 	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/pkl"
 	"github.com/umayr/brine/internal/store"
 )
 
 type stackHandler struct {
+	history       *operationhistory.Store
 	agent         agent.Agent
 	store         store.StackStore
 	git           *gitpkg.Runner
@@ -166,10 +168,18 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "up")
+	if !ok {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
+	defer historyDelivery(request, fw, r)
+	if request != nil {
+		fw.flush()
+	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, "up", h.agent.Dill().Up(ctx, stack.PklPath, fw))
 }
 
@@ -186,9 +196,17 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "down")
+	if !ok {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
+	defer historyDelivery(request, fw, r)
+	if request != nil {
+		fw.flush()
+	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, "down", h.agent.Dill().Down(ctx, stack.PklPath, fw))
 }
 
@@ -205,9 +223,17 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "stop")
+	if !ok {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
+	defer historyDelivery(request, fw, r)
+	if request != nil {
+		fw.flush()
+	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, "stop", h.agent.Dill().Stop(ctx, stack.PklPath, fw))
 }
 
@@ -227,9 +253,17 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "start")
+	if !ok {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
+	defer historyDelivery(request, fw, r)
+	if request != nil {
+		fw.flush()
+	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, "start", h.agent.Dill().Start(ctx, stack.PklPath, fw))
 }
 
@@ -249,9 +283,17 @@ func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "restart")
+	if !ok {
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
+	defer historyDelivery(request, fw, r)
+	if request != nil {
+		fw.flush()
+	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, "restart", h.agent.Dill().Restart(ctx, stack.PklPath, fw))
 }
 

@@ -216,6 +216,15 @@ func Authenticated(r *http.Request) bool {
 	return ok && (info.method == "cookie" || info.method == "bearer")
 }
 
+// Identity returns only the trusted authenticated account name, never credentials.
+func Identity(r *http.Request) string {
+	if !Authenticated(r) {
+		return ""
+	}
+	info, _ := r.Context().Value(ctxKey{}).(requestInfo)
+	return info.user
+}
+
 // CSRFFor returns the CSRF token for the current session, or "" when the
 // request was authenticated with a bearer token or auth is disabled.
 func (a *Authenticator) CSRFFor(r *http.Request) string {

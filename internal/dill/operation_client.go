@@ -162,17 +162,40 @@ func bindOperationReceipt(receipt *OperationReceipt, op, stack, engine, endpoint
 func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (terminal OperationInvocation, err error) {
 	terminal.Status = "unknown"
 	terminal.ExitCode = -1
+	observer, _ := ctx.Value(operationObserverKey{}).(OperationObserver)
+	historyFailed := false
+	deliveryFailed := false
 	defer func() {
+		// Persist before exposing any terminal marker. A delivery failure below
+		// cannot alter the already observed process/receipt axes.
+		if observer != nil && observer.Terminal(terminal) != nil {
+			historyFailed = true
+		}
 		if w != nil {
 			data, _ := json.Marshal(terminal)
-			if _, e := io.WriteString(w, OperationMarker+string(data)+"\n"); e != nil && err == nil {
+			if _, e := io.WriteString(w, OperationMarker+string(data)+"\n"); e != nil {
+				deliveryFailed = true
+			}
+		}
+		if historyFailed {
+			err = &OperationHistoryError{Invocation: terminal}
+		} else if err != nil {
+			err = &OperationError{Invocation: terminal}
+		} else if deliveryFailed {
+			if observer != nil {
+				err = &OperationDeliveryError{Invocation: terminal}
+			} else {
 				err = &OperationError{Invocation: terminal}
 			}
 		}
-		if err != nil {
-			err = &OperationError{Invocation: terminal}
-		}
 	}()
+	if r.RequireOperationObserver && !oneOf(op, "validate", "plan") && observer == nil {
+		return terminal, ErrOperationContract
+	}
+	if observer != nil && observer.Started() != nil {
+		historyFailed = true
+		return terminal, ErrOperationContract
+	}
 	if !oneOf(op, "validate", "plan", "up", "start", "restart", "stop", "down") {
 		return terminal, ErrOperationContract
 	}
