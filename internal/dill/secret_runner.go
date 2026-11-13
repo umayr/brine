@@ -282,6 +282,9 @@ func (s *SecretRunner) PreviewLocked(ctx context.Context, id, stack, config stri
 	if !s.valid() {
 		return nil, "", ErrSecretUnavailable
 	}
+	if err := s.Runner.checkExecutionContract(); err != nil {
+		return nil, "", err
+	}
 	candidate, err := s.State.Draft(id, stack, s.Target)
 	if err != nil {
 		return nil, "", ErrSecretUnavailable
@@ -317,6 +320,9 @@ func (s *SecretRunner) ApplyActive(ctx context.Context, id, stack, config string
 	return s.applyActive(ctx, id, stack, config)
 }
 func (s *SecretRunner) applyActive(ctx context.Context, id, stack, config string) error {
+	if err := s.Runner.checkExecutionContract(); err != nil {
+		return err
+	}
 	if !filepath.IsAbs(config) {
 		return ErrSecretUnavailable
 	}
@@ -352,6 +358,9 @@ func (s *SecretRunner) ConfirmAndApply(ctx context.Context, id, stack, config, t
 func (s *SecretRunner) ConfirmAndApplyLocked(ctx context.Context, id, stack, config, token string) error {
 	if !s.valid() {
 		return ErrSecretUnavailable
+	}
+	if err := s.Runner.checkExecutionContract(); err != nil {
+		return err
 	}
 	snapshot, err := s.State.Preview(id, stack, s.Target)
 	if err != nil || subtle.ConstantTimeCompare([]byte(token), []byte(snapshot.Token)) != 1 {

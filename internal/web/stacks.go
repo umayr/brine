@@ -345,15 +345,23 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
+	// Return a swappable partial even on failure so polling and manual refresh
+	// remain recoverable. Never expose subprocess output or workspace paths.
+	unavailable := func(message string) {
+		h.renderPartial(w, r, "stack-containers-error", struct {
+			Name    string
+			Message string
+		}{name, message})
+	}
 	stack, err := h.store.Get(name)
-	if err != nil {
-		h.renderPartial(w, r, "stack-containers", nil)
+	if err != nil || stack == nil {
+		unavailable("Stack metadata could not be loaded. The stack may have been removed or its workspace may be unavailable.")
 		return
 	}
 	psContainers, err := h.agent.Dill().PS(r.Context(), stack.PklPath)
-	if err != nil {
-		// Stack may not be deployed yet — show empty state, not an error.
-		h.renderPartial(w, r, "stack-containers", nil)
+	if err != nil || psContainers == nil {
+		// A failed command, rejected source, or JSON null is not an empty list.
+		unavailable("The stack container query did not return a valid inventory. Check the configured target, Dill compatibility and stack source, then retry.")
 		return
 	}
 	containers := make([]engine.ContainerInfo, 0, len(psContainers))

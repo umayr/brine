@@ -102,6 +102,41 @@ config {
 	}
 	runner := New(binary)
 	runner.PklBinary = pkl
+	// The old raw offline CLI remains a diagnostics oracle, not a production
+	// pinned validation path. Production must reject v0.5.0 endpoint support.
+	validateFile := func(ctx context.Context, path string) error {
+		out, err := runner.capture(ctx, "-f", path, "validate", "--format", "json")
+		if err != nil {
+			return err
+		}
+		return parseValidateJSON(out)
+	}
+	validateContent := func(ctx context.Context, path, content string) error {
+		cmd, cleanup, err := runner.command(ctx, "-f", path, "validate", "--stdin", "--format", "json")
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		cmd.Stdin = strings.NewReader(content)
+		out, err := cmd.Output()
+		if err != nil {
+			return err
+		}
+		return parseValidateJSON(string(out))
+	}
+	t.Run("PinnedValidationRejected", func(t *testing.T) {
+		pinned := New(binary)
+		pinned.PklBinary = pkl
+		pinned.Engine = "docker"
+		pinned.Socket = filepath.Join(dir, "nonexistent-disposable.sock")
+		pinned.ResolveStack = func(string) (string, error) { return "brine-integration", nil }
+		if err := pinned.Validate(ctx, path); err == nil {
+			t.Fatal("v0.5.0 unexpectedly supports pinned validation")
+		}
+		if err := pinned.ValidateContent(ctx, path, valid); err == nil {
+			t.Fatal("v0.5.0 unexpectedly supports pinned stdin validation")
+		}
+	})
 	assertInvalidJSON := func(t *testing.T, cmd *exec.Cmd) {
 		t.Helper()
 		out, err := cmd.Output()
@@ -131,8 +166,9 @@ config {
 		}
 		r := New(wrapper)
 		r.PklBinary = pkl
-		if err := r.Validate(ctx, path); err != nil {
-			t.Fatalf("released validation with isolated HOME: %v", err)
+		out, err := r.capture(ctx, "-f", path, "validate", "--format", "json")
+		if err != nil || parseValidateJSON(out) != nil {
+			t.Fatalf("raw released validation with isolated HOME: %v %s", err, out)
 		}
 		home, err := os.ReadFile(log)
 		if err != nil {
@@ -146,7 +182,7 @@ config {
 		}
 	})
 	t.Run("Validate", func(t *testing.T) {
-		if err := runner.Validate(ctx, path); err != nil {
+		if err := validateFile(ctx, path); err != nil {
 			t.Fatalf("valid file: %v", err)
 		}
 		badPath := filepath.Join(dir, "invalid.pkl")
@@ -154,18 +190,18 @@ config {
 			t.Fatal(err)
 		}
 		assertInvalidJSON(t, exec.CommandContext(ctx, binary, "-f", badPath, "validate", "--format", "json"))
-		if err := runner.Validate(ctx, badPath); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
+		if err := validateFile(ctx, badPath); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
 			t.Fatalf("invalid file diagnostic: %v", err)
 		}
 	})
 	t.Run("ValidateContent", func(t *testing.T) {
-		if err := runner.ValidateContent(ctx, path, valid); err != nil {
+		if err := validateContent(ctx, path, valid); err != nil {
 			t.Fatalf("valid stdin with relative schema: %v", err)
 		}
 		cmd := exec.CommandContext(ctx, binary, "-f", path, "validate", "--stdin", "--format", "json")
 		cmd.Stdin = strings.NewReader(invalid)
 		assertInvalidJSON(t, cmd)
-		if err := runner.ValidateContent(ctx, path, invalid); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
+		if err := validateContent(ctx, path, invalid); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
 			t.Fatalf("invalid stdin diagnostic: %v", err)
 		}
 		after, err := os.ReadFile(path)
@@ -190,18 +226,18 @@ config {
 		if err := os.WriteFile(importPath, []byte(imported), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := runner.Validate(ctx, importPath); err != nil {
+		if err := validateFile(ctx, importPath); err != nil {
 			t.Fatalf("file relative import: %v", err)
 		}
-		if err := runner.ValidateContent(ctx, importPath, imported); err != nil {
+		if err := validateContent(ctx, importPath, imported); err != nil {
 			t.Fatalf("stdin relative import: %v", err)
 		}
 		if err := os.Remove(settings); err != nil {
 			t.Fatal(err)
 		}
 		for name, validate := range map[string]func() error{
-			"file":  func() error { return runner.Validate(ctx, importPath) },
-			"stdin": func() error { return runner.ValidateContent(ctx, importPath, imported) },
+			"file":  func() error { return validateFile(ctx, importPath) },
+			"stdin": func() error { return validateContent(ctx, importPath, imported) },
 		} {
 			if err := validate(); err == nil || !strings.Contains(err.Error(), "settings.pkl") {
 				t.Errorf("%s missing import diagnostic: %v", name, err)
@@ -210,7 +246,7 @@ config {
 	})
 	t.Run("SchemaTypeError", func(t *testing.T) {
 		bad := strings.Replace(valid, `image = "nginx:alpine"`, `image = 42`, 1)
-		if err := runner.ValidateContent(ctx, path, bad); err == nil || !strings.Contains(err.Error(), "String") {
+		if err := validateContent(ctx, path, bad); err == nil || !strings.Contains(err.Error(), "String") {
 			t.Fatalf("schema type diagnostic: %v", err)
 		}
 	})

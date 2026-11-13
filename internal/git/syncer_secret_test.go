@@ -54,13 +54,14 @@ func TestSyncRejectsOldDillInStrictMode(t *testing.T) {
 	defer state.Close()
 	gitBin := filepath.Join(dir, "git")
 	counter := filepath.Join(dir, "counter")
-	gitScript := "#!/bin/sh\ncase \"$1 $2\" in 'status --porcelain') exit 0;; 'pull --ff-only') exit 0;; 'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; else echo old; touch '" + counter + "'; fi;; 'rev-parse --short') echo new;; esac\n"
+	gitScript := "#!/bin/sh\nwhile [ \"$1\" = -c ]; do shift 2; done\ncase \"$1 $2\" in 'status --porcelain') exit 0;; 'pull --ff-only') exit 0;; 'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; else echo old; touch '" + counter + "'; fi;; 'rev-parse --short') echo new;; esac\n"
 	if err = os.WriteFile(gitBin, []byte(gitScript), 0700); err != nil {
 		t.Fatal(err)
 	}
 	dillBin := filepath.Join(dir, "dill")
 	up := filepath.Join(dir, "up")
-	script := "#!/bin/sh\ncase \" $* \" in *\" up \"*) touch '" + up + "';; esac\nexit 1\n"
+	discovery := filepath.Join(dir, "discovery")
+	script := "#!/bin/sh\ncase \" $* \" in *\" secret-capabilities \"*) touch '" + discovery + "';; *\" up \"*) touch '" + up + "';; esac\nexit 1\n"
 	if err = os.WriteFile(dillBin, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +73,17 @@ func TestSyncRejectsOldDillInStrictMode(t *testing.T) {
 		}
 		return "demo", nil
 	}, LegacyGate: func(context.Context, string) error { return nil }}
-	NewSyncer(st, &Runner{Binary: gitBin}, runner, time.Second).sync(context.Background(), "demo")
+	NewSyncer(st, &Runner{Binary: gitBin}, runner, 10*time.Second).sync(context.Background(), "demo")
+	if _, err = os.Stat(counter); err != nil {
+		t.Fatal("fake Git never read changed HEAD:", err)
+	}
+	updated, err := st.Get("demo")
+	if err != nil || updated.Git.LastCommit != "new" {
+		t.Fatalf("changed pull not recorded: %+v %v", updated, err)
+	}
+	if _, err = os.Stat(discovery); err != nil {
+		t.Fatal("capability rejection not exercised:", err)
+	}
 	if _, err = os.Stat(up); !os.IsNotExist(err) {
 		t.Fatal("auto-sync used old binary to deploy")
 	}

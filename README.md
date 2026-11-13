@@ -35,7 +35,11 @@ it talks to the container engine directly for container and image views.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.5.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
+- A `dill` binary (v0.7.0) on `PATH`, or pass `--dill /path/to/dill`.
+  Older binaries that cannot accept explicit stack/engine/socket flags are
+  rejected for lifecycle and validation; Brine does not retry against defaults.
+- Alpha file-secret mode also requires the matching v0.7.0 schema. See the
+  [qualification status](docs/alpha-secrets-status.md) for platform and testing limits.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -62,7 +66,7 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
-The image bundles Brine, Dill (v0.5.0), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.7.0), and Pkl (0.31.1):
 
 ```sh
 docker build -t brine .
@@ -88,7 +92,7 @@ docker run -d --name brine \
   brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.5.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.7.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
@@ -148,6 +152,7 @@ local processes and non-browser clients can still control it.
 | `--bind` | | `127.0.0.1` | Literal listen IP; no-auth requires loopback |
 | `--data-dir` | | `~/.brine` | Stack files, recipes, credentials |
 | `--engine` | | `docker` | `docker` or `podman` |
+| `--profile` | | `legacy` | `alpha` requires auth and an explicit local socket; unqualified engine writes are blocked, except pinned stack stop/down cleanup. See [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
 | `--dill` | | `dill` | Path to the Dill binary |
 | `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
@@ -177,8 +182,10 @@ Alpha resources and its private data after checking their identity. No SSO, RBAC
 remote enrollment, production binding provider, vault or late-bound secret provider
 is provided.
 
-Brine strips its named authentication environment variables from Dill subprocesses,
-but other inherited environment values can be visible to deployment tooling and Pkl.
+Brine gives both legacy and strict Dill subprocesses a minimal explicit environment
+(PATH/locale, isolated private HOME/XDG directories, and configured Pkl/policy paths),
+not the inherited service environment or its login/API credentials. This does not
+isolate Git subprocesses, which still inherit the service environment (see below).
 Dill/Pkl run with the server user's filesystem privileges; credentials and stack data
 are not a sandbox boundary. Errors, engine logs, streams and stored outcomes can
 contain deployment values; use synthetic secrets only and protect logs/state. Do not
@@ -186,6 +193,16 @@ put login or API credentials in deployment data. Future mutation/history paths h
 not been security-qualified by this Alpha slice.
 
 ## Data directory
+
+Persisted credentials require a canonical, service-owned mode-0700 state directory
+and a regular, service-owned, single-link mode-0600 credential file. Symlinks,
+group/world-writable ancestors (including sticky temporary directories), and ACLs
+that expand or inherit access are rejected rather than silently repaired. macOS
+permits deny-only ACLs; Linux rejects extended access and default POSIX ACLs.
+Provision a private state directory without inherited grants before startup; mode
+bits alone do not neutralize ACLs. Uninspectable ACLs fail closed. File-backed
+credential handling is supported on Linux/macOS; other platforms require explicit
+credentials instead of an insecure filesystem fallback.
 
 ```
 ~/.brine/
@@ -200,6 +217,20 @@ not been security-qualified by this Alpha slice.
 ```
 
 Stack and recipe paths are validated; directories are `0700` and files `0600`.
+
+File-backed authentication requires a canonical private data directory on Linux
+or macOS: owned by the server user, mode `0700`, beneath root/server-owned
+ancestors without group/other write permission. Credential files must be regular,
+single-link, server-owned files with mode `0600`; symlinks, hardlinks, unsafe
+parents (including temporary shared directories) and permissive existing state
+are rejected before credentials are read. Brine does not chmod unrelated files
+or automatically repair preexisting unsafe state. Before upgrading an existing
+installation, stop Brine and inspect the exact data directory and credential
+file ownership, modes and link identities; deliberately provision a private
+canonical location rather than blindly chmodding a path that may be a link.
+New image data volumes start private; existing volumes retain their old modes
+and may require operator repair. On other platforms, supply both explicit login
+password and API token; file-backed credential loading fails closed.
 
 ## Stacks
 

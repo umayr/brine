@@ -1,7 +1,18 @@
-# Paired candidate checks (qualification pending)
+# Paired candidate checks (full Brine Alpha qualification pending)
 
-The bundled Dill 0.5.0 is incompatible. Do not bump it or claim released
-support. The CI Docker job tests that its capability command fails. The paired CI
+Brine now bundles released Dill v0.7.0; v0.5.0 remains an incompatible negative
+test baseline. The release commit `0554f6d73cb924b06a47f3a495bcad39a9dcb08c`
+has the same tracked tree as the pinned candidate below. See the
+[updated qualification status](alpha-secrets-status.md) for passing paired run
+43361791813, tested commit/tree identities, platform limits and remaining gaps.
+The paired jobs qualify a source-built candidate, not the downloaded release
+artifact or a complete Brine server/browser canary.
+
+## Historical candidate setup and earlier failures
+
+The following records the original candidate progression; pending statements
+about that pin below are superseded by the linked passing run, not by a claim
+of full Alpha qualification. The CI Docker job tests that its capability command fails. The paired CI
 configuration pins Dill commit `258e73e58ba018931be57172908e8e64f433945e`
 and builds it from source; the resulting binary SHA-256 is recorded and checked
 within each job. This is an interim correction pin, not a qualified release.
@@ -88,8 +99,9 @@ before test fixture disposal. This deliberate test fault injection is not produc
 behavior. A failed test may leave disposable engine resources requiring CI
 cleanup; it must never run against a shared or production engine. Passing this
 harness is not a substitute for workload-read, namespace/security, browser and
-full paired Linux qualification. The pinned candidate has not yet been tested
-by these Brine CI jobs.
+full paired Linux qualification. The pinned candidate subsequently passed both selected Brine harnesses on
+Docker and rootless Podman in run 43361791813, without selected-test skips.
+Full server/browser and restart/recovery qualification remains pending.
 
 ## Legacy lifecycle compatibility
 
@@ -143,7 +155,8 @@ Dill subprocess's fresh isolated runtime HOME. CI checks ownership, mode,
 no-symlink ancestry and absence of access/default ACLs, and reports only
 bounded metadata. The earlier rootless run failed before mutation; its log
 showed a default ACL on `/home`, which Dill rejects for private-file ancestry.
-The protected HOME change has not yet been qualified by a paired rerun.
+Run 43361791813 subsequently verified safe protected-HOME ancestry and completed
+both selected Brine tests on Docker and rootless Podman.
 It records the built candidate checksum, and explicitly fails
 if either selected Brine test skips. No local or production engine is used.
 

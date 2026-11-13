@@ -3,11 +3,13 @@ package web
 import (
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/target"
 )
 
 type pageData struct {
 	Page          string
 	RuntimeEngine string
+	Target        target.Identity
 	CSRF          string
 	User          string
 	AuthEnabled   bool
@@ -15,7 +17,10 @@ type pageData struct {
 
 type runtimePageData interface {
 	setRuntimeEngine(string)
+	setTarget(target.Identity)
 }
+
+func (p *pageData) setTarget(identity target.Identity) { p.Target = identity }
 
 func (p *pageData) setRuntimeEngine(engine string) {
 	p.RuntimeEngine = engine

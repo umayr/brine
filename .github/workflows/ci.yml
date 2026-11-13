@@ -43,7 +43,8 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Test
-        run: go test -race ./...
+        # Credential fixtures require ACL-free canonical ancestry, not runner HOME.
+        run: bash scripts/ci-test-go.sh
 
   paired-alpha:
     name: Paired Alpha / ${{ matrix.mode }}
@@ -96,17 +97,23 @@ jobs:
           docker run --rm brine:ci --version
           docker run --rm --entrypoint /usr/local/bin/dill brine:ci version
           docker run --rm --entrypoint /usr/local/bin/pkl brine:ci --version
-      - name: Bundled Dill 0.5.0 rejects Alpha capability discovery
+      - name: Bundled Dill 0.7.0 advertises the Alpha contract
         run: |
-          if docker run --rm --entrypoint /usr/local/bin/dill brine:ci secret-capabilities --format json > /tmp/brine-old-dill-output 2>&1; then
-            echo 'The unmodified bundled Dill unexpectedly claimed Alpha capabilities' >&2
+          docker run --rm --entrypoint /usr/local/bin/dill brine:ci version | grep -Fx 'v0.7.0'
+          docker run --rm --entrypoint /usr/local/bin/dill brine:ci secret-capabilities --format json > /tmp/brine-dill-capabilities.json
+          jq -e '.contract == "dill.alpha-secrets/1" and .bindings == "dill.secret-bindings/1" and .policy == "dill.secret-policy/1" and (.engines | sort) == ["docker-host-file", "podman-host-file"]' /tmp/brine-dill-capabilities.json
+      - name: Legacy Dill 0.5.0 rejects Alpha capability discovery
+        run: |
+          docker build --build-arg DILL_VERSION=0.5.0 -t brine:legacy-dill .
+          if docker run --rm --entrypoint /usr/local/bin/dill brine:legacy-dill secret-capabilities --format json > /tmp/brine-old-dill-output 2>&1; then
+            echo 'The legacy Dill unexpectedly claimed Alpha capabilities' >&2
             exit 1
           fi
           if grep -q 'dill.alpha-secrets/1' /tmp/brine-old-dill-output; then
-            echo 'The unmodified bundled Dill advertised an unsupported contract' >&2
+            echo 'The legacy Dill advertised an unsupported contract' >&2
             exit 1
           fi
-          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:ci --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token --secret-target lab-a --secret-policy /synthetic-policy.json --engine-socket unix:///run/synthetic.sock)
+          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:legacy-dill --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token --secret-target lab-a --secret-policy /synthetic-policy.json --engine-socket unix:///run/synthetic.sock)
           trap 'docker rm -f "$cid" >/dev/null' EXIT
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18089/api/health >/dev/null && break || sleep 1; done
           curl -fsS -H 'Authorization: Bearer synthetic-ci-token' -H 'Content-Type: application/json' -d '{"name":"demo","pkl_content":"config {}"}' http://127.0.0.1:18089/api/stacks/ >/dev/null

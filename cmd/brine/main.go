@@ -54,6 +54,7 @@ func effectiveEngineHost(cfg *config.Config) string {
 func run() error {
 	cfg := config.Default()
 
+	flag.StringVar(&cfg.Profile, "profile", cfg.Profile, "execution profile: legacy (compatibility) or alpha (explicit local target; mutations gated)")
 	flag.StringVar(&cfg.Port, "port", cfg.Port, "HTTP listen port")
 	flag.StringVar(&cfg.Bind, "bind", cfg.Bind, "HTTP listen IP (default loopback)")
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "directory for storing stack configs")
@@ -125,6 +126,7 @@ func run() error {
 	// Initialise dill runner.
 	runner := dill.New(cfg.DillBin)
 	runner.PklBinary = cfg.SecretPkl
+	runner.Profile = cfg.Profile
 	runner.Engine = cfg.Engine
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)

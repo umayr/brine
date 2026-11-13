@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
 # which need GLIBC_2.38.
 FROM debian:trixie-slim
 ARG TARGETARCH
-ARG DILL_VERSION=0.5.0
+ARG DILL_VERSION=0.7.0
 ARG PKL_VERSION=0.31.1
 
 RUN apt-get update \
@@ -48,7 +48,7 @@ RUN set -eux; \
 COPY --from=build /out/brine /usr/local/bin/brine
 
 ENV DILL_PKL_PATH=/usr/local/bin/pkl
-RUN mkdir -p /data
+RUN mkdir -m 0700 /data
 VOLUME ["/data"]
 EXPOSE 8080
 
