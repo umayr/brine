@@ -36,6 +36,9 @@ it talks to the container engine directly for container and image views.
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
 - A `dill` binary (v0.5.0 or newer) on `PATH`, or pass `--dill /path/to/dill`
+- Alpha file-secret mode requires Dill v0.7.0 and its matching schema; the legacy
+  v0.5.0 minimum above does not provide that contract. See the
+  [qualification status](docs/alpha-secrets-status.md) for platform and testing limits.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -62,7 +65,7 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
-The image bundles Brine, Dill (v0.5.0), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.7.0), and Pkl (0.31.1):
 
 ```sh
 docker build -t brine .
@@ -88,7 +91,7 @@ docker run -d --name brine \
   brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.5.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.7.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
