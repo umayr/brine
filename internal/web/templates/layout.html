@@ -61,10 +61,12 @@
     <header class="app-header bg-panel border-b border-line px-6 py-3.5 flex items-center justify-between shrink-0">
       <div class="text-sm text-muted">{{block "header" .}}Brine{{end}}</div>
       <div class="flex items-center gap-2">
-        <div class="runtime-pill" title="Runtime selected when Brine started">
+        <div class="runtime-pill" title="{{.Target.Status}}">
           <i data-lucide="info" class="w-3.5 h-3.5 text-info" aria-hidden="true"></i>
           <span class="runtime-label">ENGINE</span>
           <span class="font-mono font-semibold text-foreground">{{.RuntimeEngine}}</span>
+          <span class="font-mono text-xs">{{.Target.Socket}}</span>
+          <span class="text-xs">{{.Target.Profile}} · configured only</span>
         </div>
         {{block "header-actions" .}}{{end}}
         {{if .AuthEnabled}}
@@ -80,6 +82,7 @@
     </header>
 
     <main class="app-main flex-1 p-6 overflow-auto">
+      {{if eq .Target.Profile "alpha"}}<div class="ui-notice ui-notice-warning mb-4" role="status">Alpha: target is configured, not negotiated or readiness-checked. Deploy and direct container/image writes are disabled pending Dill's target/ownership contract. Use pinned stack stop/down for cleanup.</div>{{end}}
       {{block "content" .}}{{end}}
     </main>
   </div>
@@ -106,6 +109,18 @@
 </dialog>
 
 <script>
+  {{if eq .Target.Profile "alpha"}}
+  // Presentation only: server-side Runner and SDK boundaries enforce denial,
+  // including requests made without these controls or before a partial settles.
+  function disableAlphaWrites() {
+    document.querySelectorAll('[hx-post^="/web/containers/"], [hx-post="/web/images/pull"], [onclick*="removeImage("], [onclick*="pull-modal"]').forEach(el => {
+      const controls = el.matches('form') ? el.querySelectorAll('button, input') : [el];
+      controls.forEach(control => { control.disabled = true; control.title = 'Alpha: Dill target/ownership contract unavailable; use pinned stack stop/down for cleanup'; });
+    });
+  }
+  document.addEventListener('DOMContentLoaded', disableAlphaWrites);
+  document.addEventListener('htmx:afterSettle', disableAlphaWrites);
+  {{end}}
   document.addEventListener('DOMContentLoaded', () => lucide.createIcons());
   document.addEventListener('htmx:afterSettle',  () => lucide.createIcons());
 

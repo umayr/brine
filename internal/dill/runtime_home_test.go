@@ -40,6 +40,9 @@ esac
 		t.Fatal(err)
 	}
 	r := New(binary)
+	r.Engine = "docker"
+	r.Socket = "/synthetic/engine.sock"
+	r.ResolveStack = func(string) (string, error) { return "demo", nil }
 	ctx := context.Background()
 	if _, err := r.capture(ctx, "other"); err != nil {
 		t.Fatal(err)

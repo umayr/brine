@@ -8,9 +8,12 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/umayr/brine/internal/target"
 )
 
 type Config struct {
+	Profile      string // legacy compatibility or explicit fail-closed alpha boundary
 	Port         string
 	Bind         string // literal listen address
 	DataDir      string
@@ -38,6 +41,7 @@ type Config struct {
 func Default() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
+		Profile: target.Legacy,
 		Port:    "8080",
 		Bind:    "127.0.0.1",
 		DataDir: filepath.Join(home, ".brine"),
@@ -56,6 +60,9 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	if err := target.ValidateProfile(c.Profile, c.Engine, c.EngineSocket); err != nil {
+		return err
+	}
 	ip := net.ParseIP(c.Bind)
 	if ip == nil {
 		return fmt.Errorf("bind must be a literal IP address")

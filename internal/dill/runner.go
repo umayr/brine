@@ -22,6 +22,7 @@ import (
 type Runner struct {
 	Binary       string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
 	PklBinary    string // explicit operator-configured Pkl binary, if any
+	Profile      string // Alpha gates execution until Dill has a target/ownership contract
 	Engine       string
 	Socket       string
 	ResolveStack func(string) (string, error)
@@ -248,6 +249,9 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err = cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("Dill label cleanup interrupted: %w", ctx.Err())
+		}
 		return errors.New("Dill lifecycle failed; an endpoint-pinning compatible Dill may be required")
 	}
 	return nil
@@ -255,6 +259,9 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
+	if err := r.checkExecutionContract(); err != nil {
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	if err := r.checkSource(pklPath); err != nil {
 		return err
@@ -284,6 +291,9 @@ func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Start starts previously stopped containers.
 func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
+	if err := r.checkExecutionContract(); err != nil {
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	if err := r.checkSource(pklPath); err != nil {
 		return err
@@ -301,6 +311,9 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Restart stops then starts all containers.
 func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
+	if err := r.checkExecutionContract(); err != nil {
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	if err := r.checkSource(pklPath); err != nil {
 		return err
@@ -319,6 +332,9 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 // Teardown removes containers, images, volumes, and the stack network.
 // Pass force=true to force-remove images referenced by other containers.
 func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
+	if err := r.checkExecutionContract(); err != nil {
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	if err := r.checkSource(pklPath); err != nil {
 		return errors.New("teardown requires a safe recipe; stop and down remain available")
@@ -354,6 +370,9 @@ func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) 
 // Plan returns a structured diff of what `dill up` would change.
 // Exit 0 = no changes, exit 1 = has changes (not an error), exit 2 = error.
 func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) {
+	if err := r.checkExecutionContract(); err != nil {
+		return nil, err
+	}
 	if err := r.checkSource(pklPath); err != nil {
 		return nil, err
 	}
@@ -399,7 +418,11 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 			return err
 		}
 	}
-	out, err := r.capture(ctx, "-f", pklPath, "validate", "--format", "json")
+	args, err := r.lifecycleArgs(pklPath, "validate", "--format", "json")
+	if err != nil {
+		return err
+	}
+	out, err := r.capture(ctx, args...)
 	if err != nil {
 		// Unexpected non-zero exit (e.g. file not found). Fall back to raw output.
 		if msg := strings.TrimSpace(out); msg != "" {
@@ -425,7 +448,11 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	cmd, cleanup, err := r.command(ctx, "-f", pklPath, "validate", "--stdin", "--format", "json")
+	args, err := r.lifecycleArgs(pklPath, "validate", "--stdin", "--format", "json")
+	if err != nil {
+		return err
+	}
+	cmd, cleanup, err := r.command(ctx, args...)
 	if err != nil {
 		return err
 	}

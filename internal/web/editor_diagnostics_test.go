@@ -29,11 +29,15 @@ func TestEditorDraftValidationAndFormat(t *testing.T) {
 	dir := t.TempDir()
 	log := filepath.Join(dir, "args")
 	binary := filepath.Join(dir, "dill")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + log + "'\ncat > '" + log + ".stdin'\nif [ \"$3\" = validate ]; then printf '%s' '{\"valid\":false,\"error\":\"bad <source>\\nline 2\"}'; else echo formatted; fi\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + log + "'\ncat > '" + log + ".stdin'\ncase \" $* \" in *\" validate \"*) printf '%s' '{\"valid\":false,\"error\":\"bad <source>\\nline 2\"}';; *) echo formatted;; esac\n"
 	if err = os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	h := &Handler{store: st, agent: agent.NewLocalAgent(nil, dill.New(binary))}
+	runner := dill.New(binary)
+	runner.Engine = "docker"
+	runner.Socket = "/synthetic/engine.sock"
+	runner.ResolveStack = func(string) (string, error) { return "test", nil }
+	h := &Handler{store: st, agent: agent.NewLocalAgent(nil, runner)}
 	request := func(values url.Values, format bool) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/", strings.NewReader(values.Encode()))
 		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -54,7 +58,7 @@ func TestEditorDraftValidationAndFormat(t *testing.T) {
 	}
 	args, _ := os.ReadFile(log)
 	input, _ := os.ReadFile(log + ".stdin")
-	if !strings.Contains(string(args), "other.pkl\nvalidate\n--stdin") || len(input) != 0 {
+	if !strings.Contains(string(args), "other.pkl\n-p\ntest\n--engine\ndocker\n--engine-socket\n/synthetic/engine.sock\nvalidate\n--stdin") || len(input) != 0 {
 		t.Fatalf("args %q input %q", args, input)
 	}
 	w = request(url.Values{"pkl_content": {"x"}, "active_file": {"../evil.pkl"}}, true)

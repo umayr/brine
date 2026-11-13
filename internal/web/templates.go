@@ -182,6 +182,9 @@ func (h *Handler) withGlobalTemplateData(r *http.Request, data any) any {
 	}
 	if page, ok := data.(runtimePageData); ok {
 		page.setRuntimeEngine(runtimeEngine)
+		if h.agent != nil && h.agent.Dill() != nil {
+			page.setTarget(h.agent.Dill().TargetIdentity())
+		}
 	}
 	if page, ok := data.(authPageData); ok && h.auth != nil {
 		page.setAuth(h.auth.CSRFFor(r), h.auth.User(r), h.auth.Enabled())

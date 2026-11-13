@@ -27,7 +27,7 @@
     <!-- Primary action -->
     <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
       onclick="runAction('up', '{{.Stack.Name}}')"
-      {{if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
+      {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
       <i data-lucide="play" class="w-3.5 h-3.5"></i>
       Deploy
@@ -49,14 +49,14 @@
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Start stopped containers"
         onclick="runAction('start', '{{.Stack.Name}}')"
-        {{if .EngineAlignment.Blocked}}disabled{{end}}
+        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="play" class="w-3.5 h-3.5"></i>
         Start
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action
         onclick="runAction('restart', '{{.Stack.Name}}')"
-        {{if .EngineAlignment.Blocked}}disabled{{end}}
+        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
         Restart
@@ -69,7 +69,7 @@
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
-        {{if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
+        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
         Plan
@@ -81,6 +81,7 @@
       <div id="action-status" role="status" aria-live="polite" class="hidden ui-status ui-status-neutral ui-status-sm font-mono mr-1">idle</div>
       <button class="ui-button ui-button-sm ui-button-outline ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Teardown stack', 'This removes containers, images, volumes, and networks for {{.Stack.Name}}.', '{{.Stack.Name}}', () => runAction('teardown', '{{.Stack.Name}}'))"
+        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{end}}
       >
         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
         Teardown
@@ -102,6 +103,12 @@
     </div>
   </div>
   {{end}}
+
+  <div class="ui-panel px-5 py-4 mb-4 text-sm" role="status">
+    <div>Configured target: <span class="font-mono">{{.Target.Engine}} · {{.Target.Socket}}</span> ({{.Target.Profile}})</div>
+    <div class="text-muted">{{.Target.Status}}.</div>
+    {{if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending a Dill target/ownership contract. Pinned stack stop/down cleanup remains available.</div>{{end}}
+  </div>
 
   <!-- Meta -->
   <div class="stack-metadata ui-panel divide-x divide-line flex">
@@ -130,6 +137,7 @@
   <!-- Plan result (populated on demand) -->
   <div id="plan-result"></div>
 
+  {{if ne .Target.Profile "alpha"}}
   <section id="secret-bindings" class="ui-panel p-5 space-y-3" data-stack="{{.Stack.Name}}" aria-labelledby="secret-bindings-title">
     <h2 id="secret-bindings-title" class="font-semibold">File secret references</h2>
     <p class="text-sm text-muted">References only: never enter secret values or host paths. Provision source files and policy externally. Saving a draft does not rotate a running workload.</p>
@@ -150,6 +158,7 @@
     </div>
   </section>
   <script src="/static/secret-bindings.js" defer></script>
+  {{end}}
 
   <!-- Action output terminal -->
   <div id="action-output" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">

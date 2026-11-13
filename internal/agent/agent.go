@@ -3,6 +3,7 @@ package agent
 import (
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
+	"github.com/umayr/brine/internal/target"
 )
 
 // Agent is the central abstraction for the manager/agent architecture.
@@ -39,6 +40,9 @@ func NewLocalAgent(eng engine.Engine, runner *dill.Runner) *LocalAgent {
 			guard.LockStack = runner.LockStack
 		}
 		eng = guard
+		if runner != nil && runner.Profile == target.Alpha {
+			eng = &engine.AlphaReadOnly{Engine: guard}
+		}
 	}
 	return &LocalAgent{
 		id:     "local",
@@ -50,7 +54,11 @@ func NewLocalAgent(eng engine.Engine, runner *dill.Runner) *LocalAgent {
 
 // SetSecretRecordLookup configures trusted persisted classification at startup.
 func (a *LocalAgent) SetSecretRecordLookup(lookup func(string) (bool, error)) {
-	if guard, ok := a.eng.(*engine.LifecycleGuard); ok {
+	eng := a.eng
+	if boundary, ok := eng.(*engine.AlphaReadOnly); ok {
+		eng = boundary.Engine
+	}
+	if guard, ok := eng.(*engine.LifecycleGuard); ok {
 		guard.SecretEnabled = lookup
 	}
 }

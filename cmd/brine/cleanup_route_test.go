@@ -64,6 +64,9 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 			}
 			st := &recipeReadCounter{StackStore: fs}
 			runner := dill.New(binary)
+			// Alpha must retain pinned cleanup even with unavailable source
+			// inputs and no target negotiation/secret workflow available.
+			runner.Profile = "alpha"
 			runner.Engine = "docker"
 			runner.Socket = "/synthetic/engine.sock"
 			runner.ResolveStack = stackPathResolver(st)
@@ -75,8 +78,13 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 				t.Fatal(err)
 			}
 			router.Use(authn.Middleware)
-			api.Mount(router, ag, st, nil, nil, "docker", httpx.Timeouts{}, time.Second)
-			web.Mount(router, web.New(ag, st, nil, nil, "docker", false, authn, time.Second), httpx.Timeouts{})
+			// This is an endpoint/source-safety test, not a one-second OS
+			// process-start benchmark. Full concurrent race runs reproduced a
+			// deadline at 1.002s before the first fake invocation completed.
+			// Keep all exact safety assertions; test cancellation independently.
+			const fixtureBudget = 10 * time.Second
+			api.Mount(router, ag, st, nil, nil, "docker", httpx.Timeouts{}, fixtureBudget)
+			web.Mount(router, web.New(ag, st, nil, nil, "docker", false, authn, fixtureBudget), httpx.Timeouts{})
 			request := func(method, path string, body *bytes.Buffer) *http.Request {
 				if body == nil {
 					body = &bytes.Buffer{}
@@ -112,9 +120,11 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 			for _, action := range []string{"stop", "down"} {
 				st.reads = 0
 				w := httptest.NewRecorder()
+				started := time.Now()
 				router.ServeHTTP(w, request(http.MethodPost, "/api/stacks/demo/"+action, nil))
 				if w.Code != 200 || !strings.Contains(w.Body.String(), "[brine:done] "+action+" complete") {
-					t.Fatalf("%s route: %d %s", action, w.Code, w.Body.String())
+					commands, _ := os.ReadFile(log)
+					t.Fatalf("%s route after %s: %d %s; completed fake commands: %q", action, time.Since(started), w.Code, w.Body.String(), commands)
 				}
 				if st.reads != 0 {
 					t.Fatalf("%s read recipe", action)
