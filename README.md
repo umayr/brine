@@ -206,6 +206,20 @@ not been security-qualified by this Alpha slice.
 
 Stack and recipe paths are validated; directories are `0700` and files `0600`.
 
+File-backed authentication requires a canonical private data directory on Linux
+or macOS: owned by the server user, mode `0700`, beneath root/server-owned
+ancestors without group/other write permission. Credential files must be regular,
+single-link, server-owned files with mode `0600`; symlinks, hardlinks, unsafe
+parents (including temporary shared directories) and permissive existing state
+are rejected before credentials are read. Brine does not chmod unrelated files
+or automatically repair preexisting unsafe state. Before upgrading an existing
+installation, stop Brine and inspect the exact data directory and credential
+file ownership, modes and link identities; deliberately provision a private
+canonical location rather than blindly chmodding a path that may be a link.
+New image data volumes start private; existing volumes retain their old modes
+and may require operator repair. On other platforms, supply both explicit login
+password and API token; file-backed credential loading fails closed.
+
 ## Stacks
 
 Stacks amend the published Dill schema:

@@ -48,7 +48,7 @@ RUN set -eux; \
 COPY --from=build /out/brine /usr/local/bin/brine
 
 ENV DILL_PKL_PATH=/usr/local/bin/pkl
-RUN mkdir -p /data
+RUN mkdir -m 0700 /data
 VOLUME ["/data"]
 EXPOSE 8080
 
