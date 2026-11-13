@@ -65,7 +65,7 @@
 
     <!-- Plan -->
     <div class="border-l border-line pl-1.5 ml-0.5">
-      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5"
+      <button id="plan-button" class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
@@ -423,6 +423,13 @@ async function runAction(action, name, method, body, contentType) {
   const status = document.getElementById('action-status');
   const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
+
+  if (['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action)) {
+    // Lifecycle actions can invalidate a plan even if they fail partway through.
+    // Cancel any in-flight plan so its response cannot restore stale results.
+    htmx.trigger(document.getElementById('plan-button'), 'htmx:abort');
+    document.getElementById('plan-result').replaceChildren();
+  }
 
   output.classList.remove('hidden');
   log.textContent = '';

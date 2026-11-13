@@ -23,10 +23,12 @@ type templateSet struct {
 }
 
 var funcMap = template.FuncMap{
-	"formatBytes": formatBytes,
-	"rawJSON":     rawJSON,
-	"shortID":     shortID,
-	"toJSON":      toJSON,
+	"formatBytes":      formatBytes,
+	"describePlanPort": describePlanPort,
+	"isPlanPort":       func(field string) bool { return strings.HasPrefix(field, "port.") },
+	"rawJSON":          rawJSON,
+	"shortID":          shortID,
+	"toJSON":           toJSON,
 }
 
 func shortID(id string) string {

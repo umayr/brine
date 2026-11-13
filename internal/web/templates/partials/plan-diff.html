@@ -16,6 +16,7 @@
     </button>
   </div>
 
+  <p class="px-5 py-2 text-xs text-muted">Plan is a snapshot. Port rows show only the bindings Dill reported; check the engine for additional bindings.</p>
   <div class="divide-y divide-line">
     {{range .Changes}}
     <div class="grid grid-cols-1 lg:grid-cols-[13rem_1fr] gap-4 px-5 py-4 {{if eq .Kind "noop"}}opacity-55{{end}}">
@@ -44,6 +45,22 @@
         {{if .Diffs}}
         <div class="space-y-3">
           {{range .Diffs}}
+          {{if eq .Field "config_hash"}}
+          <details class="text-xs text-muted">
+            <summary class="cursor-pointer">Configuration fingerprint changed — technical details</summary>
+            <div class="font-mono break-all mt-1">Before: {{.Before}}</div>
+            <div class="font-mono break-all">After: {{.After}}</div>
+          </details>
+          {{else if isPlanPort .Field}}
+          <div class="grid grid-cols-1 xl:grid-cols-[8rem_1fr] gap-2">
+            <div class="field-label pt-0.5">Port binding</div>
+            <div class="min-w-0 text-xs space-y-1.5">
+              {{if .Before}}<div class="rounded bg-error/10 px-2 py-1 text-error/90"><strong>Before:</strong> {{describePlanPort .Field .Before}}</div>{{end}}
+              {{if .After}}<div class="rounded bg-success/10 px-2 py-1 text-success/90"><strong>After:</strong> {{describePlanPort .Field .After}}</div>{{end}}
+              <details class="text-muted"><summary class="cursor-pointer">Raw Dill port values</summary><div class="font-mono break-all">{{.Field}} · before: {{if .Before}}{{.Before}}{{else}}(not reported){{end}} · after: {{if .After}}{{.After}}{{else}}(not reported){{end}}</div></details>
+            </div>
+          </div>
+          {{else}}
           <div class="grid grid-cols-1 xl:grid-cols-[8rem_1fr] gap-2">
             <div class="field-label pt-0.5">{{.Field}}</div>
             <div class="min-w-0 font-mono text-xs space-y-1.5">
@@ -61,6 +78,7 @@
               {{end}}
             </div>
           </div>
+          {{end}}
           {{end}}
         </div>
         {{else}}
