@@ -180,6 +180,7 @@ func validPreflightResult(r *PreflightResult) bool {
 	}
 	counts, present := map[string]int{}, map[string]int{}
 	seen := map[string]bool{}
+	presentContainerIDs := map[string]bool{}
 	creates := false
 	volumeEnsure := false
 	for _, x := range r.Resources {
@@ -188,6 +189,15 @@ func validPreflightResult(r *PreflightResult) bool {
 			return false
 		}
 		seen[key] = true
+		// Distinct authoritative container names cannot share one live ID.
+		// Keep identity namespaces separate: network IDs and absent planned
+		// names are not live container identities, and rows are never collapsed.
+		if x.Kind == "container" && x.Presence == "present" {
+			if presentContainerIDs[x.Identity] {
+				return false
+			}
+			presentContainerIDs[x.Identity] = true
+		}
 		counts[x.Kind]++
 		if x.Presence == "present" {
 			present[x.Kind]++
