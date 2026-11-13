@@ -90,7 +90,7 @@
       </button>
       <button class="ui-button ui-button-sm ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Delete stack', 'Remove {{.Stack.Name}} from Brine? Its containers will be stopped and removed.', '{{.Stack.Name}}', () => deleteStack('{{.Stack.Name}}', true))"
-        {{if .QualifiedOperations}}disabled title="Run Down and inspect the receipt before deleting metadata via the API"{{end}}
+        {{if .QualifiedOperations}}disabled title="Qualified stack deletion is deferred; preserve source and operation recovery context. Use explicit Down and inspect its receipt."{{end}}
       >
         <i data-lucide="x" class="w-3.5 h-3.5"></i>
         Delete
