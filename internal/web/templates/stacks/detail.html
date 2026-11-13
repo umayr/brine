@@ -27,7 +27,7 @@
     <!-- Primary action -->
     <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
       onclick="runAction('up', '{{.Stack.Name}}')"
-      {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
+      {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
       <i data-lucide="play" class="w-3.5 h-3.5"></i>
       Deploy
@@ -49,14 +49,14 @@
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Start stopped containers"
         onclick="runAction('start', '{{.Stack.Name}}')"
-        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
+        {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="play" class="w-3.5 h-3.5"></i>
         Start
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action
         onclick="runAction('restart', '{{.Stack.Name}}')"
-        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
+        {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled{{end}}
       >
         <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
         Restart
@@ -69,11 +69,13 @@
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
-        {{if eq .Target.Profile "alpha"}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
+        {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
         Plan
       </button>
+      {{if .QualifiedOperations}}<button class="ui-button ui-button-ghost ui-button-sm" data-stack-action
+        hx-post="/web/stacks/{{.Stack.Name}}/validate" hx-target="#plan-result" hx-swap="innerHTML">Validate saved</button>{{end}}
     </div>
 
     <!-- Danger zone -->
@@ -88,6 +90,7 @@
       </button>
       <button class="ui-button ui-button-sm ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Delete stack', 'Remove {{.Stack.Name}} from Brine? Its containers will be stopped and removed.', '{{.Stack.Name}}', () => deleteStack('{{.Stack.Name}}', true))"
+        {{if .QualifiedOperations}}disabled title="Qualified stack deletion is deferred; preserve source and operation recovery context. Use explicit Down and inspect its receipt."{{end}}
       >
         <i data-lucide="x" class="w-3.5 h-3.5"></i>
         Delete
@@ -107,7 +110,7 @@
   <div class="ui-panel px-5 py-4 mb-4 text-sm" role="status">
     <div>Configured target: <span class="font-mono">{{.Target.Engine}} · {{.Target.Socket}}</span> ({{.Target.Profile}})</div>
     <div class="text-muted">{{.Target.Status}}.</div>
-    {{if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending a Dill target/ownership contract. Pinned stack stop/down cleanup remains available.</div>{{end}}
+    {{if .QualifiedOperations}}<div>Qualified operation client configured, not yet qualified by a received receipt. Manual deploy/start/restart/stop/down use the operator-selected Dill contract without fallback. Plan and saved-source validation are read-only. Teardown, secrets, stdin validation, background pull/auto-deploy and direct container/image writes remain disabled.</div><p>Partial, unknown or interrupted operations require offline <code>dill coordination inspect</code> and independent resource inspection. Exact operation acknowledgement is operator-only; Brine never retries, deletes journals or acknowledges automatically. See <code>docs/alpha-operation-consumer.md</code>.</p>{{else if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending explicit qualified operation configuration. Pinned stack stop/down cleanup remains available.</div>{{end}}
   </div>
 
   <!-- Meta -->
@@ -161,7 +164,7 @@
   {{end}}
 
   <!-- Action output terminal -->
-  <div id="action-output" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
+  <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
       <span id="action-title" class="font-mono text-xs">output</span>
       <button aria-label="Close action output" onclick="document.getElementById('action-output').classList.add('hidden')"
@@ -209,7 +212,7 @@
         <span class="ui-status ui-status-warning ui-status-sm">read-only</span>
         {{end}}
         {{if .Stack.Git.AutoDeploy}}
-        <span class="ui-status ui-status-info ui-status-sm">auto-deploy</span>
+        {{if eq .Target.Profile "alpha"}}<span class="ui-status ui-status-warning ui-status-sm">auto-deploy disabled in Alpha</span>{{else}}<span class="ui-status ui-status-info ui-status-sm">auto-deploy</span>{{end}}
         {{end}}
       </div>
       <div class="flex items-center gap-2">
@@ -251,7 +254,7 @@
       {{end}}
       {{if .Stack.Git.AutoDeploy}}
       <div>
-        <div class="field-label mb-1">Poll interval</div>
+        <div class="field-label mb-1">{{if eq .Target.Profile "alpha"}}Background polling disabled (saved interval){{else}}Poll interval{{end}}</div>
         <div class="font-mono text-sm">{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}</div>
       </div>
       {{end}}
@@ -319,8 +322,8 @@
             </label>
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent ui-checkbox-sm"
-                {{if .Stack.Git.AutoDeploy}}checked{{end}} />
-              <span class="ui-label-text text-xs">Auto-deploy on new commits</span>
+                {{if .Stack.Git.AutoDeploy}}checked{{end}} {{if eq .Target.Profile "alpha"}}disabled{{end}} />
+              <span class="ui-label-text text-xs">{{if eq .Target.Profile "alpha"}}Auto-deploy unavailable in Alpha; manual source review required{{else}}Auto-deploy on new commits{{end}}</span>
             </label>
           </div>
           <div class="col-span-2">
@@ -432,6 +435,8 @@ async function runAction(action, name, method, body, contentType) {
   const status = document.getElementById('action-status');
   const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
+  const qualified = output.dataset?.qualifiedOperations === 'true' && ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
+  let operationStream;
 
   if (['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action)) {
     // Lifecycle actions can invalidate a plan even if they fail partway through.
@@ -461,19 +466,33 @@ async function runAction(action, name, method, body, contentType) {
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    const stream = BrineUI.createStreamStatus();
+    const stream = BrineUI.createStreamStatus({qualified, operation: action, stack: name});
+    operationStream = stream;
     while (true) {
       const {done, value} = await reader.read();
       if (done) break;
       const chunk = decoder.decode(value, {stream: true});
       stream.push(chunk);
-      log.textContent += chunk;
+      if (!qualified) log.textContent += chunk;
       log.scrollTop = log.scrollHeight;
     }
 
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
     stream.push(decoder.decode());
-    if (stream.status.error || !stream.status.done) {
+    if (qualified) {
+      stream.finish();
+      log.textContent = stream.summary();
+      const result = stream.status.result;
+      const complete = result === 'succeeded';
+      title.textContent = `${action} ${result} after ${elapsed}s`;
+      status.textContent = result;
+      status.className = `ui-status ui-status-${complete ? 'success' : result === 'unknown' ? 'unknown' : 'error'} ui-status-sm font-mono mr-1`;
+      showToast(`${action} ${result}`, complete ? 'success' : 'error');
+      if (complete) {
+        const refresh = document.getElementById('stack-containers-refresh');
+        if (refresh) htmx.trigger(refresh, 'click');
+      }
+    } else if (stream.status.error || !stream.status.done) {
       title.textContent = `${action} failed after ${elapsed}s`;
       status.textContent = 'failed';
       status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
@@ -490,11 +509,23 @@ async function runAction(action, name, method, body, contentType) {
       }
     }
   } catch (err) {
-    log.textContent += '\n[brine:error] ' + err.message + '\n';
-    title.textContent = `${action} failed`;
-    status.textContent = 'failed';
-    status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
-    showToast(`${action} failed`, 'error');
+    if (qualified) {
+      if (operationStream) {
+        operationStream.finish();
+        operationStream.status.result = 'unknown';
+      }
+      log.textContent = operationStream ? operationStream.summary() : 'No validated terminal receipt; effects are unknown. Inspect offline; do not automatically retry.';
+      title.textContent = `${action} unknown`;
+      status.textContent = 'unknown';
+      status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
+      showToast(`${action} unknown`, 'error');
+    } else {
+      log.textContent += '\n[brine:error] ' + err.message + '\n';
+      title.textContent = `${action} failed`;
+      status.textContent = 'failed';
+      status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
+      showToast(`${action} failed`, 'error');
+    }
   } finally {
     if (action === 'git/push') htmx.trigger(document.body, 'git-refresh');
     buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true');

@@ -154,7 +154,10 @@ local processes and non-browser clients can still control it.
 | `--engine` | | `docker` | `docker` or `podman` |
 | `--profile` | | `legacy` | `alpha` requires auth and an explicit local socket; unqualified engine writes are blocked, except pinned stack stop/down cleanup. See [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
-| `--dill` | | `dill` | Path to the Dill binary |
+| `--dill` | | `dill` | Operator-selected Dill binary; bundled v0.7.0 is incompatible with qualified operations |
+| `--coordination-state-dir` | | unset | Preexisting canonical shared operator-owned 0700 state outside Brine data; no auto-provisioning |
+| `--coordination-layout` | | unset | Explicit native Linux Docker assertion: `native-local-docker-v1` only |
+| `--coordination-daemon-id` | | unset | Independently provisioned expected daemon ID, never learned from the selected socket |
 | `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
 | `--auth-password` | `BRINE_AUTH_PASSWORD` | generated | Admin password |
 | `--api-token` | `BRINE_API_TOKEN` | generated | Bearer token for API clients |
@@ -167,6 +170,18 @@ local processes and non-browser clients can still control it.
 | `--version` | | | Print the version |
 
 ## Isolated Alpha operation
+
+The opt-in [qualified operation consumer](docs/alpha-operation-consumer.md) targets
+exact Dill candidate `b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2`, selected explicitly
+with `--dill`. Set all three coordination flags together only after independent
+native Linux Docker host/state provisioning. Authenticated manual stack
+up/start/restart/stop/down use the negotiated CLI contract without fallback; plan
+and saved-source validation are read-only. The bundled Dill v0.7.0 is unchanged
+and incompatible. Teardown, rm, secrets, stdin, direct SDK writes, qualified stack
+deletion and **all Alpha background Git pull/auto-deploy remain disabled**.
+Current-action receipts preserve process failure separately from outcome/effects;
+there is no durable history or auto-acknowledgement. **Actual native app/browser
+canary has NOT RUN; qualification and #67 durable approval remain pending.**
 
 Use a dedicated local Docker target and a new private data directory (`mkdir -m 700`),
 not an existing Portainer/hl engine or state directory. Keep authentication and
@@ -269,7 +284,7 @@ Validate the migrated project and review its plan before deploying. These Pkl
 schema changes do not rename Brine's own REST API fields or Git settings.
 
 Git-backed stacks support branch, subfolder, entrypoint, read-only, and auto-deploy
-with a poll interval. Auto-deploy runs `dill up` only when the pull changed `HEAD`;
+with a poll interval. In legacy mode, auto-deploy runs `dill up` only when the pull changed `HEAD`; Alpha background polling/pull/auto-deploy is explicitly disabled even with qualified manual operations configured;
 uncommitted local edits are skipped rather than clobbered.
 
 ## API
@@ -302,7 +317,7 @@ All routes are under `/api` and require authentication (except `/api/health`).
 | `GET/POST` | `/api/recipes` | List or create snippets |
 | `GET/PUT/PATCH/DELETE` | `/api/recipes/{slug}` | Manage a snippet |
 
-Deleting a stack accepts `{"remove_containers": true}` to run `dill down` first.
+In legacy mode, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
 
 ## Development
 

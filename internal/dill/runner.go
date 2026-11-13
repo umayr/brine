@@ -33,6 +33,9 @@ type Runner struct {
 	BeforeLegacyValidate func(context.Context, string) error
 	StrictActions        StrictActions
 
+	// Once set, every supported mutation uses the qualified CLI contract or fails.
+	QualifiedOperation *QualifiedOperationConfig
+
 	Coordinator secretbindings.Coordinator
 
 	mu    sync.Mutex
@@ -109,8 +112,10 @@ type PlanSummary struct {
 
 // PlanResult is the structured output of `dill plan --format json`.
 type PlanResult struct {
-	Changes []PlanChange `json:"changes"`
-	Summary PlanSummary  `json:"summary"`
+	// Receipt contains opaque observations, not service names or field diffs.
+	Operation *OperationReceipt `json:"operation,omitempty"`
+	Changes   []PlanChange      `json:"changes"`
+	Summary   PlanSummary       `json:"summary"`
 }
 
 // ChangeCount returns the number of services that would actually change.
@@ -259,6 +264,11 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
 func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		defer r.lockPath(pklPath)()
+		_, err := r.operation(ctx, pklPath, "up", w)
+		return err
+	}
 	if err := r.checkExecutionContract(); err != nil {
 		return err
 	}
@@ -279,18 +289,33 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Down stops and removes all containers in the stack.
 func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		defer r.lockPath(pklPath)()
+		_, err := r.operation(ctx, pklPath, "down", w)
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	return r.runLabelCleanup(ctx, w, pklPath, "down")
 }
 
 // Stop stops running containers without removing them.
 func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		defer r.lockPath(pklPath)()
+		_, err := r.operation(ctx, pklPath, "stop", w)
+		return err
+	}
 	defer r.lockPath(pklPath)()
 	return r.runLabelCleanup(ctx, w, pklPath, "stop")
 }
 
 // Start starts previously stopped containers.
 func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		defer r.lockPath(pklPath)()
+		_, err := r.operation(ctx, pklPath, "start", w)
+		return err
+	}
 	if err := r.checkExecutionContract(); err != nil {
 		return err
 	}
@@ -311,6 +336,11 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Restart stops then starts all containers.
 func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		defer r.lockPath(pklPath)()
+		_, err := r.operation(ctx, pklPath, "restart", w)
+		return err
+	}
 	if err := r.checkExecutionContract(); err != nil {
 		return err
 	}
@@ -332,6 +362,9 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 // Teardown removes containers, images, volumes, and the stack network.
 // Pass force=true to force-remove images referenced by other containers.
 func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
+	if r.QualifiedOperation != nil {
+		return ErrOperationContract
+	}
 	if err := r.checkExecutionContract(); err != nil {
 		return err
 	}
@@ -370,6 +403,9 @@ func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) 
 // Plan returns a structured diff of what `dill up` would change.
 // Exit 0 = no changes, exit 1 = has changes (not an error), exit 2 = error.
 func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) {
+	if r.QualifiedOperation != nil {
+		return r.operationPlan(ctx, pklPath)
+	}
 	if err := r.checkExecutionContract(); err != nil {
 		return nil, err
 	}
@@ -407,6 +443,10 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 // NOTE: dill exits 0 in both valid and invalid cases when --format json is used;
 // validity must be determined by parsing the JSON output, not the exit code.
 func (r *Runner) Validate(ctx context.Context, pklPath string) error {
+	if r.QualifiedOperation != nil || r.Profile == "alpha" {
+		_, err := r.operation(ctx, pklPath, "validate", nil)
+		return err
+	}
 	if err := r.checkSource(pklPath); err != nil {
 		return err
 	}
@@ -436,6 +476,9 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 // ValidateContent validates in-memory content using `dill validate --stdin`.
 // pklPath is used for directory context (PKL import resolution).
 func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) error {
+	if r.QualifiedOperation != nil || r.Profile == "alpha" {
+		return ErrOperationContract
+	}
 	if err := r.checkSource(pklPath); err != nil {
 		return err
 	}

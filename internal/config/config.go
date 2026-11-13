@@ -13,17 +13,20 @@ import (
 )
 
 type Config struct {
-	Profile      string // legacy compatibility or explicit fail-closed alpha boundary
-	Port         string
-	Bind         string // literal listen address
-	DataDir      string
-	Engine       string // "docker" | "podman"
-	EngineSocket string // Docker-compatible engine host/socket, e.g. unix:///var/run/docker.sock
-	DillBin      string // path to dill binary
-	SecretTarget string // operator-selected target ID, enables strict secret mode with SecretPolicy
-	SecretPolicy string // absolute operator-controlled policy path
-	SecretPkl    string // optional absolute operator-installed Pkl binary
-	Dev          bool   // hot-reload templates in dev mode
+	Profile              string // legacy compatibility or explicit fail-closed alpha boundary
+	Port                 string
+	Bind                 string // literal listen address
+	DataDir              string
+	Engine               string // "docker" | "podman"
+	EngineSocket         string // Docker-compatible engine host/socket, e.g. unix:///var/run/docker.sock
+	DillBin              string // path to dill binary
+	SecretTarget         string // operator-selected target ID, enables strict secret mode with SecretPolicy
+	SecretPolicy         string // absolute operator-controlled policy path
+	SecretPkl            string // optional absolute operator-installed Pkl binary
+	CoordinationStateDir string // preexisting private shared operator state, never stack data
+	CoordinationLayout   string // explicit native-local-docker-v1 operator assertion
+	CoordinationDaemonID string // independently provisioned expected daemon ID
+	Dev                  bool   // hot-reload templates in dev mode
 
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
@@ -65,6 +68,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Profile == target.Alpha && c.NoAuth {
 		return fmt.Errorf("Alpha profile requires authentication, including on loopback")
+	}
+	if err := c.validateCoordination(); err != nil {
+		return err
 	}
 	ip := net.ParseIP(c.Bind)
 	if ip == nil {

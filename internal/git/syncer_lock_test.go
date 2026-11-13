@@ -36,7 +36,9 @@ func TestSyncHoldsDeploymentLockAcrossWorkspacePull(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := dill.New("unused")
-	s := NewSyncer(st, &Runner{Binary: bin}, r, time.Second)
+	// Budget process startup under full-suite race instrumentation separately
+	// from the short observation proving Git cannot run while the lock is held.
+	s := NewSyncer(st, &Runner{Binary: bin}, r, 5*time.Second)
 	unlock := r.LockStack("demo")
 	done := make(chan struct{})
 	go func() { defer close(done); s.sync(context.Background(), "demo") }()
@@ -51,7 +53,7 @@ func TestSyncHoldsDeploymentLockAcrossWorkspacePull(t *testing.T) {
 	unlock()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("sync did not finish")
 	}
 	if _, err = os.Stat(marker); err != nil {

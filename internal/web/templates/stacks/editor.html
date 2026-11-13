@@ -68,6 +68,7 @@
           required
         >{{.PklContent}}</textarea>
 
+        {{if .QualifiedOperations}}<p class="ui-notice ui-notice-warning text-sm">Draft/stdin validation and formatting are unsupported by the qualified operation contract. Save changes, then use Validate saved on the stack detail page. Validation does not approve deployment.</p>{{end}}
         <div class="flex items-center gap-2 flex-wrap">
           <span id="editor-dirty" class="text-xs text-warning hidden" role="status">Unsaved changes</span>
           <button type="submit" class="ui-button ui-button-primary ui-button-sm gap-1.5">
@@ -79,11 +80,13 @@
             hx-target="#edit-result"
             hx-swap="innerHTML"
             hx-include="[name=pkl_content],[name=active_file]"
+            {{if .QualifiedOperations}}disabled title="stdin validation unsupported; save and validate the saved entrypoint"{{end}}
           >Validate</button>
           <button type="button" id="fmt-btn" class="ui-button ui-button-ghost ui-button-sm"
             hx-post="/web/stacks/{{.Stack.Name}}/fmt"
             hx-swap="none"
             hx-include="[name=pkl_content],[name=active_file]"
+            {{if .QualifiedOperations}}disabled title="stdin formatting unsupported; no legacy fallback"{{end}}
           >Format</button>
 
           <div class="ml-auto flex items-center gap-2">

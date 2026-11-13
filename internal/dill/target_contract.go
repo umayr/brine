@@ -7,10 +7,11 @@ func (r *Runner) TargetIdentity() target.Identity {
 	return target.Configured(r.Profile, r.Engine, r.Socket)
 }
 
-// No released general target execution contract exists. Never turn a metadata
-// protocol.check or secret-capabilities result into permission to mutate.
+// Legacy/secret controllers may never bypass the qualified operation adapter.
+// The public operation entry points route configured requests before this gate.
+// Metadata and secret discovery are not permission to mutate an Alpha target.
 func (r *Runner) checkExecutionContract() error {
-	if r.Profile == target.Alpha {
+	if r.Profile == target.Alpha || r.QualifiedOperation != nil {
 		return target.ErrNegotiationUnavailable
 	}
 	return nil

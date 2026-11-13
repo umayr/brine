@@ -281,7 +281,11 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 	}
 	for _, route := range []struct{ method, path, body string }{{"GET", "/api/stacks/demo/validate", ""}, {"POST", "/web/stacks/demo/validate", "pkl_content=synthetic"}, {"POST", "/web/stacks/demo/validate", ""}, {"GET", "/web/stacks/demo/containers", ""}, {"GET", "/api/containers", ""}, {"GET", "/api/images", ""}, {"GET", "/api/containers/ordinary/logs", ""}, {"GET", "/web/containers/ordinary/logs", ""}} {
 		w := call(route.method, route.path, route.body)
-		if w.Code != 200 || strings.Contains(w.Body.String(), "validation failed") {
+		if profile == "alpha" && strings.Contains(route.path, "/validate") {
+			if w.Code != 200 || (!strings.Contains(w.Body.String(), "unsupported") && !strings.Contains(w.Body.String(), "contract") && !strings.Contains(w.Body.String(), "Alpha mutations unavailable") && !strings.Contains(w.Body.String(), "operation unavailable or incomplete")) {
+				t.Fatalf("unconfigured Alpha validation did not fail closed: %d %s", w.Code, w.Body.String())
+			}
+		} else if w.Code != 200 || strings.Contains(w.Body.String(), "validation failed") {
 			t.Fatalf("read %s: %d %s", route.path, w.Code, w.Body.String())
 		}
 	}
@@ -297,13 +301,17 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 			t.Fatalf("Alpha write: %s", c)
 		}
 	}
-	for _, c := range []string{"POST /target/stop", "POST /target/down", "GET /target/validate"} {
+	for _, c := range []string{"POST /target/stop", "POST /target/down"} {
 		if counts[c] == 0 {
 			t.Fatalf("selected operation absent %s: %v", c, calls[1])
 		}
 	}
-	if counts["GET /target/validate"] != 3 {
-		t.Fatalf("saved/stdin validation missing: %v", counts)
+	wantValidations := 3
+	if profile == "alpha" {
+		wantValidations = 0
+	}
+	if counts["GET /target/validate"] != wantValidations {
+		t.Fatalf("saved/stdin validation calls: %v", counts)
 	}
 	if profile == "legacy" && counts["POST /target/up"] != 1 {
 		t.Fatal("legacy deployment not exercised")

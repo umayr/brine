@@ -30,6 +30,10 @@ func (h *stackHandler) secretRunner(w http.ResponseWriter, r *http.Request) (*di
 		writeError(w, http.StatusServiceUnavailable, "secret workflow unavailable")
 		return nil, nil, "", false
 	}
+	if h.agent.Dill().QualifiedOperationConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "qualified operations do not support secrets")
+		return nil, nil, "", false
+	}
 	strict, ok := h.agent.Dill().StrictActions.(*dill.StrictController)
 	if !ok || strict.Secret == nil {
 		writeError(w, http.StatusServiceUnavailable, "secret workflow unavailable: configure strict secret mode")

@@ -9,6 +9,7 @@ import (
 
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/target"
 )
 
 const defaultPollInterval = 5 * time.Minute
@@ -48,6 +49,11 @@ func (s *Syncer) Run(ctx context.Context) {
 }
 
 func (s *Syncer) syncAll(ctx context.Context) {
+	// Qualified manual operation support is NOT unattended source approval.
+	// Keep Alpha Git auto-deploy (including background pull) disabled until #67.
+	if s.dill == nil || s.dill.Profile == target.Alpha {
+		return
+	}
 	stacks, err := s.store.List()
 	if err != nil {
 		return
@@ -67,6 +73,10 @@ func (s *Syncer) syncAll(ctx context.Context) {
 }
 
 func (s *Syncer) sync(ctx context.Context, name string) {
+	// Guard here too: direct callers must not bypass the scheduler boundary.
+	if s.dill == nil || s.dill.Profile == target.Alpha {
+		return
+	}
 	if _, loaded := s.inFlight.LoadOrStore(name, struct{}{}); loaded {
 		return // a sync for this stack is already running
 	}

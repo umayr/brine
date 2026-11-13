@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/pkl"
@@ -247,6 +248,9 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedReadAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -260,6 +264,10 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 	}
 	content, submitted := r.Form["pkl_content"]
 	if submitted {
+		if h.agent.Dill().Profile == "alpha" || h.agent.Dill().QualifiedOperationConfigured() {
+			h.renderAlert(w, "warning", "Draft/stdin validation is unsupported by dill.operation/1. Save the source, then validate the saved entrypoint; validation does not approve deployment.")
+			return
+		}
 		path := stack.PklPath
 		if filename := r.FormValue("active_file"); filename != "" {
 			if _, err := h.store.ReadFile(name, filename); err != nil {
@@ -283,6 +291,10 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
+	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() {
+		http.Error(w, "Qualified operation mode does not support stdin formatting; no legacy fallback is permitted", http.StatusUnprocessableEntity)
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -317,6 +329,9 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
+	if !h.qualifiedReadAllowed(w, r) {
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -576,6 +591,14 @@ func htmlEscape(s string) string {
 		`"`, "&#34;",
 	)
 	return replacer.Replace(s)
+}
+
+func (h *Handler) qualifiedReadAllowed(w http.ResponseWriter, r *http.Request) bool {
+	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() && !auth.Authenticated(r) {
+		http.Error(w, "Qualified operations require authentication", http.StatusUnauthorized)
+		return false
+	}
+	return true
 }
 
 func (h *Handler) lockStack(name string) func() {

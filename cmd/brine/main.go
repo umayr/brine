@@ -60,7 +60,10 @@ func run() error {
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "directory for storing stack configs")
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
-	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "path to dill binary")
+	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "operator-selected Dill binary (bundled v0.7.0 is incompatible with qualified operations)")
+	flag.StringVar(&cfg.CoordinationStateDir, "coordination-state-dir", "", "preexisting canonical shared owner-only0700 state outside Brine data (no automatic provisioning)")
+	flag.StringVar(&cfg.CoordinationLayout, "coordination-layout", "", "explicit operator assertion: native-local-docker-v1 only")
+	flag.StringVar(&cfg.CoordinationDaemonID, "coordination-daemon-id", "", "independently provisioned expected Docker daemon ID; never discovered from the selected socket")
 	flag.StringVar(&cfg.SecretTarget, "secret-target", "", "operator-selected Alpha target ID (enables strict secret mode with --secret-policy)")
 	flag.StringVar(&cfg.SecretPolicy, "secret-policy", "", "absolute path to operator-controlled Alpha secret policy")
 	flag.StringVar(&cfg.SecretPkl, "secret-pkl", "", "optional absolute path to operator-installed Pkl for Alpha secret mode")
@@ -83,6 +86,15 @@ func run() error {
 		return nil
 	}
 
+	var emptyCoordinationOption bool
+	flag.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "coordination-") && f.Value.String() == "" {
+			emptyCoordinationOption = true
+		}
+	})
+	if emptyCoordinationOption {
+		return fmt.Errorf("coordination options must not be explicitly empty")
+	}
 	if err := normalizeDataDir(cfg); err != nil {
 		return err
 	}
@@ -131,6 +143,9 @@ func run() error {
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)
 	runner.CheckSource = stackSourceCheck(st)
+	if cfg.QualifiedOperations() {
+		runner.QualifiedOperation = &dill.QualifiedOperationConfig{StateDir: cfg.CoordinationStateDir, Layout: cfg.CoordinationLayout, DaemonID: cfg.CoordinationDaemonID}
+	}
 
 	// Wire up local agent. Persisted restrictions continue to apply even when
 	// secret support is not configured for new operations.
