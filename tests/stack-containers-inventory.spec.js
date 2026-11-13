@@ -2,6 +2,25 @@ const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 const endpoint = '**/web/stacks/observability/containers';
 
+// Swapped HTML is visible before HTMX's settle tasks install its handlers.
+// Register before navigation so even the first fast fixture response is tracked.
+// Mark the actual retry node, not a global flag that could outlive a later swap.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    document.addEventListener('htmx:afterSettle', event => {
+      if (event.target.id !== 'stack-containers') return;
+      const retry = event.target.querySelector('#stack-containers-retry');
+      if (retry) retry.dataset.inventorySettled = 'true';
+    });
+  });
+});
+
+async function settledRetry(inventory) {
+  const retry = inventory.getByRole('button', { name: 'Retry stack container inventory' });
+  await expect(retry).toHaveAttribute('data-inventory-settled', 'true');
+  return retry;
+}
+
 // The read-only fixture deliberately cannot execute Dill. Initial errors below
 // use the actual route/partial; only successful recovery is intercepted. Go
 // tests exercise the production success partial with a synthetic Dill process.
@@ -24,7 +43,7 @@ test('unavailable stack inventory has bounded keyboard retry and can recover to 
   await expect(inventory).not.toContainText('No containers in this stack.');
   await expect(inventory).not.toContainText('/nonexistent-brine-fixture-dill');
   await expect(inventory).not.toContainText('lifecycle requires an explicit local engine endpoint');
-  const retry = inventory.getByRole('button', { name: 'Retry stack container inventory' });
+  const retry = await settledRetry(inventory);
   await expect(retry).toHaveAttribute('hx-request', '{"timeout":10000}');
   await retry.focus();
   await expect(retry).toBeFocused();
@@ -54,7 +73,7 @@ test('a timed-out retry becomes usable again without claiming the stack is empty
   });
   await page.goto(new URL('/stacks/observability', baseURL).href);
   const inventory = page.locator('#stack-containers');
-  const retry = inventory.getByRole('button', { name: 'Retry stack container inventory' });
+  const retry = await settledRetry(inventory);
   await expect(retry).toBeEnabled();
   await page.evaluate(() => {
     window.inventoryTimedOut = false;
@@ -69,6 +88,7 @@ test('a timed-out retry becomes usable again without claiming the stack is empty
     await expect(inventory.getByRole('alert')).toContainText('inventory is unavailable');
     await expect(inventory).not.toContainText('No containers in this stack.');
     recovered = true;
+    await settledRetry(inventory);
     await retry.click();
     await expect(inventory).toContainText('recovered-web');
   } finally {
@@ -101,6 +121,6 @@ test('stack inventory refresh and polling retain an honest failure and recover t
   await expect(inventory.getByRole('alert')).toContainText('inventory is unavailable');
   await expect(inventory).not.toContainText('No containers in this stack.');
   mode = 'populated';
-  await inventory.getByRole('button', { name: 'Retry stack container inventory' }).click();
+  await (await settledRetry(inventory)).click();
   await expect(inventory).toContainText('recovered-web');
 });
