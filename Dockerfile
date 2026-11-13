@@ -5,8 +5,12 @@
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 WORKDIR /src
 COPY package.json package-lock.json tailwind.config.js ./
-COPY internal/web/assets ./internal/web/assets
-RUN npm ci && npm run build:web
+# Tailwind scans templates, UI scripts and Go fragments, not just assets.
+COPY internal/web ./internal/web
+COPY internal/auth ./internal/auth
+RUN npm ci && npm run build:web \
+ && grep -Fq '.flex{display:flex}' internal/web/static/vendor/app.css \
+ && grep -Fq '.space-y-1>' internal/web/static/vendor/app.css
 
 # --- brine binary -----------------------------------------------------------
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
