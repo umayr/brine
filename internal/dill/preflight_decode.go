@@ -27,7 +27,7 @@ var preflightMessages = map[string]string{
 	"CANCELLED":                   "Preflight cancelled or deadline exceeded.",
 	"ENGINE_CLOSE_FAILED":         "Preflight transport cleanup failed.",
 	"COORDINATION_COMMIT_FAILED":  "Durable preflight outcome unavailable. Inspect before retrying.",
-	"COORDINATION_RELEASE_FAILED": "Preflight coordination cleanup failed.",
+	"COORDINATION_RELEASE_FAILED": "Preflight coordination cleanup failed. Inspect before retrying.",
 }
 
 // A frame has no leading/trailing whitespace except one optional terminal LF.

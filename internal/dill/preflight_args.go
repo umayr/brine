@@ -82,6 +82,10 @@ func ValidatePreflightArguments(a []string) error {
 			t = t[1:]
 		}
 		key, value, eq := strings.Cut(t, "=")
+		// "stack" is only our semantic map key, never a frozen raw alias.
+		if key == "stack" {
+			return ErrPreflightArguments
+		}
 		switch key {
 		case "p", "stack-name", "project-name":
 			key = "stack"
