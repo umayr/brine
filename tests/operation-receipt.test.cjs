@@ -10,8 +10,8 @@ function receipt() {
     resources:[{kind:'container',identityDigest:'sha256:'+'4'.repeat(64),action:'stop',effect:'complete'}],resourcesTruncated:false,errors:[]};
 }
 function body(value, final='[brine:done] stop complete\n') {return '[brine:operation] '+JSON.stringify(value)+'\n'+final;}
-function consume(text, chunkSize=17) {
-  const stream=createStreamStatus({qualified:true,operation:'stop',stack:'synthetic'});
+function consume(text, chunkSize=17, operation='stop') {
+  const stream=createStreamStatus({qualified:true,operation,stack:'synthetic'});
   for(let i=0;i<text.length;i+=chunkSize)stream.push(text.slice(i,i+chunkSize));
   stream.finish();return stream;
 }
@@ -52,6 +52,63 @@ test('missing, malformed, unbound, unknown effects and ambiguous terminals never
   for(const text of bad) assert.equal(consume(text).status.result,'unknown',text.slice(0,100));
   assert.equal(consume(body({receipt:receipt(),exitCode:1,status:'succeeded'})).status.result,'unknown');
   assert.equal(consume(body({receipt:null,exitCode:-1,status:'unknown'},'[brine:error] failed\n')).status.result,'unknown');
+});
+test('visible resource effects cannot contradict a less-conservative aggregate',()=>{
+  for(const truncated of [false,true]){
+    for(const [aggregate,resourceEffect] of [['none','complete'],['none','unknown'],['complete','unknown'],['partial','unknown'],['none','none']]){
+      const r=receipt();r.effects=aggregate;r.resources[0].effect=resourceEffect;r.resourcesTruncated=truncated;
+      const status=aggregate==='partial'?'failed':'succeeded';r.outcome=status==='failed'?'failed':'succeeded';
+      const stream=consume(body({receipt:r,exitCode:status==='failed'?1:0,status}));
+      assert.equal(stream.status.result,'unknown',`${aggregate}/${resourceEffect}, truncated=${truncated}`);
+      assert.equal(stream.status.invocation,null,'contradictory receipt must not be retained as validated');
+    }
+  }
+});
+test('read-only receipts reject engine observations and validate has no resources/effects',()=>{
+  for(const operation of ['plan','diff','validate']){
+    for(const resource of [
+      {kind:'container',identityDigest:'sha256:'+'4'.repeat(64),action:'stop',effect:'complete'},
+      {kind:'network',identityDigest:'sha256:'+'4'.repeat(64),action:'intent.retain',effect:'none'},
+    ]){
+      const r=receipt();r.operation=operation;r.effects='none';r.resources=[resource];delete r.target.qualifiedIdentityDigest;
+      assert.equal(consume(body({receipt:r,exitCode:0,status:'succeeded'}),17,operation).status.invocation,null,operation+' '+resource.kind);
+    }
+  }
+  const r=receipt();r.operation='validate';r.effects='none';r.resources=[{kind:'service',identityDigest:'sha256:'+'4'.repeat(64),action:'noop',effect:'none'}];
+  assert.equal(consume(body({receipt:r,exitCode:0,status:'succeeded'}),17,'validate').status.invocation,null);
+  r.resources=[];r.effects='complete';
+  assert.equal(consume(body({receipt:r,exitCode:0,status:'succeeded'}),17,'validate').status.invocation,null);
+});
+test('known partial, complete and conservative unknown prefixes remain valid even when truncated',()=>{
+  for(const truncated of [false,true]){
+    for(const [outcome,effects,status,exitCode] of [['failed','partial','failed',1],['succeeded','complete','succeeded',0],['unknown','unknown','unknown',1]]){
+      const r=receipt();r.outcome=outcome;r.effects=effects;r.resourcesTruncated=truncated;
+      if(outcome==='failed')r.errors=[{code:'OPERATION_FAILED',message:'Operation failed. Inspect the target before retrying if effects are uncertain.'}];
+      const stream=consume(body({receipt:r,exitCode,status},status==='succeeded'?'[brine:done]\n':'[brine:error]\n'));
+      assert.equal(stream.status.result,status);assert.ok(stream.status.invocation);assert.match(stream.summary(),new RegExp('Effects: '+effects));
+      if(truncated)assert.match(stream.summary(),/observations truncated/);
+    }
+    const r=receipt();r.outcome='unknown';r.effects='unknown';r.resources=[];r.resourcesTruncated=truncated;
+    assert.ok(consume(body({receipt:r,exitCode:1,status:'unknown'},'[brine:error]\n')).status.invocation);
+  }
+});
+test('read-only plan/diff planned observations and engine-close unknown are retained without qualified identity',()=>{
+  for(const operation of ['plan','diff','validate']){
+    const r=receipt();r.operation=operation;r.effects='none';r.resources=operation==='validate'?[]:[{kind:'service',identityDigest:'sha256:'+'4'.repeat(64),action:'create',effect:'none'}];delete r.target.qualifiedIdentityDigest;
+    if(operation==='validate'){
+      assert.equal(consume(body({receipt:r,exitCode:0,status:'succeeded'}),17,operation).status.result,'succeeded');
+      r.outcome=r.effects='unknown';
+      const stream=consume(body({receipt:r,exitCode:1,status:'unknown'},'[brine:error]\n'),17,operation);
+      assert.equal(stream.status.result,'unknown');assert.ok(stream.status.invocation,'conservative empty validation unknown is retained, never success');
+      assert.match(stream.summary(),/Qualified identity digest \(received\): not received/);
+    }else{
+      r.outcome='changes';r.changesDetected=true;
+      assert.equal(consume(body({receipt:r,exitCode:operation==='plan'?1:0,status:'changes'}),17,operation).status.result,'changes');
+      r.outcome='unknown';r.effects='unknown';r.errors=[{code:'ENGINE_CLOSE_FAILED',message:'Engine connection release failed. Inspect the target before retrying.'}];
+      const stream=consume(body({receipt:r,exitCode:1,status:'unknown'},'[brine:error]\n'),17,operation);
+      assert.equal(stream.status.result,'unknown');assert.ok(stream.status.invocation,'close failure must retain actual observed plan');
+    }
+  }
 });
 test('unexpected raw output is never included in receipt summary',()=>{
   const stream=consume('RAW_SUBPROCESS_SENTINEL\n[brine:done]\n');

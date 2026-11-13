@@ -22,7 +22,7 @@ import (
 // running a candidate, opening a socket or weakening the native Linux gate.
 func TestQualifiedStreamPreservesProducerReceiptAndProcessFailure(t *testing.T) {
 	for _, cleanupFailure := range []bool{false, true} {
-		receipt := &dill.OperationReceipt{Version: dill.OperationVersion, OperationID: "op_" + strings.Repeat("a", 32), Operation: "stop", Stack: "demo", Outcome: "succeeded", Effects: "complete", Target: &dill.OperationTarget{Engine: "docker", EndpointDigest: "sha256:" + strings.Repeat("b", 64), QualifiedIdentityDigest: "sha256:" + strings.Repeat("c", 64)}, Resources: []dill.OperationResource{}, Errors: []dill.OperationDiagnostic{}}
+		receipt := &dill.OperationReceipt{Version: dill.OperationVersion, OperationID: "op_" + strings.Repeat("a", 32), Operation: "stop", Stack: "demo", Outcome: "succeeded", Effects: "complete", Target: &dill.OperationTarget{Engine: "docker", EndpointDigest: "sha256:" + strings.Repeat("b", 64), QualifiedIdentityDigest: "sha256:" + strings.Repeat("c", 64)}, Resources: []dill.OperationResource{{Kind: "container", IdentityDigest: "sha256:" + strings.Repeat("d", 64), Action: "stop", Effect: "complete"}}, Errors: []dill.OperationDiagnostic{}}
 		invocation := dill.OperationInvocation{Receipt: receipt, ExitCode: 0, Status: "succeeded"}
 		var actionError error
 		if cleanupFailure {

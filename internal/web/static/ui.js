@@ -21,13 +21,21 @@
       if (r.target !== null && (!keys(r.target, ['engine', 'endpointDigest'], ['qualifiedIdentityDigest']) || r.target.engine !== 'docker' || !digest(r.target.endpointDigest) ||
           (Object.hasOwn(r.target, 'qualifiedIdentityDigest') && !digest(r.target.qualifiedIdentityDigest)))) return false;
       if (r.target === null && (r.stack !== '' || r.effects !== 'none' || r.changesDetected || r.resources.length || !['invalid_input','failed'].includes(r.outcome))) return false;
-      if ((r.effects !== 'none' || r.outcome === 'succeeded') && !digest(r.target?.qualifiedIdentityDigest)) return false;
+      const readOnly = ['validate', 'plan', 'diff'].includes(r.operation);
+      if (!readOnly && (r.effects !== 'none' || r.outcome === 'succeeded') && !digest(r.target?.qualifiedIdentityDigest)) return false;
       if (!r.resources.every(item => keys(item, ['kind', 'identityDigest', 'action', 'effect']) &&
           ['service', 'container', 'image', 'network', 'volume', 'createScope'].includes(item.kind) && digest(item.identityDigest) &&
-          typeof item.action === 'string' && ({service:['create','recreate','remove','noop'],container:['stop','start','remove','intent.stopRemove','intent.removeStoppedCandidate'],createScope:['create'],network:['ensure','intent.retain'],volume:['ensure','intent.retain'],image:['pull','remove','intent.removeCandidate']}[item.kind] || []).includes(item.action) && ['none','complete','unknown'].includes(item.effect) && (!(item.kind === 'service' || item.action.startsWith('intent.')) || item.effect === 'none'))) return false;
+          typeof item.action === 'string' && ({service:['create','recreate','remove','noop'],container:['stop','start','remove','intent.stopRemove','intent.removeStoppedCandidate'],createScope:['create'],network:['ensure','intent.retain'],volume:['ensure','intent.retain'],image:['pull','remove','intent.removeCandidate']}[item.kind] || []).includes(item.action) && ['none','complete','unknown'].includes(item.effect) && ((item.kind === 'service' || item.action.startsWith('intent.')) ? item.effect === 'none' : item.effect !== 'none'))) return false;
+      // A receipt is an observation, not an inventory: omitted/truncated effects
+      // may be more conservative than the visible prefix, never less conservative.
+      if (r.resources.some(item => item.effect === 'unknown') && r.effects !== 'unknown') return false;
+      if (r.resources.some(item => item.effect === 'complete') && r.effects === 'none') return false;
+      if (readOnly && r.effects !== 'none' && !(r.outcome === 'unknown' && r.effects === 'unknown')) return false;
+      if (r.operation === 'validate' && r.resources.length !== 0) return false;
+      if (['plan', 'diff'].includes(r.operation) && !r.resources.every(item => item.kind === 'service' && item.effect === 'none')) return false;
       if (!r.errors.every(item => keys(item, ['code', 'message']) && typeof item.code === 'string' && /^[A-Z_]{1,80}$/.test(item.code) &&
           typeof item.message === 'string' && item.message.length <= 256 && !/[\x00-\x1f]/.test(item.message))) return false;
-      if (value.status === 'succeeded') return value.exitCode === 0 && r.outcome === 'succeeded' && ['none', 'complete'].includes(r.effects) && r.errors.length === 0 && digest(r.target?.qualifiedIdentityDigest);
+      if (value.status === 'succeeded') return value.exitCode === 0 && r.outcome === 'succeeded' && ['none', 'complete'].includes(r.effects) && r.errors.length === 0 && (readOnly || digest(r.target?.qualifiedIdentityDigest));
       if (value.status === 'changes') return r.outcome === 'changes' && ['plan', 'diff'].includes(r.operation) && r.changesDetected && r.effects === 'none' && value.exitCode === (r.operation === 'plan' ? 1 : 0) && r.errors.length === 0;
       if (value.status === 'cancelled') return r.outcome === 'cancelled' && [0, 1].includes(value.exitCode);
       if (value.status === 'unknown') return r.outcome === 'unknown' && r.effects === 'unknown' && value.exitCode === 1;
