@@ -271,6 +271,7 @@ func validPreflightErrors(r *PreflightResult) bool {
 	primary := ""
 	limit := false
 	cleanup := false
+	stateCleanup := false
 	for i, x := range r.Errors {
 		msg, ok := preflightMessages[x.Code]
 		if !ok || x.Message != msg {
@@ -296,6 +297,7 @@ func validPreflightErrors(r *PreflightResult) bool {
 			}
 			last = rank
 			cleanup = true
+			stateCleanup = stateCleanup || rank >= 2
 		}
 		if x.Code == "PREFLIGHT_LIMIT_EXCEEDED" {
 			limit = true
@@ -307,20 +309,32 @@ func validPreflightErrors(r *PreflightResult) bool {
 	if primary == "SECRET_UNAVAILABLE" && (r.Target != nil || r.Stack != "") {
 		return false
 	}
+	// Static rejection precedes config/socket/state and cannot have cleanup.
+	if oneOf(primary, "INVALID_ARGUMENTS", "UNSUPPORTED_OPERATION", "UNSUPPORTED_CONTRACT", "UNSUPPORTED_FORMAT", "INVALID_TARGET", "UNSUPPORTED_PREFLIGHT") {
+		return !cleanup && r.Target == nil && r.Outcome == "invalid_input" && r.CoordinationEffects == "none"
+	}
+	// Evaluation/qualification cannot claim actual qualification or state
+	// cleanup. A transport close can fail before state was ever attempted.
+	if oneOf(primary, "EVALUATION_FAILED", "QUALIFICATION_FAILED") {
+		return r.Target == nil && !stateCleanup && r.CoordinationEffects == "none" &&
+			((!cleanup && r.Outcome == "failed") || (cleanup && r.Outcome == "unknown"))
+	}
 	if cleanup {
+		if stateCleanup {
+			return r.Outcome == "unknown" && r.CoordinationEffects == "unknown"
+		}
+		// Actual target presence does not reveal whether state was attempted.
 		return r.Outcome == "unknown" && oneOf(r.CoordinationEffects, "none", "unknown")
 	}
 	switch primary {
-	case "INVALID_ARGUMENTS", "UNSUPPORTED_OPERATION", "UNSUPPORTED_CONTRACT", "UNSUPPORTED_FORMAT", "INVALID_TARGET", "UNSUPPORTED_PREFLIGHT":
-		return r.Outcome == "invalid_input" && r.CoordinationEffects == "none"
 	case "CONFIG_INVALID":
 		return (r.Outcome == "invalid_input" && r.CoordinationEffects == "none") || (r.Outcome == "failed" && r.CoordinationEffects == "written")
 	case "CANCELLED":
 		return r.Outcome == "cancelled" && r.CoordinationEffects != "unknown"
 	case "COORDINATION_UNAVAILABLE":
 		return oneOf(r.Outcome, "failed", "unknown") && r.CoordinationEffects == "unknown"
-	case "SECRET_UNAVAILABLE", "EVALUATION_FAILED", "QUALIFICATION_FAILED":
-		return r.Outcome == "failed" && r.CoordinationEffects == "none"
+	case "SECRET_UNAVAILABLE":
+		return r.Outcome == "failed" && oneOf(r.CoordinationEffects, "none", "written")
 	case "PREFLIGHT_UNAVAILABLE", "PREFLIGHT_LIMIT_EXCEEDED":
 		return r.Outcome == "failed" && r.CoordinationEffects != "unknown"
 	}

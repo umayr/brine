@@ -1,6 +1,7 @@
 package dill
 
 import (
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -101,9 +102,11 @@ func ValidatePreflightArguments(a []string) error {
 			if !eq {
 				value = "true"
 			}
-			if !oneOf(value, "true", "false") {
+			parsed, err := strconv.ParseBool(value)
+			if err != nil {
 				return ErrPreflightArguments
 			}
+			value = strconv.FormatBool(parsed)
 		} else if !eq {
 			i++
 			if i >= len(a) {

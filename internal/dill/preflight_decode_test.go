@@ -453,7 +453,11 @@ func TestPreflightProcessBindingAndFailures(t *testing.T) {
 			m["resourcesTruncated"] = code == "PREFLIGHT_LIMIT_EXCEEDED"
 			m["errors"] = []any{map[string]any{"code": code, "message": msg}}
 			switch code {
-			case "INVALID_ARGUMENTS", "UNSUPPORTED_OPERATION", "UNSUPPORTED_CONTRACT", "UNSUPPORTED_FORMAT", "INVALID_TARGET", "UNSUPPORTED_PREFLIGHT", "CONFIG_INVALID":
+			case "INVALID_ARGUMENTS", "UNSUPPORTED_OPERATION", "UNSUPPORTED_CONTRACT", "UNSUPPORTED_FORMAT", "INVALID_TARGET", "UNSUPPORTED_PREFLIGHT":
+				m["target"] = nil
+				m["outcome"] = "invalid_input"
+				m["coordinationEffects"] = "none"
+			case "CONFIG_INVALID":
 				m["outcome"] = "invalid_input"
 				m["coordinationEffects"] = "none"
 			case "SECRET_UNAVAILABLE":
@@ -461,6 +465,7 @@ func TestPreflightProcessBindingAndFailures(t *testing.T) {
 				m["stack"] = ""
 				m["coordinationEffects"] = "none"
 			case "EVALUATION_FAILED", "QUALIFICATION_FAILED":
+				m["target"] = nil
 				m["coordinationEffects"] = "none"
 			case "COORDINATION_UNAVAILABLE", "ENGINE_CLOSE_FAILED", "COORDINATION_COMMIT_FAILED", "COORDINATION_RELEASE_FAILED":
 				m["outcome"] = "unknown"
