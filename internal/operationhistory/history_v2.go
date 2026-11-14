@@ -134,6 +134,12 @@ func validV2(r RecordV2) bool {
 		if e != nil {
 			return false
 		}
+		if v.Result != nil {
+			p := v.Result
+			if (p.Operation != "" && p.Operation != r.Intent.Action) || (p.Stack != "" && p.Stack != r.Intent.Stack) || (p.Target != nil && *p.Target != r.Intent.ExpectedTarget) {
+				return false
+			}
+		}
 		if v.Result != nil && v.Status == "succeeded" {
 			t := r.Intent.ExpectedTarget
 			if dill.CheckPreflightBinding(v, dill.PreflightBinding{Stack: r.Intent.Stack, Operation: r.Intent.Action, Engine: t.Engine, EndpointDigest: t.EndpointDigest, QualifiedIdentityDigest: t.QualifiedIdentityDigest}) != nil {
@@ -157,6 +163,9 @@ func validV2(r RecordV2) bool {
 		}
 		if v.Receipt != nil {
 			t := v.Receipt.Target
+			if (v.Receipt.Outcome == "succeeded" || v.Receipt.Effects != "none") && (t == nil || t.QualifiedIdentityDigest != r.Intent.ExpectedTarget.QualifiedIdentityDigest) {
+				return false
+			}
 			if v.Receipt.Operation != r.Intent.Action || (v.Receipt.Stack != "" && v.Receipt.Stack != r.Intent.Stack) || (t != nil && (t.Engine != "docker" || t.EndpointDigest != r.Intent.ExpectedTarget.EndpointDigest || (t.QualifiedIdentityDigest != "" && t.QualifiedIdentityDigest != r.Intent.ExpectedTarget.QualifiedIdentityDigest))) {
 				return false
 			}
