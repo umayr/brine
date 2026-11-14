@@ -66,6 +66,17 @@ var ErrQualifiedOperationConfig = errors.New("qualified operations require indep
 // DecodeOperationInvocation validates a marker payload, not its provenance. Browser
 // supplied markers remain untrusted; only the subprocess adapter binds requests.
 func DecodeOperationInvocation(data []byte) (*OperationInvocation, error) {
+	return decodeOperationInvocation(data, false)
+}
+
+// DecodeBoundOperationInvocation is only for a caller that explicitly
+// negotiated preflight and issued a paired bound operation. It validates shape,
+// not provenance or confirmation authority.
+func DecodeBoundOperationInvocation(data []byte) (*OperationInvocation, error) {
+	return decodeOperationInvocation(data, true)
+}
+
+func decodeOperationInvocation(data []byte, bound bool) (*OperationInvocation, error) {
 	var v OperationInvocation
 	m, err := operationObject(data, []string{"receipt", "exitCode", "status"}, nil)
 	if err != nil {
@@ -75,7 +86,7 @@ func DecodeOperationInvocation(data []byte) (*OperationInvocation, error) {
 		return nil, ErrOperationContract
 	}
 	if string(m["receipt"]) != "null" {
-		v.Receipt, err = parseOperationReceipt(m["receipt"])
+		v.Receipt, err = parseOperationReceiptMode(m["receipt"], bound)
 		if err != nil {
 			return nil, ErrOperationContract
 		}
