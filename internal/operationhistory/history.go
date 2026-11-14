@@ -122,6 +122,12 @@ func Open(root, data, coordination string) (*Store, error) {
 	if e != nil {
 		return nil, ErrUnsafe
 	}
+	return openStore(disk)
+}
+
+// openStore owns disk on both success and failure. Keeping recovery separate
+// allows synthetic fault tests without bypassing Linux root checks in Open.
+func openStore(disk backend) (*Store, error) {
 	s := &Store{disk: disk, known: make(map[string]Record)}
 	names, e := disk.names()
 	if e != nil || len(names) > MaxRecords {

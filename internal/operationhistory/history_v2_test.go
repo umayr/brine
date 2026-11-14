@@ -98,6 +98,73 @@ func TestMixedV1V2StoreRemainsVersionSeparated(t *testing.T) {
 	}
 }
 
+func TestV2MemoryRestartRecoversOnlyPendingRecords(t *testing.T) {
+	s, d := testStore()
+	i := intentV2()
+	preview, review := completePreview(t, s, i)
+	accepted, err := s.BeginPreviewV2(i)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply, err := s.BeginApplyV2(i, preview.ID(), review.ReviewDigest)
+	if err != nil || apply.Started() != nil {
+		t.Fatal(err)
+	}
+	legacy, err := s.Begin(testIntent())
+	if err != nil {
+		t.Fatal(err)
+	}
+	namesBefore := len(d.files)
+	reopened, err := openStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{accepted.ID(), apply.ID()} {
+		r, err := reopened.GetV2(id)
+		if err != nil || r.Phase != "unknown" || r.RecoveryObservedAt == nil || r.EndObservedAt != nil || r.Preview != nil || r.Apply != nil {
+			t.Fatalf("recovery %s: %+v %v", id, r, err)
+		}
+	}
+	old, err := reopened.Get(legacy.ID())
+	if err != nil || old.Phase != "unknown" || old.EndObservedAt != nil {
+		t.Fatal("legacy recovery", err)
+	}
+	got, err := reopened.GetV2(preview.ID())
+	if err != nil || got.Phase != "terminal" || got.ReviewDigest != review.ReviewDigest || len(d.files) != namesBefore {
+		t.Fatal("review changed or replayed", err)
+	}
+}
+
+func TestV2RestartValidatesAllBeforeAnyRecovery(t *testing.T) {
+	for _, fault := range []string{"corrupt", "missing-review", "write"} {
+		t.Run(fault, func(t *testing.T) {
+			s, d := testStore()
+			i := intentV2()
+			preview, review := completePreview(t, s, i)
+			pending, err := s.BeginApplyV2(i, preview.ID(), review.ReviewDigest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := append([]byte(nil), d.files[pending.ID()+".json"]...)
+			switch fault {
+			case "corrupt":
+				d.files[preview.ID()+".json"] = []byte(`{"rawSource":"private"}`)
+			case "missing-review":
+				delete(d.files, preview.ID()+".json")
+			case "write":
+				d.fail = true
+			}
+			if reopened, err := openStore(d); err == nil {
+				reopened.Close()
+				t.Fatal("unsafe restart accepted")
+			}
+			if string(d.files[pending.ID()+".json"]) != string(before) {
+				t.Fatal("pending record changed despite failed recovery")
+			}
+		})
+	}
+}
+
 func TestV2IntentAndStartFaultNeverPublishTerminal(t *testing.T) {
 	s, d := testStore()
 	d.fail = true
@@ -143,6 +210,53 @@ func TestV2ApplyPreservesIndependentInvocationAxes(t *testing.T) {
 	got, err := s.GetV2(a.ID())
 	if err != nil || got.Apply.Status != "failed" || got.Apply.ExitCode != 1 || got.Apply.Receipt.Outcome != "succeeded" || got.Apply.Receipt.Effects != "complete" || got.Delivery != "write_failed" || got.Apply.Receipt.OperationID == preview.Preview.Result.OperationID {
 		t.Fatalf("lost independent axes: %+v %v", got, err)
+	}
+}
+
+// A reported failure after publication models an uncertain fsync outcome: the
+// caller must suppress its marker even if a valid terminal later survives.
+type ambiguousDisk struct {
+	*memoryDisk
+	failAfterWrite bool
+}
+
+func (d *ambiguousDisk) write(name string, b []byte) error {
+	if err := d.memoryDisk.write(name, b); err != nil {
+		return err
+	}
+	if d.failAfterWrite {
+		return ErrUnsafe
+	}
+	return nil
+}
+func TestV2AmbiguousPublicationNeverClaimsDurabilityInProcess(t *testing.T) {
+	base := &memoryDisk{files: map[string][]byte{}}
+	d := &ambiguousDisk{memoryDisk: base}
+	s := &Store{disk: d, known: map[string]Record{}}
+	i := intentV2()
+	p, err := s.BeginPreviewV2(i)
+	if err != nil || p.Started() != nil {
+		t.Fatal(err)
+	}
+	d.failAfterWrite = true
+	if p.TerminalPreview(previewV2(i)) == nil {
+		t.Fatal("ambiguous publication reported success")
+	}
+	known, err := s.GetV2(p.ID())
+	if err != nil || known.Persistence != "failed_inspect" || known.Preview == nil {
+		t.Fatal("lost known axes", err)
+	}
+	if _, err := s.BeginPreviewV2(i); err == nil {
+		t.Fatal("poisoned store accepted intent")
+	}
+	d.failAfterWrite = false
+	restarted, err := openStore(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	durable, err := restarted.GetV2(p.ID())
+	if err != nil || durable.Phase != "terminal" || durable.Persistence != "durable" || durable.ReviewDigest == "" {
+		t.Fatal("valid published terminal lost on restart", err)
 	}
 }
 
