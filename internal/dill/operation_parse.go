@@ -140,6 +140,10 @@ func operationLine(data []byte, max int) bool {
 }
 
 func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
+	return parseOperationReceiptMode(data, false)
+}
+
+func parseOperationReceiptMode(data []byte, bound bool) (*OperationReceipt, error) {
 	m, e := operationObject(data, []string{"version", "operationId", "operation", "target", "stack", "outcome", "effects", "changesDetected", "resources", "resourcesTruncated", "errors"}, nil)
 	if e != nil {
 		return nil, e
@@ -216,6 +220,20 @@ func parseOperationReceipt(data []byte) (*OperationReceipt, error) {
 		}
 		x := r.Errors[i]
 		msg, ok := operationMessages[x.Code]
+		if bound && x.Code == "PREFLIGHT_MISMATCH" {
+			msg, ok = "Reviewed resource selection changed. Review again before retrying.", true
+		} else if bound && x.Code == "PREFLIGHT_UNAVAILABLE" {
+			msg, ok = "Complete preflight evidence unavailable.", true
+		}
+		if bound && oneOf(x.Code, "PREFLIGHT_MISMATCH", "PREFLIGHT_UNAVAILABLE") {
+			cleanup := false
+			for _, d := range r.Errors {
+				cleanup = cleanup || oneOf(d.Code, "ENGINE_CLOSE_FAILED", "COORDINATION_COMMIT_FAILED", "COORDINATION_RELEASE_FAILED")
+			}
+			if !preflightAction(r.Operation) || !((r.Outcome == "failed" && r.Effects == "none") || (cleanup && r.Outcome == "unknown" && r.Effects == "unknown")) {
+				return nil, ErrOperationContract
+			}
+		}
 		if !ok || len(x.Message) > 256 {
 			return nil, ErrOperationContract
 		}
