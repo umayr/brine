@@ -55,6 +55,10 @@ ACL, descriptor, lock and atomic fsync rules are inherited from S1.
 
 The original `brine.operation/1` remains strictly UNBOUND with its unchanged 3 MiB
 limit and closed canonical shape; it is never upgraded or interpreted as bound.
+The in-process `Lookup` helper dispatches once by the explicit stored version and
+returns one typed record, including any known nondurable failure overlay. A future
+authenticated lookup must serialize that selected original record, not the helper
+wrapper, and must never fall back to another decoder after corruption.
 The v2 apply path uses the explicit bound operation decoder; v1 keeps its original
 legacy decoder. Apply receipt data does not provide an independent coordination
 effect, so that axis is unreported rather than inferred. Independent review and all
