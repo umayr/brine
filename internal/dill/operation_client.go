@@ -159,7 +159,17 @@ func bindOperationReceipt(receipt *OperationReceipt, op, stack, engine, endpoint
 
 // operation invokes only the pinned CLI adapter. No fallback, retry or replay is
 // possible here. All output is captured privately and validated before emitting.
-func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (terminal OperationInvocation, err error) {
+func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (OperationInvocation, error) {
+	return r.operationMode(ctx, path, op, w, nil)
+}
+
+type boundOperation struct {
+	review        *PreflightInvocation
+	binding       PreflightBinding
+	forceRecreate bool
+}
+
+func (r *Runner) operationMode(ctx context.Context, path, op string, w io.Writer, bound *boundOperation) (terminal OperationInvocation, err error) {
 	terminal.Status = "unknown"
 	terminal.ExitCode = -1
 	observer, _ := ctx.Value(operationObserverKey{}).(OperationObserver)
@@ -192,7 +202,7 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 			}
 		}
 	}()
-	if r.RequireOperationObserver && !oneOf(op, "validate", "plan") && observer == nil {
+	if (bound != nil || (r.RequireOperationObserver && !oneOf(op, "validate", "plan"))) && observer == nil {
 		historyFailed = true
 		return terminal, ErrOperationContract
 	}
@@ -241,12 +251,26 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 	if e = r.checkOperationCapabilities(ctx, qualified); e != nil {
 		return terminal, e
 	}
+	if bound != nil {
+		if observer == nil || bound.binding.Stack != stack || bound.binding.Operation != op || bound.binding.Engine != r.Engine || bound.binding.EndpointDigest != operationDigest(endpoint) || bound.binding.QualifiedIdentityDigest != operationDigest("dill-local-docker-v1\x00"+q.DaemonID) || CheckPreflightBinding(bound.review, bound.binding) != nil {
+			return terminal, ErrPreflightBinding
+		}
+		if e = r.checkPreflightCapabilities(ctx); e != nil {
+			return terminal, e
+		}
+	}
 	args := []string{"operation", op, "--contract", OperationVersion, "--format", "json", "--engine", r.Engine, "--engine-socket", endpoint, "-p", stack, "-f", path}
 	if qualified {
 		args = append(args, "--coordination-state-dir", q.StateDir, "--coordination-layout", q.Layout, "--coordination-daemon-id", q.DaemonID, "--coordination-source", "brine")
 	}
 	if op == "up" {
 		args = append(args, "--no-prune", "--pull", "never")
+	}
+	if bound != nil {
+		args, e = BuildBoundPreflightArguments(PreflightArguments{Operation: op, ConfigFile: path, Socket: endpoint, Stack: stack, Coordination: *q, ForceRecreate: bound.forceRecreate}, *bound.review.Result.SelectionDigest)
+		if e != nil {
+			return terminal, e
+		}
 	}
 	data, exit, e := r.operationCapture(ctx, maxOperationOutput, args...)
 	if exit != nil {
@@ -255,7 +279,7 @@ func (r *Runner) operation(ctx context.Context, path, op string, w io.Writer) (t
 	if e != nil || exit == nil || !operationLine(data, maxOperationOutput) {
 		return terminal, ErrOperationContract
 	}
-	receipt, e := parseOperationReceipt(data)
+	receipt, e := parseOperationReceiptMode(data, bound != nil)
 	if e != nil || bindOperationReceipt(receipt, op, stack, r.Engine, endpoint, func() *QualifiedOperationConfig {
 		if qualified {
 			return q
