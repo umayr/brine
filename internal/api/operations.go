@@ -53,7 +53,7 @@ func (h *stackHandler) operationGet(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "operation not found")
 		return
 	}
-	record, e := h.history.Get(id)
+	record, e := h.history.Lookup(id)
 	if e != nil {
 		if errors.Is(e, os.ErrNotExist) {
 			writeError(w, http.StatusNotFound, "operation not found")
@@ -63,5 +63,12 @@ func (h *stackHandler) operationGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("X-Brine-Request-ID", id)
-	writeJSON(w, http.StatusOK, record)
+	switch {
+	case record.Version == operationhistory.Version && record.V1 != nil && record.V2 == nil:
+		writeJSON(w, http.StatusOK, record.V1)
+	case record.Version == operationhistory.VersionV2 && record.V2 != nil && record.V1 == nil:
+		writeJSON(w, http.StatusOK, record.V2)
+	default:
+		writeError(w, http.StatusServiceUnavailable, "operation history unavailable; inspect private state")
+	}
 }
