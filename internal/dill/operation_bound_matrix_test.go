@@ -70,19 +70,52 @@ func TestBoundInvocationAdversarialMatrix(t *testing.T) {
 					{"malformed-target-digest", func(v *OperationInvocation) { v.Receipt.Target.QualifiedIdentityDigest = "wrong" }},
 					{"missing-stack-with-target", func(v *OperationInvocation) { v.Receipt.Stack = "" }},
 					{"unknown-engine", func(v *OperationInvocation) { v.Receipt.Target.Engine = "wrong" }},
+					{"podman-target", func(v *OperationInvocation) { v.Receipt.Target.Engine = "podman" }},
+					{"missing-qualified-identity", func(v *OperationInvocation) { v.Receipt.Target.QualifiedIdentityDigest = "" }},
+					{"missing-target", func(v *OperationInvocation) { v.Receipt.Target = nil; v.Receipt.Stack = "" }},
+					{"close-appended", func(v *OperationInvocation) { v.Receipt.Errors = append(v.Receipt.Errors, closeDiag) }},
+					{"release-unknown", func(v *OperationInvocation) {
+						v.Receipt.Errors = append(v.Receipt.Errors, releaseDiag)
+						v.Receipt.Outcome = "unknown"
+						v.Receipt.Effects = "unknown"
+						v.Status = "unknown"
+					}},
+					{"commit-failed-none", func(v *OperationInvocation) { v.Receipt.Errors = append(v.Receipt.Errors, commitDiag) }},
 				}
 				for _, tc := range cases {
 					t.Run(tc.name, func(t *testing.T) { v := base(code, action); tc.mutate(&v); check(t, v, false) })
 				}
 				v := base(code, action)
+				v.Receipt.Errors = append(v.Receipt.Errors, releaseDiag)
+				check(t, v, true)
+				v = base(code, action)
 				v.Receipt.Outcome = "unknown"
 				v.Receipt.Effects = "unknown"
 				v.Status = "unknown"
-				v.Receipt.Errors = append(v.Receipt.Errors, closeDiag, commitDiag, releaseDiag)
+				v.Receipt.Errors = append(v.Receipt.Errors, commitDiag)
 				check(t, v, true)
-				// A syntactically valid target is a claim, not independently verified actual identity.
-				// Nil-target phase semantics are intentionally not tightened pending provider clarification.
+				v.Receipt.Errors = append(v.Receipt.Errors, releaseDiag)
+				check(t, v, true)
 			})
+		}
+	}
+}
+
+// A close failure replaces the preflight diagnostic. Both decoders must
+// preserve existing-only semantics rather than infer the missing primary.
+func TestBoundExistingOnlyCleanupUnchanged(t *testing.T) {
+	r := &OperationReceipt{Version: "dill.operation/1", OperationID: "op_00000000000000000000000000000009", Operation: "up", Target: &OperationTarget{Engine: "docker", EndpointDigest: "sha256:" + strings.Repeat("1", 64)}, Stack: "synthetic", Outcome: "unknown", Effects: "unknown", Resources: []OperationResource{}, Errors: []OperationDiagnostic{{Code: "ENGINE_CLOSE_FAILED", Message: "Engine connection release failed. Inspect the target before retrying."}}}
+	for _, extra := range [][]OperationDiagnostic{nil, {{Code: "COORDINATION_COMMIT_FAILED", Message: "Durable outcome unavailable. Inspect coordination state before retrying."}}, {{Code: "COORDINATION_RELEASE_FAILED", Message: "Engine outcome was recorded; local coordination cleanup failed."}}, {{Code: "COORDINATION_COMMIT_FAILED", Message: "Durable outcome unavailable. Inspect coordination state before retrying."}, {Code: "COORDINATION_RELEASE_FAILED", Message: "Engine outcome was recorded; local coordination cleanup failed."}}} {
+		r.Errors = append(r.Errors[:1], extra...)
+		b, err := json.Marshal(OperationInvocation{Receipt: r, ExitCode: 1, Status: "unknown"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = DecodeOperationInvocation(b); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = DecodeBoundOperationInvocation(b); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

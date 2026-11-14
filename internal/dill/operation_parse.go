@@ -226,28 +226,30 @@ func parseOperationReceiptMode(data []byte, bound bool) (*OperationReceipt, erro
 			msg, ok = "Complete preflight evidence unavailable.", true
 		}
 		if bound && oneOf(x.Code, "PREFLIGHT_MISMATCH", "PREFLIGHT_UNAVAILABLE") {
-			// A comparison failure is the one primary error, before any
-			// mutation. Only ordered, distinct finalization errors may follow.
-			if i != 0 || !preflightAction(r.Operation) {
+			// Current negotiated profile: these diagnostics arise after actual
+			// qualification and before any mutator. Apply finalization keeps
+			// operation/1 semantics, not the preview cleanup table.
+			if i != 0 || !preflightAction(r.Operation) || r.Target == nil || r.Target.Engine != "docker" || !operationDigestPattern.MatchString(r.Target.QualifiedIdentityDigest) {
 				return nil, ErrOperationContract
 			}
-			last := 0
+			commit, release := false, false
 			for _, d := range r.Errors[1:] {
-				rank := 0
 				switch d.Code {
-				case "ENGINE_CLOSE_FAILED":
-					rank = 1
 				case "COORDINATION_COMMIT_FAILED":
-					rank = 2
+					if commit || release {
+						return nil, ErrOperationContract
+					}
+					commit = true
 				case "COORDINATION_RELEASE_FAILED":
-					rank = 3
-				}
-				if rank <= last {
+					if release {
+						return nil, ErrOperationContract
+					}
+					release = true
+				default:
 					return nil, ErrOperationContract
 				}
-				last = rank
 			}
-			if !((r.Outcome == "failed" && r.Effects == "none") || (last > 0 && r.Outcome == "unknown" && r.Effects == "unknown")) {
+			if (commit && (r.Outcome != "unknown" || r.Effects != "unknown")) || (!commit && (r.Outcome != "failed" || r.Effects != "none")) {
 				return nil, ErrOperationContract
 			}
 		}
