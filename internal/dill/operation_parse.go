@@ -226,11 +226,28 @@ func parseOperationReceiptMode(data []byte, bound bool) (*OperationReceipt, erro
 			msg, ok = "Complete preflight evidence unavailable.", true
 		}
 		if bound && oneOf(x.Code, "PREFLIGHT_MISMATCH", "PREFLIGHT_UNAVAILABLE") {
-			cleanup := false
-			for _, d := range r.Errors {
-				cleanup = cleanup || oneOf(d.Code, "ENGINE_CLOSE_FAILED", "COORDINATION_COMMIT_FAILED", "COORDINATION_RELEASE_FAILED")
+			// A comparison failure is the one primary error, before any
+			// mutation. Only ordered, distinct finalization errors may follow.
+			if i != 0 || !preflightAction(r.Operation) {
+				return nil, ErrOperationContract
 			}
-			if !preflightAction(r.Operation) || !((r.Outcome == "failed" && r.Effects == "none") || (cleanup && r.Outcome == "unknown" && r.Effects == "unknown")) {
+			last := 0
+			for _, d := range r.Errors[1:] {
+				rank := 0
+				switch d.Code {
+				case "ENGINE_CLOSE_FAILED":
+					rank = 1
+				case "COORDINATION_COMMIT_FAILED":
+					rank = 2
+				case "COORDINATION_RELEASE_FAILED":
+					rank = 3
+				}
+				if rank <= last {
+					return nil, ErrOperationContract
+				}
+				last = rank
+			}
+			if !((r.Outcome == "failed" && r.Effects == "none") || (last > 0 && r.Outcome == "unknown" && r.Effects == "unknown")) {
 				return nil, ErrOperationContract
 			}
 		}
