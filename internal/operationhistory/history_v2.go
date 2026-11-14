@@ -262,6 +262,11 @@ func (s *Store) beginV2(i BoundIntent, kind, previewID, digest string) (*Request
 			s.failed = true
 			return nil, ErrUnsafe
 		}
+		if kind == "apply" {
+			if prior, err := decodeV2(b); err == nil && prior.Kind == "apply" && prior.PreviewRequestID == previewID {
+				return nil, ErrUnsafe
+			}
+		}
 	}
 	var random [16]byte
 	if _, e = rand.Read(random[:]); e != nil {

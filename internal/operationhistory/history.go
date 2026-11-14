@@ -157,10 +157,14 @@ func openStore(disk backend) (*Store, error) {
 			return nil, ErrUnsafe
 		}
 	}
+	consumed := make(map[string]bool)
 	for _, r := range recordsV2 {
-		if r.Kind == "apply" && s.validateReviewLink(r.Intent, r.PreviewRequestID, r.ReviewDigest) != nil {
-			disk.close()
-			return nil, ErrUnsafe
+		if r.Kind == "apply" {
+			if consumed[r.PreviewRequestID] || s.validateReviewLink(r.Intent, r.PreviewRequestID, r.ReviewDigest) != nil {
+				disk.close()
+				return nil, ErrUnsafe
+			}
+			consumed[r.PreviewRequestID] = true
 		}
 	}
 	now := time.Now().UTC()

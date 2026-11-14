@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/umayr/brine/internal/dill"
@@ -162,6 +163,98 @@ func TestV2RestartValidatesAllBeforeAnyRecovery(t *testing.T) {
 				t.Fatal("pending record changed despite failed recovery")
 			}
 		})
+	}
+}
+
+func TestV2ReviewCanBeConsumedOnlyOnceAcrossRestart(t *testing.T) {
+	for _, phase := range []string{"accepted", "running", "terminal-failed", "write-failed"} {
+		t.Run(phase, func(t *testing.T) {
+			s, d := testStore()
+			i := intentV2()
+			p, review := completePreview(t, s, i)
+			a, err := s.BeginApplyV2(i, p.ID(), review.ReviewDigest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if phase != "accepted" && a.Started() != nil {
+				t.Fatal("start")
+			}
+			if phase == "terminal-failed" || phase == "write-failed" {
+				inv := terminal(true)
+				inv.Receipt.Target.EndpointDigest = i.ExpectedTarget.EndpointDigest
+				inv.Receipt.Target.QualifiedIdentityDigest = i.ExpectedTarget.QualifiedIdentityDigest
+				if phase == "write-failed" {
+					d.fail = true
+				}
+				err := a.TerminalApply(inv)
+				if (err != nil) != (phase == "write-failed") {
+					t.Fatal("terminal fault", err)
+				}
+			}
+			if _, err := s.BeginApplyV2(i, p.ID(), review.ReviewDigest); err == nil {
+				t.Fatal("review reused in process")
+			}
+			d.fail = false
+			s, err = openStore(d)
+			if err != nil {
+				t.Fatal("restart", err)
+			}
+			if _, err := s.BeginApplyV2(i, p.ID(), review.ReviewDigest); err == nil {
+				t.Fatal("review reused after restart")
+			}
+		})
+	}
+}
+
+func TestV2ConcurrentApplyOnlyOneConsumesReview(t *testing.T) {
+	s, _ := testStore()
+	i := intentV2()
+	p, review := completePreview(t, s, i)
+	const n = 16
+	results := make(chan bool, n)
+	var wg sync.WaitGroup
+	for j := 0; j < n; j++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.BeginApplyV2(i, p.ID(), review.ReviewDigest)
+			results <- err == nil
+		}()
+	}
+	wg.Wait()
+	close(results)
+	succeeded := 0
+	for ok := range results {
+		if ok {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d consumers, want one", succeeded)
+	}
+}
+
+func TestV2RestartRejectsDuplicateReviewConsumers(t *testing.T) {
+	s, d := testStore()
+	i := intentV2()
+	p, review := completePreview(t, s, i)
+	a, err := s.BeginApplyV2(i, p.ID(), review.ReviewDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.GetV2(a.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.RequestID = "br_" + strings.Repeat("f", 32)
+	if r.RequestID == a.ID() {
+		t.Fatal("test collision")
+	}
+	b, _ := json.Marshal(r)
+	d.files[r.RequestID+".json"] = b
+	if reopened, err := openStore(d); err == nil {
+		reopened.Close()
+		t.Fatal("duplicate consumer accepted on restart")
 	}
 }
 

@@ -37,8 +37,10 @@ Apply receives a distinct Brine request ID and references the durable successful
 preview ID and a domain-separated digest of the canonical immutable intent and
 validated preflight result. The digest is distinct from provider input/selection
 commitments and is neither authentication nor execution authority. Actor, action,
-stack, all three source assertions and expected target must match. Actual target,
-input and selection are separately present in the preflight result. The store does
+stack, all three source assertions and expected target must match. A durable apply
+intent consumes its preview exactly once, including after failed or interrupted
+apply and restart; reuse requires a new preview, never an automatic retry. Actual
+target, input and selection are separately present in the preflight result. The store does
 not infer confirmation, execute, replay or grant permission. Dill IDs occur only in
 validated producer invocations, not invented from Brine IDs.
 
