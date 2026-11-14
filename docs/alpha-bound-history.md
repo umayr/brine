@@ -55,7 +55,7 @@ ACL, descriptor, lock and atomic fsync rules are inherited from S1.
 
 The original `brine.operation/1` remains strictly UNBOUND with its unchanged 3 MiB
 limit and closed canonical shape; it is never upgraded or interpreted as bound.
-The current apply validator is deliberately the existing legacy operation decoder;
-new bound-only diagnostics remain rejected until the separately reviewed explicit
-bound decoder is integrated. Independent review and all source/provider/runtime and
-native-app gates remain required before integration or use.
+The v2 apply path uses the explicit bound operation decoder; v1 keeps its original
+legacy decoder. Apply receipt data does not provide an independent coordination
+effect, so that axis is unreported rather than inferred. Independent review and all
+source/provider/runtime and native-app gates remain required before integration or use.

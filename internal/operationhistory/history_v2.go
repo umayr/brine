@@ -151,7 +151,7 @@ func validV2(r RecordV2) bool {
 		if e != nil {
 			return false
 		}
-		v, e := dill.DecodeOperationInvocation(b)
+		v, e := dill.DecodeBoundOperationInvocation(b)
 		if e != nil {
 			return false
 		}
@@ -347,7 +347,7 @@ func (r *RequestV2) TerminalApply(inv dill.OperationInvocation) error {
 	if e != nil {
 		return ErrUnsafe
 	}
-	v, e := dill.DecodeOperationInvocation(b)
+	v, e := dill.DecodeBoundOperationInvocation(b)
 	if e != nil {
 		return ErrUnsafe
 	}
