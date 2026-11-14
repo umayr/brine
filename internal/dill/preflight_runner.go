@@ -22,6 +22,14 @@ func (e *PreflightHistoryError) Error() string {
 	return "Preflight history persistence failed; inspect request status before a new attempt"
 }
 
+// Presence is a fail-closed configuration prerequisite, not source proof.
+func (r *Runner) checkPreflightGuards() error {
+	if r.CheckSource == nil || r.BeforeLegacyAction == nil {
+		return ErrPreflightContract
+	}
+	return nil
+}
+
 func (r *Runner) checkPreflightCapabilities(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -52,6 +60,9 @@ func (r *Runner) PreviewPreflight(ctx context.Context, path, op string, forceRec
 	}()
 	if observer.Started() != nil {
 		startedFailed = true
+		return v, ErrPreflightContract
+	}
+	if r.checkPreflightGuards() != nil {
 		return v, ErrPreflightContract
 	}
 	if !preflightAction(op) || ValidateQualifiedOperationConfig(r.Engine, r.Socket, r.QualifiedOperation) != nil || r.ResolveStack == nil {

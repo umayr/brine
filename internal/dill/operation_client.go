@@ -210,6 +210,9 @@ func (r *Runner) operationMode(ctx context.Context, path, op string, w io.Writer
 		historyFailed = true
 		return terminal, ErrOperationContract
 	}
+	if bound != nil && r.checkPreflightGuards() != nil {
+		return terminal, ErrPreflightContract
+	}
 	if !oneOf(op, "validate", "plan", "up", "start", "restart", "stop", "down") {
 		return terminal, ErrOperationContract
 	}
