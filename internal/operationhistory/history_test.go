@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/umayr/brine/internal/dill"
@@ -155,6 +156,70 @@ func TestClosedRecordCorruptionAfterPositive(t *testing.T) {
 		t.Fatal("repaired corruption")
 	}
 }
+
+func TestConcurrentV1ReservationsRemainDistinct(t *testing.T) {
+	s, _ := testStore()
+	const count = 32
+	ids := make(chan string, count)
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, err := s.Begin(testIntent())
+			if err != nil {
+				errs <- err
+				return
+			}
+			ids <- r.ID()
+		}()
+	}
+	wg.Wait()
+	close(ids)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for id := range ids {
+		if seen[id] {
+			t.Fatal("duplicate reservation", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != count {
+		t.Fatalf("got %d reservations, want %d", len(seen), count)
+	}
+}
+
+// V1 remains an independent, closed UNBOUND format even when later versions
+// are introduced. In particular, a version change is not a migration.
+func TestV1VersionAndShapeAreNotUpgraded(t *testing.T) {
+	s, d := testStore()
+	r, err := s.Begin(testIntent())
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := string(d.files[r.ID()+".json"])
+	if _, err := decode([]byte(good)); err != nil {
+		t.Fatal("positive control:", err)
+	}
+	for name, bad := range map[string]string{
+		"later-version":   strings.Replace(good, `"brine.operation/1"`, `"brine.operation/2"`, 1),
+		"bound-v1":        strings.Replace(good, `"sourceBinding":"UNBOUND"`, `"sourceBinding":"BOUND"`, 1),
+		"extra-binding":   strings.Replace(good, `"sourceBinding":`, `"sourceSnapshot":"sha256:`+strings.Repeat("a", 64)+`","sourceBinding":`, 1),
+		"missing-binding": strings.Replace(good, `"sourceBinding":"UNBOUND",`, "", 1),
+		"oversize":        good + strings.Repeat(" ", MaxRecord),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decode([]byte(bad)); !errors.Is(err, ErrUnsafe) {
+				t.Fatalf("accepted non-v1 data: %v", err)
+			}
+		})
+	}
+}
+
 func TestMalformedOrMissingTerminalHasNullableDillID(t *testing.T) {
 	s, _ := testStore()
 	r, e := s.Begin(testIntent())
