@@ -199,10 +199,10 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 	}
 	stack, err := s.readMeta(name)
 	if err != nil {
-		return nil, fmt.Errorf("stack %q not found", name)
+		return nil, fmt.Errorf("read stack %q metadata: %w", name, err)
 	}
 	if stack.Git != nil && stack.Git.ReadOnly {
-		return nil, fmt.Errorf("stack %q is read-only (git-backed)", name)
+		return nil, fmt.Errorf("stack %q is read-only (git-backed): %w", name, ErrReadOnly)
 	}
 	ep := entrypointOrDefault(stack.Entrypoint)
 	fd, err := s.workspaceFD(name, stack.Git)
