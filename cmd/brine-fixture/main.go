@@ -31,6 +31,7 @@ import (
 func main() {
 	port := flag.String("port", "18082", "localhost port")
 	withAuth := flag.Bool("auth", false, "enable disposable admin login (fixture-only-not-a-secret)")
+	syntheticAttended := flag.Bool("synthetic-attended", false, "Linux-only synthetic attended test fixture; no qualification or real execution")
 	flag.Parse()
 	dir, err := os.MkdirTemp("", "brine-ui-fixture-")
 	if err != nil {
@@ -53,7 +54,14 @@ func main() {
 	}
 	fixtureStacks := &fixtureStore{StackStore: st}
 	eng := &fixtureEngine{}
-	ag := agent.NewLocalAgent(eng, dill.New("/nonexistent-brine-fixture-dill"))
+	runner := dill.New("/nonexistent-brine-fixture-dill")
+	if *syntheticAttended {
+		if err := prepareSyntheticRunner(runner); err != nil {
+			log.Fatal(err)
+		}
+		*withAuth = true
+	}
+	ag := agent.NewLocalAgent(eng, runner)
 	gr := git.New()
 	authn, err := auth.New(auth.Config{NoAuth: !*withAuth, User: "admin", Password: "fixture-only-not-a-secret"})
 	if err != nil {
@@ -65,7 +73,11 @@ func main() {
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			loginOnly := *withAuth && r.Method == http.MethodPost && (r.URL.Path == "/login" || r.URL.Path == "/logout")
-			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly {
+			attendedOnly := *syntheticAttended && r.Method == http.MethodPost && (r.URL.Path == "/api/stacks/observability/operations/preview" || r.URL.Path == "/api/stacks/observability/up")
+			if *syntheticAttended {
+				w.Header().Set("X-Brine-Fixture", "synthetic-attended-no-qualification")
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !attendedOnly {
 				http.Error(w, "fixture is read-only", http.StatusMethodNotAllowed)
 				return
 			}
@@ -77,8 +89,17 @@ func main() {
 	r.Post("/login", authn.HandleLogin)
 	r.Post("/logout", authn.HandleLogout)
 	timeouts := httpx.Timeouts{Default: 30 * time.Second, Lifecycle: 30 * time.Second}
-	api.Mount(r, ag, fixtureStacks, rs, gr, "docker", timeouts, 30*time.Second)
-	web.Mount(r, web.New(ag, fixtureStacks, rs, gr, "docker", true, authn, 30*time.Second), timeouts)
+	webHandler := web.New(ag, fixtureStacks, rs, gr, "docker", true, authn, 30*time.Second)
+	if *syntheticAttended {
+		cleanup, err := mountSyntheticAttended(r, ag, runner, fixtureStacks, rs, gr, webHandler, timeouts, dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer cleanup()
+	} else {
+		api.Mount(r, ag, fixtureStacks, rs, gr, "docker", timeouts, 30*time.Second)
+		web.Mount(r, webHandler, timeouts)
+	}
 	listener, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", *port))
 	if err != nil {
 		log.Fatal(err)

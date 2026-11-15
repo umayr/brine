@@ -66,7 +66,11 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	files, _ := h.store.Files(name)
+	files, err := h.store.Files(name)
+	if err != nil {
+		http.Error(w, "Unable to list stack files", http.StatusInternalServerError)
+		return
+	}
 	activeFile := stack.Entrypoint
 	if activeFile == "" {
 		activeFile = "compose.pkl"
@@ -74,7 +78,11 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 
 	fileContents := make(map[string]string, len(files))
 	for _, f := range files {
-		content, _ := h.store.ReadFile(name, f)
+		content, err := h.store.ReadFile(name, f)
+		if err != nil {
+			http.Error(w, "Unable to read stack file", http.StatusInternalServerError)
+			return
+		}
 		fileContents[f] = content
 	}
 
@@ -128,19 +136,30 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	content, _ := h.store.ReadFile(name, activeFile)
-	files, _ := h.store.Files(name)
-	byCategory, _ := h.recipes.ListByCategory()
+	content, err := h.store.ReadFile(name, activeFile)
+	if err != nil {
+		http.Error(w, "Unable to read stack file", http.StatusInternalServerError)
+		return
+	}
+	files, err := h.store.Files(name)
+	if err != nil {
+		http.Error(w, "Unable to list stack files", http.StatusInternalServerError)
+		return
+	}
 	entrypoint := stack.Entrypoint
 	if entrypoint == "" {
 		entrypoint = "compose.pkl"
 	}
 	fileContents := map[string]string{activeFile: content}
 	if activeFile != entrypoint {
-		if entrypointContent, err := h.store.ReadFile(name, entrypoint); err == nil {
-			fileContents[entrypoint] = entrypointContent
+		entrypointContent, err := h.store.ReadFile(name, entrypoint)
+		if err != nil {
+			http.Error(w, "Unable to read stack entrypoint", http.StatusInternalServerError)
+			return
 		}
+		fileContents[entrypoint] = entrypointContent
 	}
+	byCategory, _ := h.recipes.ListByCategory()
 
 	h.render(w, r, "stacks/editor.html", &stackEditorData{
 		pageData:           pageData{Page: "stacks"},
