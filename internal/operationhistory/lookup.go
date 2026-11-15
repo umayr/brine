@@ -52,7 +52,7 @@ func (s *Store) Lookup(id string) (LookupRecord, error) {
 		return LookupRecord{Version: Version, V1: &r}, nil
 	case VersionV2:
 		r, e := decodeV2(b)
-		if e != nil || r.RequestID != id {
+		if e != nil || r.RequestID != id || (r.Kind == "apply" && s.validateReviewLink(r.Intent, r.PreviewRequestID, r.ReviewDigest) != nil) {
 			return LookupRecord{}, ErrUnsafe
 		}
 		return LookupRecord{Version: VersionV2, V2: &r}, nil

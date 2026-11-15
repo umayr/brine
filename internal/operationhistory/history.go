@@ -320,17 +320,9 @@ func (s *Store) Begin(i Intent) (*Request, error) {
 		s.failed = true
 		return nil, ErrUnsafe
 	}
-	for _, name := range names {
-		id := strings.TrimSuffix(name, ".json")
-		if name != id+".json" || !ValidID(id) {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
-		b, e := s.disk.read(name)
-		if e != nil || !validStoredRecord(id, b) {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
+	if _, e := s.validateInventory(names); e != nil {
+		s.failed = true
+		return nil, ErrUnsafe
 	}
 	var random [16]byte
 	if _, e = rand.Read(random[:]); e != nil {

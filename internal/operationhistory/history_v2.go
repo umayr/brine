@@ -184,13 +184,6 @@ func decodeV2(b []byte) (RecordV2, error) {
 	}
 	return r, nil
 }
-func validStoredRecord(id string, b []byte) bool {
-	if r, e := decode(b); e == nil {
-		return r.RequestID == id
-	}
-	r, e := decodeV2(b)
-	return e == nil && r.RequestID == id
-}
 func (s *Store) loadV2(id string) (RecordV2, error) {
 	b, e := s.disk.read(id + ".json")
 	if e != nil {
@@ -228,6 +221,9 @@ func (s *Store) GetV2(id string) (RecordV2, error) {
 		return cloneV2(r), nil
 	}
 	r, e := s.loadV2(id)
+	if e == nil && r.Kind == "apply" && s.validateReviewLink(r.Intent, r.PreviewRequestID, r.ReviewDigest) != nil {
+		return RecordV2{}, ErrUnsafe
+	}
 	return cloneV2(r), e
 }
 func (s *Store) validateReviewLink(i BoundIntent, id, digest string) error {
@@ -240,6 +236,43 @@ func (s *Store) validateReviewLink(i BoundIntent, id, digest string) error {
 	}
 	return nil
 }
+
+// validateInventory checks all records and all v2 links/one-shot consumption
+// before accepting any new intent. It never repairs an inconsistent store.
+func (s *Store) validateInventory(names []string) (map[string]bool, error) {
+	records := make(map[string]RecordV2)
+	for _, n := range names {
+		id := strings.TrimSuffix(n, ".json")
+		if n != id+".json" || !ValidID(id) {
+			return nil, ErrUnsafe
+		}
+		b, err := s.disk.read(n)
+		if err != nil {
+			return nil, ErrUnsafe
+		}
+		if r, err := decode(b); err == nil && r.RequestID == id {
+			continue
+		}
+		r, err := decodeV2(b)
+		if err != nil || r.RequestID != id {
+			return nil, ErrUnsafe
+		}
+		records[id] = r
+	}
+	consumed := make(map[string]bool)
+	for _, r := range records {
+		if r.Kind != "apply" {
+			continue
+		}
+		p, ok := records[r.PreviewRequestID]
+		if consumed[r.PreviewRequestID] || !ok || p.Kind != "preview" || p.Phase != "terminal" || p.ReviewDigest == "" || p.ReviewDigest != r.ReviewDigest || p.Intent != r.Intent {
+			return nil, ErrUnsafe
+		}
+		consumed[r.PreviewRequestID] = true
+	}
+	return consumed, nil
+}
+
 func (s *Store) BeginPreviewV2(i BoundIntent) (*RequestV2, error) {
 	return s.beginV2(i, "preview", "", "")
 }
@@ -260,22 +293,13 @@ func (s *Store) beginV2(i BoundIntent, kind, previewID, digest string) (*Request
 		s.failed = true
 		return nil, ErrUnsafe
 	}
-	for _, n := range names {
-		id := strings.TrimSuffix(n, ".json")
-		if n != id+".json" || !ValidID(id) {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
-		b, e := s.disk.read(n)
-		if e != nil || !validStoredRecord(id, b) {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
-		if kind == "apply" {
-			if prior, err := decodeV2(b); err == nil && prior.Kind == "apply" && prior.PreviewRequestID == previewID {
-				return nil, ErrUnsafe
-			}
-		}
+	consumed, e := s.validateInventory(names)
+	if e != nil {
+		s.failed = true
+		return nil, ErrUnsafe
+	}
+	if kind == "apply" && consumed[previewID] {
+		return nil, ErrUnsafe
 	}
 	var random [16]byte
 	if _, e = rand.Read(random[:]); e != nil {
@@ -307,8 +331,11 @@ func (r *RequestV2) update(change func(*RecordV2) error) error {
 	if change(&current) != nil || !validV2(current) {
 		return ErrUnsafe
 	}
-	_, e := s.loadV2(r.id)
-	if s.failed || e != nil || s.saveV2(current) != nil {
+	durable, e := s.loadV2(r.id)
+	lastBytes, _ := json.Marshal(r.last)
+	durableBytes, _ := json.Marshal(durable)
+	invalidLink := e == nil && durable.Kind == "apply" && s.validateReviewLink(durable.Intent, durable.PreviewRequestID, durable.ReviewDigest) != nil
+	if s.failed || e != nil || !bytes.Equal(lastBytes, durableBytes) || invalidLink || s.saveV2(current) != nil {
 		s.failed = true
 		current.Persistence = "failed_inspect"
 		if s.knownV2 == nil {
