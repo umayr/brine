@@ -45,6 +45,9 @@ jobs:
       - name: Test
         # Credential fixtures require ACL-free canonical ancestry, not runner HOME.
         run: bash scripts/ci-test-go.sh
+      - name: Authenticated attended synthetic API and real Linux history
+        # Fake producer only; this is not source/native/application qualification.
+        run: bash scripts/ci-attended-synthetic.sh
 
   paired-alpha:
     name: Paired Alpha / ${{ matrix.mode }}
