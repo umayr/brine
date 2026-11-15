@@ -32,6 +32,9 @@ func mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout, attended: attended}
 	if len(histories) > 0 {
 		sh.history = histories[0]
+		if attended != nil && sh.history != nil {
+			sh.attendedHistory = durableAttendedHistory{store: sh.history}
+		}
 	}
 	ch := &containerHandler{agent: ag}
 	ih := &imageHandler{agent: ag}

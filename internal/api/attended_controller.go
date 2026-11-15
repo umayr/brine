@@ -96,7 +96,7 @@ func attendedFields(r *http.Request, keys ...string) (map[string]string, error) 
 	return values, nil
 }
 
-type previewObserver struct{ request *operationhistory.RequestV2 }
+type previewObserver struct{ request attendedRequest }
 
 func (o previewObserver) Started() error { return o.request.Started() }
 func (o previewObserver) Terminal(v dill.PreflightInvocation) error {
@@ -104,7 +104,7 @@ func (o previewObserver) Terminal(v dill.PreflightInvocation) error {
 }
 
 type applyObserver struct {
-	request  *operationhistory.RequestV2
+	request  attendedRequest
 	terminal bool
 }
 
@@ -161,7 +161,7 @@ func (h *stackHandler) attendedPreview(w http.ResponseWriter, r *http.Request) {
 	if !attendedAuthenticated(w, r) {
 		return
 	}
-	if h.attended == nil || h.history == nil || h.store == nil || unavailableProducer(h.attended.producer) {
+	if h.attended == nil || h.attendedHistory == nil || h.store == nil || unavailableProducer(h.attended.producer) {
 		writeError(w, http.StatusServiceUnavailable, "attended preview unavailable")
 		return
 	}
@@ -183,7 +183,7 @@ func (h *stackHandler) attendedPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	source, target := capture.Intent()
 	intent := operationhistory.BoundIntent{Action: fields["action"], Stack: name, Actor: attendedActor(r), Source: source, ExpectedTarget: target}
-	request, err := h.history.BeginPreviewV2(intent)
+	request, err := h.attendedHistory.BeginPreview(intent)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "preview history unavailable")
 		return
@@ -195,7 +195,7 @@ func (h *stackHandler) attendedPreview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "preview unavailable; inspect request before a new attempt")
 		return
 	}
-	stored, err := h.history.GetV2(request.ID())
+	stored, err := h.attendedHistory.GetPreview(request.ID())
 	if err != nil || stored.Persistence != "durable" || stored.Phase != "terminal" || stored.ReviewDigest == "" || stored.Preview == nil {
 		writeError(w, http.StatusServiceUnavailable, "preview history unavailable")
 		return
@@ -238,7 +238,7 @@ func (h *stackHandler) attendedApply(w http.ResponseWriter, r *http.Request, act
 	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
-	if h.history == nil || unavailableProducer(h.attended.producer) {
+	if h.attendedHistory == nil || unavailableProducer(h.attended.producer) {
 		writeError(w, http.StatusServiceUnavailable, "confirmation unavailable")
 		return
 	}
@@ -261,7 +261,7 @@ func (h *stackHandler) attendedApply(w http.ResponseWriter, r *http.Request, act
 		writeError(w, http.StatusConflict, "review context changed; obtain a fresh preview")
 		return
 	}
-	request, err := h.history.BeginApplyV2(review.intent, review.previewID, review.digest)
+	request, err := h.attendedHistory.BeginApply(review.intent, review.previewID, review.digest)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "apply history unavailable; inspect before a new attempt")
 		return

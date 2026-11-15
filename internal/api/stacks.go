@@ -20,13 +20,14 @@ import (
 )
 
 type stackHandler struct {
-	attended      *AttendedContext
-	history       *operationhistory.Store
-	agent         agent.Agent
-	store         store.StackStore
-	git           *gitpkg.Runner
-	runtimeEngine string
-	deployTimeout time.Duration
+	attended        *AttendedContext
+	attendedHistory attendedHistory
+	history         *operationhistory.Store
+	agent           agent.Agent
+	store           store.StackStore
+	git             *gitpkg.Runner
+	runtimeEngine   string
+	deployTimeout   time.Duration
 }
 
 // Defense in depth for mounted API routers: a configured qualified client must
