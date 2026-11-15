@@ -81,6 +81,36 @@ func TestLinuxPositiveLockRestartUnknownAndTerminalRetention(t *testing.T) {
 		t.Fatal("replay/extra state")
 	}
 }
+func TestLinuxV2RestartRetainsReviewAndMakesPendingUnknown(t *testing.T) {
+	root, data, coord := privateRoots(t)
+	s, err := Open(root, data, coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := intentV2()
+	preview, review := completePreview(t, s, i)
+	pending, err := s.BeginApplyV2(i, preview.ID(), review.ReviewDigest)
+	if err != nil || pending.Started() != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(root, data, coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.GetV2(pending.ID())
+	if err != nil || got.Phase != "unknown" || got.EndObservedAt != nil || got.RecoveryObservedAt == nil || got.Apply != nil {
+		t.Fatalf("recovery: %+v %v", got, err)
+	}
+	again, err := s.GetV2(preview.ID())
+	if err != nil || again.ReviewDigest != review.ReviewDigest || again.Phase != "terminal" {
+		t.Fatal("review lost", err)
+	}
+}
+
 func TestLinuxUnsafeStateAfterPositiveControl(t *testing.T) {
 	for _, kind := range []string{"corrupt", "symlink", "hardlink", "mode", "pending", "root-mode", "ancestor-mode"} {
 		t.Run(kind, func(t *testing.T) {
