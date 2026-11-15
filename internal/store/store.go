@@ -1,6 +1,12 @@
 package store
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+// ErrReadOnly indicates that a Git-backed stack cannot be edited.
+var ErrReadOnly = errors.New("stack is read-only")
 
 // GitSource describes a remote Git repository that backs a stack.
 type GitSource struct {

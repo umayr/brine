@@ -162,9 +162,17 @@ func DecodePreflightResult(b []byte) (*PreflightResult, error) {
 }
 
 func validPreflightResult(r *PreflightResult) bool {
-	if r == nil || r.Version != PreflightVersion || !operationIDPattern.MatchString(r.OperationID) || (!preflightAction(r.Operation) && r.Operation != "") ||
-		(r.Stack != "" && !operationStackPattern.MatchString(r.Stack)) || r.EngineEffects != "none" || !oneOf(r.CoordinationEffects, "none", "written", "unknown") ||
-		!oneOf(r.Outcome, "succeeded", "failed", "cancelled", "unknown", "invalid_input") || r.Resources == nil || r.Errors == nil || len(r.Resources) > 256 || len(r.Errors) > 4 {
+	if r == nil || r.Version != PreflightVersion || !operationIDPattern.MatchString(r.OperationID) {
+		return false
+	}
+	if (r.Operation != "" && !preflightAction(r.Operation)) || (r.Stack != "" && !operationStackPattern.MatchString(r.Stack)) {
+		return false
+	}
+	if r.EngineEffects != "none" || !oneOf(r.CoordinationEffects, "none", "written", "unknown") ||
+		!oneOf(r.Outcome, "succeeded", "failed", "cancelled", "unknown", "invalid_input") {
+		return false
+	}
+	if r.Resources == nil || r.Errors == nil || len(r.Resources) > 256 || len(r.Errors) > 4 {
 		return false
 	}
 	if r.Target != nil && (r.Target.Engine != "docker" || !operationDigestPattern.MatchString(r.Target.EndpointDigest) || !operationDigestPattern.MatchString(r.Target.QualifiedIdentityDigest)) {
@@ -172,7 +180,13 @@ func validPreflightResult(r *PreflightResult) bool {
 	}
 	success := r.Outcome == "succeeded"
 	if success {
-		if r.Target == nil || r.Stack == "" || !preflightAction(r.Operation) || r.CoordinationEffects != "written" || len(r.Errors) != 0 || r.ResourcesTruncated || r.InputDigest == nil || r.SelectionDigest == nil || !operationDigestPattern.MatchString(*r.InputDigest) || !operationDigestPattern.MatchString(*r.SelectionDigest) {
+		if r.Target == nil || r.Stack == "" || !preflightAction(r.Operation) || r.CoordinationEffects != "written" {
+			return false
+		}
+		if len(r.Errors) != 0 || r.ResourcesTruncated || r.InputDigest == nil || r.SelectionDigest == nil {
+			return false
+		}
+		if !operationDigestPattern.MatchString(*r.InputDigest) || !operationDigestPattern.MatchString(*r.SelectionDigest) {
 			return false
 		}
 	} else if len(r.Errors) == 0 || len(r.Resources) != 0 || r.InputDigest != nil || r.SelectionDigest != nil {

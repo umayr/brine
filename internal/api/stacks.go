@@ -2,9 +2,13 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -62,7 +66,11 @@ func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	pkl, _ := h.store.ReadPkl(name)
+	pkl, err := h.store.ReadPkl(name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "unable to read stack configuration")
+		return
+	}
 	writeJSON(w, http.StatusOK, stackResponse{Stack: stack, PklContent: pkl})
 }
 
@@ -108,7 +116,14 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 	}
 	stack, err := h.store.Update(name, req.PklContent)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			writeError(w, http.StatusNotFound, "stack not found")
+		case errors.Is(err, store.ErrReadOnly):
+			writeError(w, http.StatusForbidden, "stack is read-only")
+		default:
+			writeError(w, http.StatusInternalServerError, "unable to update stack")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, stack)
@@ -152,7 +167,9 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
+// lifecycle centralizes the shared authorization, locking, history, and streaming
+// steps while keeping action-specific engine checks explicit at the call sites.
+func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action string, checkEngine bool, run func(context.Context, string, io.Writer) error) {
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -163,138 +180,56 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	if !h.ensureRuntimeEngine(w, stack) {
+	if checkEngine && !h.ensureRuntimeEngine(w, stack) {
 		return
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "up")
+	ctx, request, ok := h.beginOperation(ctx, w, r, stack, action)
 	if !ok {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if action == "up" {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+	}
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
 	defer historyDelivery(request, fw, r)
 	if request != nil {
 		fw.flush()
 	} // Publish stable lookup ID before discovery.
-	writeActionStatus(fw, "up", h.agent.Dill().Up(ctx, stack.PklPath, fw))
+	writeActionStatus(fw, action, run(ctx, stack.PklPath, fw))
+}
+
+func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
+	h.lifecycle(w, r, "up", true, func(ctx context.Context, path string, out io.Writer) error {
+		return h.agent.Dill().Up(ctx, path, out)
+	})
 }
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
-	if !h.qualifiedActionAllowed(w, r) {
-		return
-	}
-	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
-	stack, err := h.store.Get(name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
-	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "down")
-	if !ok {
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
-	defer historyDelivery(request, fw, r)
-	if request != nil {
-		fw.flush()
-	} // Publish stable lookup ID before discovery.
-	writeActionStatus(fw, "down", h.agent.Dill().Down(ctx, stack.PklPath, fw))
+	h.lifecycle(w, r, "down", false, func(ctx context.Context, path string, out io.Writer) error {
+		return h.agent.Dill().Down(ctx, path, out)
+	})
 }
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
-	if !h.qualifiedActionAllowed(w, r) {
-		return
-	}
-	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
-	stack, err := h.store.Get(name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
-	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "stop")
-	if !ok {
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
-	defer historyDelivery(request, fw, r)
-	if request != nil {
-		fw.flush()
-	} // Publish stable lookup ID before discovery.
-	writeActionStatus(fw, "stop", h.agent.Dill().Stop(ctx, stack.PklPath, fw))
+	h.lifecycle(w, r, "stop", false, func(ctx context.Context, path string, out io.Writer) error {
+		return h.agent.Dill().Stop(ctx, path, out)
+	})
 }
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
-	if !h.qualifiedActionAllowed(w, r) {
-		return
-	}
-	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
-	stack, err := h.store.Get(name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if !h.ensureRuntimeEngine(w, stack) {
-		return
-	}
-	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
-	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "start")
-	if !ok {
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
-	defer historyDelivery(request, fw, r)
-	if request != nil {
-		fw.flush()
-	} // Publish stable lookup ID before discovery.
-	writeActionStatus(fw, "start", h.agent.Dill().Start(ctx, stack.PklPath, fw))
+	h.lifecycle(w, r, "start", true, func(ctx context.Context, path string, out io.Writer) error {
+		return h.agent.Dill().Start(ctx, path, out)
+	})
 }
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
-	if !h.qualifiedActionAllowed(w, r) {
-		return
-	}
-	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
-	stack, err := h.store.Get(name)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
-		return
-	}
-	if !h.ensureRuntimeEngine(w, stack) {
-		return
-	}
-	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
-	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, "restart")
-	if !ok {
-		return
-	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
-	defer historyDelivery(request, fw, r)
-	if request != nil {
-		fw.flush()
-	} // Publish stable lookup ID before discovery.
-	writeActionStatus(fw, "restart", h.agent.Dill().Restart(ctx, stack.PklPath, fw))
+	h.lifecycle(w, r, "restart", true, func(ctx context.Context, path string, out io.Writer) error {
+		return h.agent.Dill().Restart(ctx, path, out)
+	})
 }
 
 type teardownRequest struct {
