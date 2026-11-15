@@ -11,9 +11,9 @@ case "$profile" in
   legacy-b3)
     readonly commit=b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
     readonly tree=cc545129c5a178cd07fa97b9e7827f74fe624866 ;;
-  preflight-main-2d48)
-    readonly commit=2d48de89947c1bec0c4e305b6d05e9172cfdaecd
-    readonly tree=5a4b96b8410be7f852bfcb09f80ddb48469c72e2 ;;
+  preflight-main-2a725)
+    readonly commit=2a725aa76f6cbca3bfacd480137b7d183b326ce0
+    readonly tree=504d09d2336b84c2272cdaebe48dae3daf71feb3 ;;
   *) echo 'Unknown operation candidate profile' >&2; exit 2 ;;
 esac
 readonly schema_sha=b34206d0622fc6c1aa99d5edefb9b6d4b01232635756d2c67fb135161f8db345
@@ -28,7 +28,7 @@ check_source() {
   for name in manifest success failure unsupported-operation unsupported-version qualified-success qualified-cleanup-failure; do
     cmp "$candidate/internal/operation/testdata/$name.json" "$brine/internal/dill/testdata/operation-v1/$name.json"
   done
-  if [[ $profile = preflight-main-2d48 ]]; then
+  if [[ $profile = preflight-main-2a725 ]]; then
     for name in apply-mismatch argv canonical-vectors capabilities-supported capabilities-unsupported manifest negative-wire-cases preview-down-absent preview-empty-start preview-invalid-contract preview-limit-failure preview-metadata-unknown preview-up-config-noop preview-up-create preview-up-recreate; do
       cmp "$candidate/internal/preflight/testdata/$name.json" "$brine/internal/dill/testdata/preflight-v1/$name.json"
     done
@@ -85,7 +85,7 @@ for name in CandidatePins PinnedFixtureIntegrity ConsumerFixtures ConsumerCapabi
   }
 done
 check_source
-if [[ $profile = preflight-main-2d48 ]]; then
+if [[ $profile = preflight-main-2a725 ]]; then
   grep -F -- '--- PASS: TestOperationContractCandidateProcess/preflight-discovery ' "$base/results.log" >/dev/null || {
     echo 'Missing actual successor preflight discovery pass' >&2; exit 1;
   }

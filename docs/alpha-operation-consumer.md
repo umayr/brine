@@ -14,26 +14,39 @@ claims or enable any action. Outside that opt-in the behavior below is unchanged
 
 ## Accepted successor and compatibility boundary
 
-The accepted provider successor is Dill main
-`2d48de89947c1bec0c4e305b6d05e9172cfdaecd` (tree
-`5a4b96b8410be7f852bfcb09f80ddb48469c72e2`), independently received against
-exact-main CI `43666038516` and disposable qualification `43666204662`.
-Docker passed all 30 required Dill-side cases; Podman remains unqualified
-(11 passed / 19 blocked). This is **not Brine source or application qualification**.
+The accepted corrected provider successor is Dill main
+`2a725aa76f6cbca3bfacd480137b7d183b326ce0` (tree
+`504d09d2336b84c2272cdaebe48dae3daf71feb3`). Both supervisors independently
+received the actual main artifacts against exact-main CI `43683773067` and
+one disposable qualification run `43684062769`, and compared all 20 input-pin
+fields. Docker passed all 30 required Dill-side cases; Podman remains unqualified
+(11 passed / 19 blocked). This is finite same-profile provider acceptance,
+**not Brine source or application qualification**, receiving-daemon identity or
+universal mixed-port convergence assurance.
 
 Exact Linux amd64 accepted supply:
 
-- Docker artifact `14143195067`, ZIP SHA256
-  `3cbf172ed1b5e802ebe615bba38a9022ee9b17849824357a21831df0386b43bc`,
-  official expiry `2026-11-29T02:16:09Z`.
-- Binary SHA256 `5338c665f0ca710dd6fbc3f0da71db836d73ad9954ff9880a593406e203b72d7`.
+- Docker artifact `14149539591`, `79944927` bytes, ZIP SHA256
+  `1219db85bb08e0b92102f27c7428e38170271665276a046dc650150d1143d715`,
+  official expiry `2026-11-29T06:17:51Z`.
+- Binary SHA256 `7af78b677cde2221dfa81f90b98ebed83b09a4bc187c57b619747a8f8d640709`.
 - Handoff v2 tar SHA256
-  `274620193c7d71cf391f9f064ad539ae3ec0ab8edef299ef7ccd07321e3f579c`;
+  `726ce9a24b0a0b278440c08677670a91bbaec8f9d0aedb01c4f3139875c0e3e3`;
   manifest SHA256
-  `c63c895d968db91432199d12b2617bac5c36b97b08007a995cd9c1fb44db96d6`.
+  `59f4e9f413e77af61a92d8bdf1a96ffc62ce6be7767b96c225da827aac1f4cec`.
 
-The pinned synthetic CI matrix preserves `legacy-b3` and adds the closed
-`preflight-main-2d48` selector. Each builds its exact clean source commit/tree
+The corrected source adds only `test/integration/port_bindings_test.go` to the
+closed outer artifact namespace (55 to 56 files). The 32 canonical public
+handoff members, catalog of 30 cases, input's 20-key schema and qualified profile
+are unchanged. Pkl remains 0.31.1 with Linux amd64 SHA256
+`618f13955d755cafbfe8c9cba1d27635848cd49dbc6abffd398d2751db1231bf`;
+schema SHA256 remains
+`b34206d0622fc6c1aa99d5edefb9b6d4b01232635756d2c67fb135161f8db345`.
+
+The pinned synthetic CI matrix preserves `legacy-b3` and replaces the previous
+successor selector with closed `preflight-main-2a725`. The old
+`preflight-main-2d48` selector and raw source SHAs are rejected, not aliases or
+additional accepted candidates. Each builds its exact clean source commit/tree
 and checks the same unchanged operation fixtures. Only the successor also
 checks actual offline preflight discovery against the frozen wire object.
 These are **source-built read-only synthetic compatibility tests**, not execution
@@ -48,6 +61,25 @@ is an input-receiving bound, not an invitation to use a different or latest run.
 The bundled/released Dill v0.7.0 and legacy secret CI pins remain unchanged.
 Source execution and actual app qualification stay disabled pending their own
 evidence and integration; the original Pkl audit is deferred, not waived.
+
+## Historical 2d48 receipt, not a current promotion pin
+
+The earlier main `2d48de89947c1bec0c4e305b6d05e9172cfdaecd` (tree
+`5a4b96b8410be7f852bfcb09f80ddb48469c72e2`) was received against CI
+`43666038516` and qualification `43666204662`. Preserve its historical Docker
+artifact `14143195067`, ZIP SHA256
+`3cbf172ed1b5e802ebe615bba38a9022ee9b17849824357a21831df0386b43bc`,
+expiry `2026-11-29T02:16:09Z`, binary SHA256
+`5338c665f0ca710dd6fbc3f0da71db836d73ad9954ff9880a593406e203b72d7`,
+handoff tar SHA256
+`274620193c7d71cf391f9f064ad539ae3ec0ab8edef299ef7ccd07321e3f579c`,
+and manifest SHA256
+`c63c895d968db91432199d12b2617bac5c36b97b08007a995cd9c1fb44db96d6`.
+That receipt does not waive the subsequently confirmed private HostIP
+`0.0.0.0`/`::` alias ambiguity; native stale-apply impact was not demonstrated.
+The finite corrected repair and newly received actual-main artifacts supersede
+that promotion hold only for exact `2a725`, not an arbitrary latest successor.
+Neither this history nor driver-branch CI artifacts replace the accepted supply.
 
 ## Historical b3 candidate and trust boundary
 

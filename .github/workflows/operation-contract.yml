@@ -20,9 +20,9 @@ jobs:
           - profile: legacy-b3
             label: b3
             commit: b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
-          - profile: preflight-main-2d48
-            label: 2d48
-            commit: 2d48de89947c1bec0c4e305b6d05e9172cfdaecd
+          - profile: preflight-main-2a725
+            label: 2a725
+            commit: 2a725aa76f6cbca3bfacd480137b7d183b326ce0
     steps:
       - uses: actions/checkout@v4
         with:

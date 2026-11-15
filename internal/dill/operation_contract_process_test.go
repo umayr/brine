@@ -178,7 +178,7 @@ func TestOperationContractCandidateProcess(t *testing.T) {
 			t.Fatalf("actual Linux b3 discovery failed: %v", err)
 		}
 	})
-	if profile == "preflight-main-2d48" {
+	if profile == "preflight-main-2a725" {
 		t.Run("preflight-discovery", func(t *testing.T) {
 			if err := r.checkPreflightCapabilities(ctx); err != nil {
 				t.Fatal("actual successor preflight discovery rejected")

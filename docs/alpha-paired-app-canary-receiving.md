@@ -121,12 +121,28 @@ verify a particular accepted input artifact; they are not the Brine pair/source
 registry, receiving-host authority or application/source qualification. Their
 `linux-amd64` literal belongs to that input schema; it is not silently identical
 to a different schema's `linux/amd64`. The historical provider receipt does not
-supply a receiving daemon identity. Provider pin promotion is currently **held**
-for the confirmed older `2d` private-host-IP `0.0.0.0`/`::` alias issue and
-unknown native impact; do not silently promote a successor tuple. A bounded
-corrected-provider qualification is authorized. Replacing the pin with a new
-tuple requires actual acceptance by both sides; that acceptance is not asserted
-here.
+supply a receiving daemon identity.
+
+Both supervisors have now independently accepted the exact corrected Dill main
+`2a725aa76f6cbca3bfacd480137b7d183b326ce0`, tree
+`504d09d2336b84c2272cdaebe48dae3daf71feb3`, against actual-main CI
+`43683773067` and qualification `43684062769`. The complete 20-key input tuple
+matches on both sides; exact artifact/hash/expiry joins are recorded in
+[the consumer receiving boundary](alpha-operation-consumer.md). This lifts the
+older `2d` private-host-IP alias promotion hold **only for that accepted tuple**.
+It preserves the old receipt and uncertain native impact; it does not claim
+universal mixed-port correctness, waive the original audit or qualify this app.
+
+Provider acceptance and input-code delivery are separate checkpoints. At the
+reviewed Dill migration head `22007da4438c7dfde6d55b77f146c970f67df783`, PR #92
+has finite four-file review closure and safe checks; exact-head CI, normal merge
+and actual post-merge checks are still pending. The preparer uses a closed
+56-file outer namespace, including the one added port-binding integration source,
+without changing the 32 public handoff members, 30-case catalog or profile.
+Driver-branch CI artifacts must never replace the accepted actual-main supply.
+No arbitrary successor, old selector alias or fallback is admitted. All six
+external contracts above, source factory/registry authority and actual native
+Brine application qualification remain off.
 
 Any future actual canary must run only on a separately accepted disposable GitHub
 Actions host after source, provider and receiving contracts are satisfied. This
