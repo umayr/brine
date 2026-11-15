@@ -221,7 +221,7 @@ test('git actions refresh revision state and streamed push failure remains faile
   assert.match(template, /id="git-state-values"[^>]*hx-trigger="git-refresh from:body"[^>]*hx-select="#git-state-values"/);
   const script = template.slice(template.indexOf('async function runAction('), template.indexOf('</script>', template.indexOf('async function runAction(')));
   for (const [marker, expected] of [['[brine:error] push failed', 'failed'], ['[brine:done] git push complete', 'complete']]) {
-    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status'].map(id => [id, {textContent: '', classList: {remove() {}}, scrollTop: 0, scrollHeight: 0}]));
+    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, scrollTop: 0, scrollHeight: 0}]));
     const events = []; let readCount = 0;
     const context = {
       document: {body: {}, getElementById: id => elements[id] || null, querySelectorAll: () => []},
