@@ -29,6 +29,7 @@ func TestAttendedCookieCSRFAndAuthenticatedPreview(t *testing.T) {
 	cookie := lr.Result().Cookies()[0]
 	r := chi.NewRouter()
 	r.Use(a.Middleware)
+	r.Use(attendedAPIGuard)
 	r.Get("/csrf", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(a.CSRFFor(r))) })
 	r.Post("/api/stacks/{name}/operations/preview", h.attendedPreview)
 	r.Post("/api/stacks/{name}/up", h.up)
@@ -36,6 +37,10 @@ func TestAttendedCookieCSRFAndAuthenticatedPreview(t *testing.T) {
 	r.Post("/api/stacks/{name}/restart", h.restart)
 	r.Post("/api/stacks/{name}/stop", h.stop)
 	r.Post("/api/stacks/{name}/down", h.down)
+	legacy := []string{"/api/stacks/demo/teardown", "/api/stacks/demo/git/pull", "/api/stacks/demo/git/push", "/api/stacks/demo/secret-bindings/preview", "/api/stacks/demo/secret-bindings/confirm", "/api/stacks/demo/secret-bindings/status", "/api/stacks", "/api/stacks/git", "/api/containers/id/start", "/api/containers/id/stop", "/api/containers/id/restart", "/api/images/pull"}
+	for _, path := range legacy {
+		r.Post(path, func(w http.ResponseWriter, _ *http.Request) { t.Error("legacy child reached") })
+	}
 	get := httptest.NewRequest("GET", "/csrf", nil)
 	get.AddCookie(cookie)
 	cw := httptest.NewRecorder()
@@ -60,6 +65,14 @@ func TestAttendedCookieCSRFAndAuthenticatedPreview(t *testing.T) {
 		}
 		if w := post(path, "incorrect"); w.Code != 403 {
 			t.Fatalf("wrong csrf %s: %d", path, w.Code)
+		}
+	}
+	for _, path := range legacy {
+		if w := post(path, ""); w.Code != 403 {
+			t.Fatalf("legacy missing csrf %s: %d", path, w.Code)
+		}
+		if w := post(path, csrf); w.Code != 503 {
+			t.Fatalf("legacy guard %s: %d", path, w.Code)
 		}
 	}
 	w := post("/api/stacks/synthetic/operations/preview", csrf)

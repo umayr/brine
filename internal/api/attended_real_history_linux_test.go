@@ -4,6 +4,8 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -70,6 +72,16 @@ func TestAttendedRealHistoryTerminalWriteFaultSuppressesMarker(t *testing.T) {
 	}
 }
 
+type disconnectedWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *disconnectedWriter) Header() http.Header       { return w.header }
+func (w *disconnectedWriter) WriteHeader(code int)      { w.status = code }
+func (w *disconnectedWriter) Write([]byte) (int, error) { return 0, errors.New("synthetic disconnect") }
+func (w *disconnectedWriter) Flush()                    {}
+
 // Linux GHA only: exercises the actual store with synthetic invocations; it is
 // not native application/source/provider qualification or a runtime test.
 func TestAttendedRealHistoryPreviewApplyAndLookup(t *testing.T) {
@@ -121,6 +133,19 @@ func TestAttendedRealHistoryPreviewApplyAndLookup(t *testing.T) {
 	if again := fakeRequest(r, "/api/stacks/synthetic/up", body); again.Code != 409 {
 		t.Fatal("replay accepted", again.Code)
 	}
+	disconnectBody := fakeReview(t, r)
+	disconnectReq := httptest.NewRequest("POST", "/api/stacks/synthetic/up", strings.NewReader(disconnectBody))
+	disconnectReq.Header.Set("Authorization", "Bearer token")
+	disconnect := &disconnectedWriter{header: make(http.Header)}
+	r.ServeHTTP(disconnect, disconnectReq)
+	disconnectedID := disconnect.header.Get("X-Brine-Request-ID")
+	disconnected, err := s.GetV2(disconnectedID)
+	if err != nil || disconnected.Phase != "terminal" || disconnected.Delivery != "write_failed" || disconnected.Apply == nil || disconnected.Apply.Status != "unknown" {
+		t.Fatalf("delivery axes: %+v %v", disconnected, err)
+	}
+	if again := fakeRequest(r, "/api/stacks/synthetic/up", disconnectBody); again.Code != 409 {
+		t.Fatal("disconnected token reused", again.Code)
+	}
 	pending := fakeReview(t, r)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -135,7 +160,7 @@ func TestAttendedRealHistoryPreviewApplyAndLookup(t *testing.T) {
 	if after := fakeRequest(r, "/api/stacks/synthetic/up", pending); after.Code != 409 {
 		t.Fatal("reopened store revived confirmation", after.Code)
 	}
-	if cap.applies.Load() != 1 {
+	if cap.applies.Load() != 2 {
 		t.Fatal("restart launched apply")
 	}
 	unauth := httptest.NewRecorder()
