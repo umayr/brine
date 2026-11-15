@@ -133,10 +133,16 @@ older `2d` private-host-IP alias promotion hold **only for that accepted tuple**
 It preserves the old receipt and uncertain native impact; it does not claim
 universal mixed-port correctness, waive the original audit or qualify this app.
 
-Provider acceptance and input-code delivery are separate checkpoints. At the
-reviewed Dill migration head `22007da4438c7dfde6d55b77f146c970f67df783`, PR #92
-has finite four-file review closure and safe checks; exact-head CI, normal merge
-and actual post-merge checks are still pending. The preparer uses a closed
+Provider acceptance and input-code delivery are separate checkpoints. Dill
+PR #92 normally merged reviewed head `22007da4438c7dfde6d55b77f146c970f67df783`
+as `8c861928124918b9e7b48238fab13bf6ae3b1ef3`, preserving the reviewed tree
+`48aceed089423db486501b7c7a6b6869e2fa095a` and all eight input-file bytes.
+All 13 exact-head checks succeeded in runs `43688088718` and `43688088696`;
+actual push/main CI `43689062137` then succeeded with all 11 checks. The Brine
+supervisor independently verified the normal merge and actual post-merge CI.
+This delivers the bounded Dill input-code migration, not Brine consumer or
+joint application qualification. The accepted provider pin remains `2a725`.
+The preparer uses a closed
 56-file outer namespace, including the one added port-binding integration source,
 without changing the 32 public handoff members, 30-case catalog or profile.
 Driver-branch CI artifacts must never replace the accepted actual-main supply.
