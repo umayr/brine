@@ -69,10 +69,11 @@ type backend interface {
 	close() error
 }
 type Store struct {
-	mu     sync.Mutex
-	disk   backend
-	failed bool
-	known  map[string]Record
+	mu      sync.Mutex
+	disk    backend
+	failed  bool
+	known   map[string]Record
+	knownV2 map[string]RecordV2
 }
 
 // SeparateRoots rejects aliases and nesting in either direction. Data may be a
@@ -121,6 +122,12 @@ func Open(root, data, coordination string) (*Store, error) {
 	if e != nil {
 		return nil, ErrUnsafe
 	}
+	return openStore(disk)
+}
+
+// openStore owns disk on both success and failure. Keeping recovery separate
+// allows synthetic fault tests without bypassing Linux root checks in Open.
+func openStore(disk backend) (*Store, error) {
 	s := &Store{disk: disk, known: make(map[string]Record)}
 	names, e := disk.names()
 	if e != nil || len(names) > MaxRecords {
@@ -129,19 +136,48 @@ func Open(root, data, coordination string) (*Store, error) {
 	}
 	// Validate the entire store before recovery modifies any accepted record.
 	records := make([]Record, 0, len(names))
+	var recordsV2 []RecordV2
 	for _, n := range names {
 		if !strings.HasSuffix(n, ".json") || !ValidID(strings.TrimSuffix(n, ".json")) {
 			disk.close()
 			return nil, ErrUnsafe
 		}
-		r, e := s.load(strings.TrimSuffix(n, ".json"))
+		id := strings.TrimSuffix(n, ".json")
+		b, e := disk.read(n)
 		if e != nil {
 			disk.close()
 			return nil, ErrUnsafe
 		}
-		records = append(records, r)
+		if r, e := decode(b); e == nil && r.RequestID == id {
+			records = append(records, r)
+		} else if r, e := decodeV2(b); e == nil && r.RequestID == id {
+			recordsV2 = append(recordsV2, r)
+		} else {
+			disk.close()
+			return nil, ErrUnsafe
+		}
+	}
+	consumed := make(map[string]bool)
+	for _, r := range recordsV2 {
+		if r.Kind == "apply" {
+			if consumed[r.PreviewRequestID] || s.validateReviewLink(r.Intent, r.PreviewRequestID, r.ReviewDigest) != nil {
+				disk.close()
+				return nil, ErrUnsafe
+			}
+			consumed[r.PreviewRequestID] = true
+		}
 	}
 	now := time.Now().UTC()
+	for _, r := range recordsV2 {
+		if r.Phase == "accepted" || r.Phase == "running" {
+			r.Phase = "unknown"
+			r.RecoveryObservedAt = &now
+			if s.saveV2(r) != nil {
+				disk.close()
+				return nil, ErrUnsafe
+			}
+		}
+	}
 	for _, r := range records {
 		if r.Phase == "accepted" || r.Phase == "running" {
 			r.Phase = "unknown"
@@ -284,16 +320,9 @@ func (s *Store) Begin(i Intent) (*Request, error) {
 		s.failed = true
 		return nil, ErrUnsafe
 	}
-	for _, name := range names {
-		id := strings.TrimSuffix(name, ".json")
-		if name != id+".json" || !ValidID(id) {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
-		if _, e := s.load(id); e != nil {
-			s.failed = true
-			return nil, ErrUnsafe
-		}
+	if _, e := s.validateInventory(names); e != nil {
+		s.failed = true
+		return nil, ErrUnsafe
 	}
 	var random [16]byte
 	if _, e = rand.Read(random[:]); e != nil {
@@ -331,8 +360,10 @@ func (r *Request) update(change func(*Record) error) error {
 	}
 	// Keep typed known axes in memory even if the prior durable record became
 	// unreadable or a previous write failed. Never reinterpret this as success.
-	_, loadErr := s.load(r.id)
-	if s.failed || loadErr != nil || s.save(current) != nil {
+	durable, loadErr := s.load(r.id)
+	lastBytes, _ := json.Marshal(r.last)
+	durableBytes, _ := json.Marshal(durable)
+	if s.failed || loadErr != nil || !bytes.Equal(lastBytes, durableBytes) || s.save(current) != nil {
 		s.failed = true
 		current.Persistence = "failed_inspect"
 		current.Reason = "history_failure_requires_inspection"
