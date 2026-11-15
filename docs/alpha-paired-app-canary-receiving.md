@@ -121,12 +121,34 @@ verify a particular accepted input artifact; they are not the Brine pair/source
 registry, receiving-host authority or application/source qualification. Their
 `linux-amd64` literal belongs to that input schema; it is not silently identical
 to a different schema's `linux/amd64`. The historical provider receipt does not
-supply a receiving daemon identity. Provider pin promotion is currently **held**
-for the confirmed older `2d` private-host-IP `0.0.0.0`/`::` alias issue and
-unknown native impact; do not silently promote a successor tuple. A bounded
-corrected-provider qualification is authorized. Replacing the pin with a new
-tuple requires actual acceptance by both sides; that acceptance is not asserted
-here.
+supply a receiving daemon identity.
+
+Both supervisors have now independently accepted the exact corrected Dill main
+`2a725aa76f6cbca3bfacd480137b7d183b326ce0`, tree
+`504d09d2336b84c2272cdaebe48dae3daf71feb3`, against actual-main CI
+`43683773067` and qualification `43684062769`. The complete 20-key input tuple
+matches on both sides; exact artifact/hash/expiry joins are recorded in
+[the consumer receiving boundary](alpha-operation-consumer.md). This lifts the
+older `2d` private-host-IP alias promotion hold **only for that accepted tuple**.
+It preserves the old receipt and uncertain native impact; it does not claim
+universal mixed-port correctness, waive the original audit or qualify this app.
+
+Provider acceptance and input-code delivery are separate checkpoints. Dill
+PR #92 normally merged reviewed head `22007da4438c7dfde6d55b77f146c970f67df783`
+as `8c861928124918b9e7b48238fab13bf6ae3b1ef3`, preserving the reviewed tree
+`48aceed089423db486501b7c7a6b6869e2fa095a` and all eight input-file bytes.
+All 13 exact-head checks succeeded in runs `43688088718` and `43688088696`;
+actual push/main CI `43689062137` then succeeded with all 11 checks. The Brine
+supervisor independently verified the normal merge and actual post-merge CI.
+This delivers the bounded Dill input-code migration, not Brine consumer or
+joint application qualification. The accepted provider pin remains `2a725`.
+The preparer uses a closed
+56-file outer namespace, including the one added port-binding integration source,
+without changing the 32 public handoff members, 30-case catalog or profile.
+Driver-branch CI artifacts must never replace the accepted actual-main supply.
+No arbitrary successor, old selector alias or fallback is admitted. All six
+external contracts above, source factory/registry authority and actual native
+Brine application qualification remain off.
 
 Any future actual canary must run only on a separately accepted disposable GitHub
 Actions host after source, provider and receiving contracts are satisfied. This
