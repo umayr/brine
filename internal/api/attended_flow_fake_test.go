@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -76,13 +77,25 @@ func (r *fakeAttendedRequest) TerminalApply(dill.OperationInvocation) error {
 func (r *fakeAttendedRequest) Delivery(bool) error { return nil }
 
 type fakeCapture struct {
-	inv     dill.PreflightInvocation
-	stale   atomic.Bool
-	applies atomic.Int32
+	inv         dill.PreflightInvocation
+	stale       atomic.Bool
+	swapSource  atomic.Bool
+	swapTarget  atomic.Bool
+	previewHook func()
+	applyHook   func()
+	applies     atomic.Int32
 }
 
 func (c *fakeCapture) Intent() (operationhistory.SourceRef, dill.PreflightTarget) {
-	return operationhistory.SourceRef{SnapshotDigest: operationhistory.Digest("source"), EvaluatorProfileDigest: operationhistory.Digest("profile"), EvaluatorRefDigest: operationhistory.Digest("evaluator")}, *c.inv.Result.Target
+	source := operationhistory.SourceRef{SnapshotDigest: operationhistory.Digest("source"), EvaluatorProfileDigest: operationhistory.Digest("profile"), EvaluatorRefDigest: operationhistory.Digest("evaluator")}
+	target := *c.inv.Result.Target
+	if c.swapSource.Load() {
+		source.SnapshotDigest = operationhistory.Digest("changed")
+	}
+	if c.swapTarget.Load() {
+		target.EndpointDigest = operationhistory.Digest("changed")
+	}
+	return source, target
 }
 func (c *fakeCapture) Revalidate(context.Context) error {
 	if c.stale.Load() {
@@ -94,12 +107,18 @@ func (c *fakeCapture) Preview(_ context.Context, o dill.PreflightObserver) (dill
 	if err := o.Started(); err != nil {
 		return c.inv, err
 	}
+	if c.previewHook != nil {
+		c.previewHook()
+	}
 	return c.inv, o.Terminal(c.inv)
 }
 func (c *fakeCapture) Apply(_ context.Context, _ *dill.PreflightInvocation, o dill.OperationObserver, w io.Writer) (dill.OperationInvocation, error) {
 	c.applies.Add(1)
 	if err := o.Started(); err != nil {
 		return dill.OperationInvocation{}, err
+	}
+	if c.applyHook != nil {
+		c.applyHook()
 	}
 	if err := o.Terminal(dill.OperationInvocation{ExitCode: -1, Status: "unknown"}); err != nil {
 		_, _ = w.Write([]byte("FORBIDDEN_MARKER"))
@@ -157,6 +176,10 @@ func fakeFlow(t *testing.T) (*chi.Mux, *fakeAttendedHistory, *fakeCapture, *stac
 	r.Use(authn.Middleware)
 	r.Post("/api/stacks/{name}/operations/preview", h.attendedPreview)
 	r.Post("/api/stacks/{name}/up", h.up)
+	r.Post("/api/stacks/{name}/start", h.start)
+	r.Post("/api/stacks/{name}/restart", h.restart)
+	r.Post("/api/stacks/{name}/stop", h.stop)
+	r.Post("/api/stacks/{name}/down", h.down)
 	return r, history, cap, h
 }
 func fakeRequest(r *chi.Mux, path, body string) *httptest.ResponseRecorder {
@@ -183,6 +206,92 @@ func fakeReview(t *testing.T, r *chi.Mux) string {
 	b, _ := json.Marshal(map[string]string{"requestId": v.ID, "reviewDigest": v.Digest, "confirmationToken": v.Token})
 	return string(b)
 }
+func TestFakeAttendedDecoderValid256RowReview(t *testing.T) {
+	r, _, capture, _ := fakeFlow(t)
+	result := *capture.inv.Result
+	result.Coverage.Containers.Count = 255
+	result.Coverage.Volumes.Count = 0
+	result.Resources = []dill.PreflightResource{}
+	for i := 0; i < 255; i++ {
+		name := fmt.Sprintf("synthetic_service_%03d", i)
+		result.Resources = append(result.Resources, dill.PreflightResource{Kind: "container", Name: name, Identity: name, IdentityKind: "planned-name", Presence: "absent", Action: "create", Retention: "not-applicable"})
+	}
+	result.Resources = append(result.Resources, dill.PreflightResource{Kind: "network", Name: "synthetic", Identity: "synthetic", IdentityKind: "planned-name", Presence: "absent", Action: "ensure", Retention: "preserve"})
+	b, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture.inv = dill.ObservePreflightInvocation(b, capture.inv.ProcessExit)
+	if capture.inv.Result == nil {
+		t.Fatal("256-row decoder-valid fixture rejected")
+	}
+	w := fakeRequest(r, "/api/stacks/synthetic/operations/preview", `{"action":"up"}`)
+	if w.Code != 200 {
+		t.Fatalf("preview: %d %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Review operationhistory.RecordV2 `json:"review"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Review.Preview == nil || len(response.Review.Preview.Result.Resources) != 256 || response.Review.Preview.Result.Resources[254].Name != "synthetic_service_254" {
+		t.Fatal("review rows truncated or altered")
+	}
+}
+
+func TestFakeAttendedAllFivePositiveRoutes(t *testing.T) {
+	for _, action := range []string{"up", "start", "restart", "stop", "down"} {
+		t.Run(action, func(t *testing.T) {
+			r, _, capture, _ := fakeFlow(t)
+			file := "preview-up-create.json"
+			if action == "start" || action == "restart" {
+				file = "preview-empty-start.json"
+			}
+			if action == "stop" || action == "down" {
+				file = "preview-down-absent.json"
+			}
+			data, err := os.ReadFile("../dill/testdata/preflight-v1/" + file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var frame struct {
+				ExitCode int                  `json:"exitCode"`
+				Stdout   dill.PreflightResult `json:"stdout"`
+			}
+			if err := json.Unmarshal(data, &frame); err != nil {
+				t.Fatal(err)
+			}
+			frame.Stdout.Operation = action
+			payload, err := json.Marshal(frame.Stdout)
+			if err != nil {
+				t.Fatal(err)
+			}
+			capture.inv = dill.ObservePreflightInvocation(payload, &frame.ExitCode)
+			if capture.inv.Result == nil {
+				t.Fatal("synthetic action evidence rejected")
+			}
+			preview := fakeRequest(r, "/api/stacks/synthetic/operations/preview", `{"action":"`+action+`"}`)
+			if preview.Code != 200 {
+				t.Fatalf("preview: %d %s", preview.Code, preview.Body.String())
+			}
+			var result struct {
+				ID     string `json:"requestId"`
+				Digest string `json:"reviewDigest"`
+				Token  string `json:"confirmationToken"`
+			}
+			if err := json.Unmarshal(preview.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			confirmation, _ := json.Marshal(map[string]string{"requestId": result.ID, "reviewDigest": result.Digest, "confirmationToken": result.Token})
+			w := fakeRequest(r, "/api/stacks/synthetic/"+action, string(confirmation))
+			if w.Code != 200 || capture.applies.Load() != 1 || !strings.Contains(w.Body.String(), "FAKE_MARKER") {
+				t.Fatalf("confirmation: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestFakeAttendedOneUseConcurrentAndStale(t *testing.T) {
 	r, _, cap, _ := fakeFlow(t)
 	body := fakeReview(t, r)
@@ -216,6 +325,59 @@ func TestFakeAttendedOneUseConcurrentAndStale(t *testing.T) {
 		t.Fatal("stale token reused", w.Code)
 	}
 }
+func TestFakeAttendedSwappedContextConsumesToken(t *testing.T) {
+	for _, mode := range []string{"action", "stack", "source", "target"} {
+		t.Run(mode, func(t *testing.T) {
+			r, _, capture, _ := fakeFlow(t)
+			body := fakeReview(t, r)
+			path := "/api/stacks/synthetic/up"
+			switch mode {
+			case "action":
+				path = "/api/stacks/synthetic/stop"
+			case "stack":
+				path = "/api/stacks/other/up"
+			case "source":
+				capture.swapSource.Store(true)
+			case "target":
+				capture.swapTarget.Store(true)
+			}
+			if w := fakeRequest(r, path, body); w.Code != 409 {
+				t.Fatalf("swapped %s accepted: %d", mode, w.Code)
+			}
+			capture.swapSource.Store(false)
+			capture.swapTarget.Store(false)
+			if w := fakeRequest(r, "/api/stacks/synthetic/up", body); w.Code != 409 {
+				t.Fatalf("token reused: %d", w.Code)
+			}
+			if capture.applies.Load() != 0 {
+				t.Fatal("unexpected apply")
+			}
+		})
+	}
+}
+
+func TestFakeAttendedSwappedActorConsumesToken(t *testing.T) {
+	r, _, capture, h := fakeFlow(t)
+	body := fakeReview(t, r)
+	other, err := auth.New(auth.Config{User: "other", Password: "password", APIToken: "other-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherRouter := chi.NewRouter()
+	otherRouter.Use(other.Middleware)
+	otherRouter.Post("/api/stacks/{name}/up", h.up)
+	req := httptest.NewRequest("POST", "/api/stacks/synthetic/up", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer other-token")
+	w := httptest.NewRecorder()
+	otherRouter.ServeHTTP(w, req)
+	if w.Code != 409 {
+		t.Fatalf("swapped actor: %d", w.Code)
+	}
+	if again := fakeRequest(r, "/api/stacks/synthetic/up", body); again.Code != 409 || capture.applies.Load() != 0 {
+		t.Fatal("swapped actor token reused")
+	}
+}
+
 func TestFakeAttendedMismatchAndRestartConsumeAuthority(t *testing.T) {
 	r, _, cap, h := fakeFlow(t)
 	body := fakeReview(t, r)

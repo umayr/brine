@@ -32,6 +32,10 @@ func TestAttendedCookieCSRFAndAuthenticatedPreview(t *testing.T) {
 	r.Get("/csrf", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(a.CSRFFor(r))) })
 	r.Post("/api/stacks/{name}/operations/preview", h.attendedPreview)
 	r.Post("/api/stacks/{name}/up", h.up)
+	r.Post("/api/stacks/{name}/start", h.start)
+	r.Post("/api/stacks/{name}/restart", h.restart)
+	r.Post("/api/stacks/{name}/stop", h.stop)
+	r.Post("/api/stacks/{name}/down", h.down)
 	get := httptest.NewRequest("GET", "/csrf", nil)
 	get.AddCookie(cookie)
 	cw := httptest.NewRecorder()
@@ -50,7 +54,7 @@ func TestAttendedCookieCSRFAndAuthenticatedPreview(t *testing.T) {
 		r.ServeHTTP(w, req)
 		return w
 	}
-	for _, path := range []string{"/api/stacks/synthetic/operations/preview", "/api/stacks/synthetic/up"} {
+	for _, path := range []string{"/api/stacks/synthetic/operations/preview", "/api/stacks/synthetic/up", "/api/stacks/synthetic/start", "/api/stacks/synthetic/restart", "/api/stacks/synthetic/stop", "/api/stacks/synthetic/down"} {
 		if w := post(path, ""); w.Code != 403 {
 			t.Fatalf("missing csrf %s: %d", path, w.Code)
 		}

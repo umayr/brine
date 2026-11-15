@@ -54,19 +54,21 @@ func TestAttendedWebCookieCSRFDoesNotBypassGuard(t *testing.T) {
 	if csrf == "" {
 		t.Fatal("no csrf")
 	}
-	for _, tc := range []struct {
-		token  string
-		status int
-	}{{"", 403}, {"invalid", 403}, {csrf, 503}} {
-		req := httptest.NewRequest("POST", "/web/stacks/demo/validate", nil)
-		req.AddCookie(cookie)
-		if tc.token != "" {
-			req.Header.Set("X-CSRF-Token", tc.token)
-		}
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		if w.Code != tc.status {
-			t.Fatalf("csrf guard: got %d want %d", w.Code, tc.status)
+	for _, path := range []string{"/web/stacks/demo/validate", "/web/stacks/demo/fmt", "/web/stacks/demo/git/pull", "/web/containers/id/start", "/web/containers/id/stop", "/web/containers/id/restart", "/web/images/pull", "/web/stacks", "/web/stacks/git"} {
+		for _, tc := range []struct {
+			token  string
+			status int
+		}{{"", 403}, {"invalid", 403}, {csrf, 503}} {
+			req := httptest.NewRequest("POST", path, nil)
+			req.AddCookie(cookie)
+			if tc.token != "" {
+				req.Header.Set("X-CSRF-Token", tc.token)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("csrf guard %s: got %d want %d", path, w.Code, tc.status)
+			}
 		}
 	}
 }
