@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/engine"
+	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/pkl"
 	"github.com/umayr/brine/internal/store"
@@ -549,14 +549,11 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
-	changed, err := h.git.Pull(ctx, repoDir)
+	changed, commit, err := gitpkg.PullAndRecord(ctx, h.git, h.store, name, repoDir)
 	if err != nil {
-		_ = h.store.UpdateGitStatus(name, "", err.Error(), time.Now())
 		h.renderAlert(w, "error", "git pull: "+err.Error())
 		return
 	}
-	commit, _ := h.git.ShortRef(ctx, repoDir)
-	_ = h.store.UpdateGitStatus(name, commit, "", timeNow())
 	if changed {
 		h.renderAlert(w, "success", fmt.Sprintf("Pulled — now at %s", commit))
 	} else {
@@ -592,8 +589,6 @@ func (h *Handler) stackGitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	h.renderAlert(w, "success", "Git settings saved")
 }
-
-func timeNow() time.Time { return time.Now() }
 
 // renderAlert writes a Brine notice fragment for HTMX swap targets.
 func (h *Handler) renderAlert(w http.ResponseWriter, alertType, msg string) {

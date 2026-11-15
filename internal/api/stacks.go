@@ -479,14 +479,11 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
-	changed, err := h.git.Pull(ctx, repoDir)
+	changed, commit, err := gitpkg.PullAndRecord(ctx, h.git, h.store, name, repoDir)
 	if err != nil {
-		_ = h.store.UpdateGitStatus(name, "", err.Error(), time.Now())
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	commit, _ := h.git.ShortRef(ctx, repoDir)
-	_ = h.store.UpdateGitStatus(name, commit, "", time.Now())
 	writeJSON(w, http.StatusOK, map[string]any{"changed": changed, "commit": commit})
 }
 
