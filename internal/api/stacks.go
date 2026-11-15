@@ -20,12 +20,14 @@ import (
 )
 
 type stackHandler struct {
-	history       *operationhistory.Store
-	agent         agent.Agent
-	store         store.StackStore
-	git           *gitpkg.Runner
-	runtimeEngine string
-	deployTimeout time.Duration
+	attended        *AttendedContext
+	attendedHistory attendedHistory
+	history         *operationhistory.Store
+	agent           agent.Agent
+	store           store.StackStore
+	git             *gitpkg.Runner
+	runtimeEngine   string
+	deployTimeout   time.Duration
 }
 
 // Defense in depth for mounted API routers: a configured qualified client must
@@ -153,6 +155,10 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "up")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -184,6 +190,10 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "down")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -211,6 +221,10 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "stop")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -238,6 +252,10 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "start")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -268,6 +286,10 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "restart")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}

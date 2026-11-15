@@ -122,7 +122,7 @@
   }
 
   // Explicit one-shot authenticated lookup only: never poll or replay a POST.
-  function operationLookup(doc, parent, id = '') {
+  function operationLookup(doc, parent, id = '', bound = false) {
     let panel = doc.getElementById('operation-lookup');
     if (!panel) {
       panel = doc.createElement('div');
@@ -145,7 +145,12 @@
           const res = await root.fetch('/api/operations/' + requestID, {method: 'GET', credentials: 'same-origin', headers: typeof root.brineHeaders === 'function' ? root.brineHeaders() : {}});
           if (!res.ok) throw new Error('lookup unavailable');
           const record = await res.json();
-          if (record.version !== 'brine.operation/1' || record.requestId !== requestID) throw new Error('invalid lookup');
+          if (record.requestId !== requestID) throw new Error('invalid lookup');
+          if (panel.dataset.bound === 'true' && record.version === 'brine.operation/2') {
+            output.textContent = 'Bound history; source references are recorded assertions, not proof. Lookup never confirms or replays.\n' + JSON.stringify(record, null, 2);
+            return;
+          }
+          if (record.version !== 'brine.operation/1') throw new Error('invalid lookup');
           const invocation = record.invocation, receipt = invocation?.receipt;
           output.textContent = ['Brine request ID: ' + requestID, 'Phase: ' + record.phase, 'Invocation status: ' + record.status,
             'History persistence: ' + record.persistence, 'HTTP delivery: ' + record.delivery + ' (no browser acknowledgement)',
@@ -158,6 +163,7 @@
       });
       parent.appendChild(panel);
     }
+    if (bound) panel.dataset.bound = 'true';
     if (/^br_[a-f0-9]{32}$/.test(id)) {
       doc.getElementById('operation-request-id').value = id;
       panel.querySelector('pre').textContent = 'Brine request ID: ' + id + '\nSave this ID. Use Look up status after disconnect; do not resubmit.';
