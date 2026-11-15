@@ -24,12 +24,14 @@ import (
 )
 
 type stackHandler struct {
-	history       *operationhistory.Store
-	agent         agent.Agent
-	store         store.StackStore
-	git           *gitpkg.Runner
-	runtimeEngine string
-	deployTimeout time.Duration
+	attended        *AttendedContext
+	attendedHistory attendedHistory
+	history         *operationhistory.Store
+	agent           agent.Agent
+	store           store.StackStore
+	git             *gitpkg.Runner
+	runtimeEngine   string
+	deployTimeout   time.Duration
 }
 
 // Defense in depth for mounted API routers: a configured qualified client must
@@ -170,6 +172,10 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 // lifecycle centralizes the shared authorization, locking, history, and streaming
 // steps while keeping action-specific engine checks explicit at the call sites.
 func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action string, checkEngine bool, run func(context.Context, string, io.Writer) error) {
+	if h.attended != nil {
+		h.attendedApply(w, r, action)
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}

@@ -164,7 +164,7 @@
   {{end}}
 
   <!-- Action output terminal -->
-  <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" data-operation-history="{{.OperationHistory}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
+  <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" data-operation-history="{{.OperationHistory}}" data-attended="{{.Attended}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
       <span id="action-title" class="font-mono text-xs">output</span>
       <button aria-label="Close action output" onclick="document.getElementById('action-output').classList.add('hidden')"
@@ -396,6 +396,7 @@
   <form method="dialog" class="ui-dialog-backdrop"><button aria-label="Close dialog">close</button></form>
 </dialog>
 
+{{if .Attended}}<script src="/static/attended.js"></script>{{end}}
 <script>
 async function deleteStack(name, removeContainers) {
   const res = await fetch(`/api/stacks/${name}`, {
@@ -428,11 +429,14 @@ function doPush(name) {
   runAction('git/push', name, 'POST', JSON.stringify({message}), 'application/json');
 }
 
-if (document.getElementById('action-output')?.dataset.operationHistory === 'true') {
-  BrineUI.operationLookup(document, document.getElementById('action-output').parentNode);
+if (document.getElementById('action-output')?.dataset.operationHistory === 'true' || document.getElementById('action-output')?.dataset.attended === 'true') {
+  BrineUI.operationLookup(document, document.getElementById('action-output').parentNode, '', document.getElementById('action-output').dataset.attended === 'true');
 }
 async function runAction(action, name, method, body, contentType) {
   const output = document.getElementById('action-output');
+  if (output.dataset.attended === 'true' && ['up', 'down', 'stop', 'start', 'restart'].includes(action)) {
+    return attendedReview(action, name, output);
+  }
   const log = document.getElementById('action-log');
   const title = document.getElementById('action-title');
   const status = document.getElementById('action-status');
