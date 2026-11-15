@@ -2,15 +2,41 @@ package web
 
 import (
 	"embed"
+	"errors"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/httpx"
 )
 
 //go:embed static
 var staticFS embed.FS
+
+// MountAttended must be installed together with api.MountAttended before serving.
+// A missing/unavailable producer still keeps these legacy routes denied.
+func MountAttended(r chi.Router, h *Handler, timeouts httpx.Timeouts, boundary *api.AttendedContext) error {
+	if h == nil || !boundary.MatchesAgent(h.agent) {
+		return errors.New("invalid attended web configuration")
+	}
+	h.attended = boundary
+	r.Group(func(r chi.Router) {
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				p := r.URL.Path
+				if (r.Method != http.MethodGet && r.Method != http.MethodHead) || (strings.HasPrefix(p, "/web/stacks/") && (strings.HasSuffix(p, "/plan") || strings.HasSuffix(p, "/containers"))) {
+					http.Error(w, "legacy operation unavailable in attended mode", http.StatusServiceUnavailable)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		})
+		Mount(r, h, timeouts)
+	})
+	return nil
+}
 
 // Mount registers all web routes on r.
 func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {

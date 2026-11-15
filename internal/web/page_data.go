@@ -15,6 +15,7 @@ type pageData struct {
 	AuthEnabled         bool
 	QualifiedOperations bool // configuration only, never readiness/attestation
 	OperationHistory    bool // explicit S1 configuration only, never source approval
+	Attended            bool // configured boundary, not readiness
 }
 
 type runtimePageData interface {
@@ -22,8 +23,10 @@ type runtimePageData interface {
 	setTarget(target.Identity)
 	setQualifiedOperations(bool)
 	setOperationHistory(bool)
+	setAttended(bool)
 }
 
+func (p *pageData) setAttended(configured bool)            { p.Attended = configured }
 func (p *pageData) setTarget(identity target.Identity)     { p.Target = identity }
 func (p *pageData) setQualifiedOperations(configured bool) { p.QualifiedOperations = configured }
 func (p *pageData) setOperationHistory(configured bool)    { p.OperationHistory = configured }

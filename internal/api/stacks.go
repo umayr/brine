@@ -20,6 +20,7 @@ import (
 )
 
 type stackHandler struct {
+	attended      *AttendedContext
 	history       *operationhistory.Store
 	agent         agent.Agent
 	store         store.StackStore
@@ -153,6 +154,10 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "up")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -184,6 +189,10 @@ func (h *stackHandler) up(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "down")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -211,6 +220,10 @@ func (h *stackHandler) down(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "stop")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -238,6 +251,10 @@ func (h *stackHandler) stop(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "start")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
@@ -268,6 +285,10 @@ func (h *stackHandler) start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
+	if h.attended != nil {
+		h.attendedApply(w, r, "restart")
+		return
+	}
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}

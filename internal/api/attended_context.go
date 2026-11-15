@@ -6,6 +6,8 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/dill"
@@ -40,15 +42,33 @@ type AttendedContext struct {
 	base     agent.Agent
 	runner   *dill.Runner
 	producer AttendedProducer
+	mu       sync.Mutex
+	pending  map[string]attendedReview
+}
+
+type attendedReview struct {
+	intent     operationhistory.BoundIntent
+	previewID  string
+	digest     string
+	invocation dill.PreflightInvocation
+	capture    AttendedCapture
+	expires    time.Time
 }
 
 var errAttendedConfiguration = errors.New("invalid attended startup configuration")
+
+// MatchesAgent binds the web boundary to the same startup agent and runner.
+func (a *AttendedContext) MatchesAgent(base agent.Agent) bool {
+	local, ok := base.(*agent.LocalAgent)
+	return a != nil && ok && local != nil && a.base == local && local.Dill() == a.runner && a.runner.Profile == target.Alpha
+}
 
 // NewAttendedContext must be called before starting any background or HTTP
 // work. The caller must propagate any error and abort startup. Profile must have
 // been set before NewLocalAgent so AlphaReadOnly was actually installed.
 func NewAttendedContext(base agent.Agent, shared *dill.Runner, producer AttendedProducer) (*AttendedContext, error) {
-	if base == nil || shared == nil || base.Dill() != shared || shared.Profile != target.Alpha {
+	local, ok := base.(*agent.LocalAgent)
+	if !ok || local == nil || shared == nil || local.Dill() != shared || shared.Profile != target.Alpha {
 		return nil, errAttendedConfiguration
 	}
 	if _, ok := base.Engine().(*engine.AlphaReadOnly); !ok {
