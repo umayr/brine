@@ -9,7 +9,7 @@ test('synthetic attended review displays every row and requires a human confirma
   let previews = 0, applies = 0, lookups = 0;
   await page.route('**/api/stacks/observability/operations/preview', async route => {
     previews++;
-    await route.fulfill({status: 200, headers: {'Content-Type': 'application/json', 'X-Brine-Request-ID': id}, body: JSON.stringify({requestId: id, reviewDigest: 'digest', confirmationToken: 'synthetic-token', review: {version: 'brine.operation/2', intent: {source: {snapshotDigest: 'assertion'}}, preview: {result: {version:'dill.preflight/1',operationId:'op_'+'0'.repeat(31)+'1',operation:'up',target:{engine:'docker',endpointDigest:'sha256:'+'1'.repeat(64),qualifiedIdentityDigest:'sha256:'+'2'.repeat(64)},stack:'synthetic',outcome:'succeeded',engineEffects:'none',coordinationEffects:'written',inputDigest:'sha256:'+'7'.repeat(64),selectionDigest:'sha256:'+'8'.repeat(64),coverage:{containers:{scope:'declared-stack',count:255,presentCount:0,complete:true},network:{scope:'stack-network',count:1,presentCount:0,complete:true},volumes:{scope:'declared-attached-named',count:0,presentCount:0,complete:true}},resources:rows,resourcesTruncated:false,errors:[]}}}})});
+    await route.fulfill({status: 200, headers: {'Content-Type': 'application/json', 'X-Brine-Request-ID': id}, body: JSON.stringify({requestId: id, reviewDigest: 'digest', confirmationToken: 'synthetic-token', review: {version: 'brine.operation/2', intent: {actor: '<literal>sentinel</literal>', source: {snapshotDigest: 'assertion'}}, preview: {result: {version:'dill.preflight/1',operationId:'op_'+'0'.repeat(31)+'1',operation:'up',target:{engine:'docker',endpointDigest:'sha256:'+'1'.repeat(64),qualifiedIdentityDigest:'sha256:'+'2'.repeat(64)},stack:'synthetic',outcome:'succeeded',engineEffects:'none',coordinationEffects:'written',inputDigest:'sha256:'+'7'.repeat(64),selectionDigest:'sha256:'+'8'.repeat(64),coverage:{containers:{scope:'declared-stack',count:255,presentCount:0,complete:true},network:{scope:'stack-network',count:1,presentCount:0,complete:true},volumes:{scope:'declared-attached-named',count:0,presentCount:0,complete:true}},resources:rows,resourcesTruncated:false,errors:[]}}}})});
   });
   await page.route('**/api/stacks/observability/up', async route => {
     applies++;
@@ -26,6 +26,7 @@ test('synthetic attended review displays every row and requires a human confirma
   const log = page.locator('#action-log');
   await expect(log).toContainText('synthetic_service_254');
   await expect(log).toContainText('"count": 255');
+  await expect(log).toContainText('<literal>sentinel</literal>');
   await expect(log).toContainText('not a backup');
   await expect(log.locator('literal')).toHaveCount(0);
   expect(previews).toBe(1); expect(applies).toBe(0); expect(lookups).toBe(0);
