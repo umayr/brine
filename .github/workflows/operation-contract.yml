@@ -10,9 +10,19 @@ permissions:
 
 jobs:
   operation-contract:
-    name: b3 CLI / Brine read-only synthetic compatibility
+    name: ${{ matrix.label }} CLI / Brine read-only synthetic compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: legacy-b3
+            label: b3
+            commit: b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
+          - profile: preflight-main-2d48
+            label: 2d48
+            commit: 2d48de89947c1bec0c4e305b6d05e9172cfdaecd
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: umayr/dill
-          ref: b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
+          ref: ${{ matrix.commit }}
           path: dill-operation-candidate
       - uses: actions/setup-go@v5
         with:
@@ -29,6 +39,7 @@ jobs:
       - name: Exact clean source, schema, fixtures, SDK read-only compatibility
         env:
           BRINE_OPERATION_ISOLATED: "1"
+          BRINE_OPERATION_CANDIDATE_PROFILE: ${{ matrix.profile }}
           BRINE_OPERATION_CANDIDATE_REPO: ${{ github.workspace }}/dill-operation-candidate
         run: bash brine/scripts/ci-operation-contract.sh
       # No real engine command, socket, provisioning or qualified mutation.
