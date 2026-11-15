@@ -1,16 +1,75 @@
 package web
 
 import (
+	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/httpx"
 )
+
+func TestAttendedWebCookieCSRFDoesNotBypassGuard(t *testing.T) {
+	runner := dill.New("/must-not-execute")
+	runner.Profile = "alpha"
+	runner.Engine = "docker"
+	runner.Socket = "/synthetic/socket"
+	runner.QualifiedOperation = &dill.QualifiedOperationConfig{StateDir: "/synthetic/state", Layout: "native-local-docker-v1", DaemonID: "synthetic-daemon"}
+	ag := agent.NewLocalAgent(&dashboardEngine{}, runner)
+	boundary, err := api.NewAttendedContext(ag, runner, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := auth.New(auth.Config{User: "operator", Password: "password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"user": {"operator"}, "password": {"password"}}
+	login := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	lw := httptest.NewRecorder()
+	a.HandleLogin(lw, login)
+	if lw.Code != 303 || len(lw.Result().Cookies()) == 0 {
+		t.Fatal("login failed")
+	}
+	cookie := lw.Result().Cookies()[0]
+	r := chi.NewRouter()
+	r.Use(a.Middleware)
+	r.Get("/csrf", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(a.CSRFFor(r))) })
+	if err := MountAttended(r, New(ag, nil, nil, nil, "docker", false, a, time.Second), httpx.Timeouts{}, boundary); err != nil {
+		t.Fatal(err)
+	}
+	get := httptest.NewRequest("GET", "/csrf", nil)
+	get.AddCookie(cookie)
+	gw := httptest.NewRecorder()
+	r.ServeHTTP(gw, get)
+	csrf := gw.Body.String()
+	if csrf == "" {
+		t.Fatal("no csrf")
+	}
+	for _, tc := range []struct {
+		token  string
+		status int
+	}{{"", 403}, {"invalid", 403}, {csrf, 503}} {
+		req := httptest.NewRequest("POST", "/web/stacks/demo/validate", nil)
+		req.AddCookie(cookie)
+		if tc.token != "" {
+			req.Header.Set("X-CSRF-Token", tc.token)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != tc.status {
+			t.Fatalf("csrf guard: got %d want %d", w.Code, tc.status)
+		}
+	}
+}
 
 func TestAttendedWebGuardDeniesLegacyEvaluationAndMutation(t *testing.T) {
 	runner := dill.New("/must-not-execute")
