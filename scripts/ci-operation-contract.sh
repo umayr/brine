@@ -6,19 +6,33 @@ set -euo pipefail
   echo 'Requires explicitly isolated disposable Linux execution; no Mac candidate execution' >&2
   exit 2
 }
-readonly commit=b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
+readonly profile=${BRINE_OPERATION_CANDIDATE_PROFILE:-legacy-b3}
+case "$profile" in
+  legacy-b3)
+    readonly commit=b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
+    readonly tree=cc545129c5a178cd07fa97b9e7827f74fe624866 ;;
+  preflight-main-2d48)
+    readonly commit=2d48de89947c1bec0c4e305b6d05e9172cfdaecd
+    readonly tree=5a4b96b8410be7f852bfcb09f80ddb48469c72e2 ;;
+  *) echo 'Unknown operation candidate profile' >&2; exit 2 ;;
+esac
 readonly schema_sha=b34206d0622fc6c1aa99d5edefb9b6d4b01232635756d2c67fb135161f8db345
 brine=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-candidate=${BRINE_OPERATION_CANDIDATE_REPO:?absolute exact-b3 source checkout required}
+candidate=${BRINE_OPERATION_CANDIDATE_REPO:?absolute exact pinned source checkout required}
 [[ $candidate = /* ]] || { echo 'Candidate path must be absolute' >&2; exit 1; }
 check_source() {
-  [[ $(git -C "$candidate" rev-parse HEAD) == "$commit" && -z $(git -C "$candidate" status --porcelain --untracked-files=all) ]] || {
-    echo 'Dill source is not exact clean b3 (no release/source SHA substitution)' >&2; exit 1;
+  [[ $(git -C "$candidate" rev-parse HEAD) == "$commit" && $(git -C "$candidate" rev-parse 'HEAD^{tree}') == "$tree" && -z $(git -C "$candidate" status --porcelain --untracked-files=all) ]] || {
+    echo 'Dill source is not the exact clean pinned profile (no release/tree/source SHA substitution)' >&2; exit 1;
   }
   [[ $(sha256sum "$candidate/dill.pkl" | awk '{print $1}') == "$schema_sha" ]] || { echo 'Candidate schema hash mismatch' >&2; exit 1; }
   for name in manifest success failure unsupported-operation unsupported-version qualified-success qualified-cleanup-failure; do
     cmp "$candidate/internal/operation/testdata/$name.json" "$brine/internal/dill/testdata/operation-v1/$name.json"
   done
+  if [[ $profile = preflight-main-2d48 ]]; then
+    for name in apply-mismatch argv canonical-vectors capabilities-supported capabilities-unsupported manifest negative-wire-cases preview-down-absent preview-empty-start preview-invalid-contract preview-limit-failure preview-metadata-unknown preview-up-config-noop preview-up-create preview-up-recreate; do
+      cmp "$candidate/internal/preflight/testdata/$name.json" "$brine/internal/dill/testdata/preflight-v1/$name.json"
+    done
+  fi
 }
 check_source
 # Nothing is copied from real HOME: fresh evaluator, registry and build homes.
@@ -61,13 +75,19 @@ printf 'Operation candidate commit: %s\nSchema SHA-256: %s\nBinary SHA-256: %s\n
 (cd "$brine" && env -i "${clean_env[@]}" \
   BRINE_OPERATION_CANDIDATE="$binary" BRINE_OPERATION_CANDIDATE_SHA256="$checksum" \
   BRINE_OPERATION_CANDIDATE_REPO="$candidate" BRINE_OPERATION_PKL="$base/pkl" \
+  BRINE_OPERATION_CANDIDATE_PROFILE="$profile" \
   "$go_bin" test ./internal/dill -count=1 -v -timeout=5m \
   -run '^TestOperationContract' ) | tee "$base/results.log"
 if grep -q -- '--- SKIP:' "$base/results.log"; then echo 'Selected contract test skipped; no positive evidence' >&2; exit 1; fi
-for name in PinnedFixtureIntegrity ConsumerFixtures ConsumerCapabilities CandidateProcess; do
+for name in CandidatePins PinnedFixtureIntegrity ConsumerFixtures ConsumerCapabilities CandidateProcess; do
   grep -F -- "--- PASS: TestOperationContract$name " "$base/results.log" >/dev/null || {
     echo "Missing required contract pass: $name" >&2; exit 1;
   }
 done
 check_source
-echo 'PASS: Brine consumer + exact b3 CLI read-only synthetic compatibility only; native engine/app/browser NOT RUN'
+if [[ $profile = preflight-main-2d48 ]]; then
+  grep -F -- '--- PASS: TestOperationContractCandidateProcess/preflight-discovery ' "$base/results.log" >/dev/null || {
+    echo 'Missing actual successor preflight discovery pass' >&2; exit 1;
+  }
+fi
+printf 'PASS: Brine consumer + exact %s CLI read-only synthetic compatibility only; native engine/app/browser NOT RUN\n' "$profile"

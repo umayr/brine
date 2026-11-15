@@ -30,10 +30,15 @@ import (
 func TestOperationContractCandidateProcess(t *testing.T) {
 	binary := os.Getenv("BRINE_OPERATION_CANDIDATE")
 	if binary == "" {
-		t.Skip("exact b3 Linux process compatibility NOT RUN: set BRINE_OPERATION_CANDIDATE via ci-operation-contract.sh")
+		t.Skip("exact pinned Linux process compatibility NOT RUN: set BRINE_OPERATION_CANDIDATE via ci-operation-contract.sh")
 	}
 	if runtime.GOOS != "linux" {
 		t.Fatal("candidate process tests require isolated Linux, not native Mac execution")
+	}
+	profile := os.Getenv("BRINE_OPERATION_CANDIDATE_PROFILE")
+	expectedCommit, expectedTree, ok := operationContractCandidatePin(profile)
+	if !ok {
+		t.Fatal("unreviewed operation candidate profile")
 	}
 	repo := os.Getenv("BRINE_OPERATION_CANDIDATE_REPO")
 	pkl := os.Getenv("BRINE_OPERATION_PKL")
@@ -58,14 +63,18 @@ func TestOperationContractCandidateProcess(t *testing.T) {
 	for _, s := range info.Settings {
 		settings[s.Key] = s.Value
 	}
-	if settings["vcs.revision"] != operationCandidateCommit || settings["vcs.modified"] != "false" {
-		t.Fatal("binary is not exact clean b3 source")
+	if settings["vcs.revision"] != expectedCommit || settings["vcs.modified"] != "false" {
+		t.Fatal("binary is not exact clean pinned source")
 	}
 	checkSource := func() {
 		t.Helper()
 		head, e := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
-		if e != nil || strings.TrimSpace(string(head)) != operationCandidateCommit {
+		if e != nil || strings.TrimSpace(string(head)) != expectedCommit {
 			t.Fatal("candidate source commit mismatch")
+		}
+		tree, e := exec.Command("git", "-C", repo, "rev-parse", "HEAD^{tree}").Output()
+		if e != nil || strings.TrimSpace(string(tree)) != expectedTree {
+			t.Fatal("candidate source tree mismatch")
 		}
 		status, e := exec.Command("git", "-C", repo, "status", "--porcelain", "--untracked-files=all").Output()
 		if e != nil || len(bytes.TrimSpace(status)) != 0 {
@@ -169,6 +178,28 @@ func TestOperationContractCandidateProcess(t *testing.T) {
 			t.Fatalf("actual Linux b3 discovery failed: %v", err)
 		}
 	})
+	if profile == "preflight-main-2d48" {
+		t.Run("preflight-discovery", func(t *testing.T) {
+			if err := r.checkPreflightCapabilities(ctx); err != nil {
+				t.Fatal("actual successor preflight discovery rejected")
+			}
+			data, exit, err := r.operationCapture(ctx, 8192, "preflight-capabilities", "--format", "json")
+			if err != nil || exit == nil || *exit != 0 {
+				t.Fatal("actual successor discovery did not exit successfully")
+			}
+			fixture, err := os.ReadFile(filepath.Join("testdata", "preflight-v1", "capabilities-supported.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var frozen struct {
+				Stdout json.RawMessage `json:"stdout"`
+			}
+			var actual, expected any
+			if json.Unmarshal(fixture, &frozen) != nil || json.Unmarshal(frozen.Stdout, &expected) != nil || json.Unmarshal(data, &actual) != nil || !reflect.DeepEqual(actual, expected) {
+				t.Fatal("actual successor wire capabilities differ from frozen stdout")
+			}
+		})
+	}
 	for _, name := range []string{"unsupported-operation.json", "unsupported-version.json", "success.json", "failure.json"} {
 		t.Run(name, func(t *testing.T) {
 			f := operationFixture(t, name)
@@ -293,5 +324,5 @@ func TestOperationContractCandidateProcess(t *testing.T) {
 	if !sawInspect || !sawList {
 		t.Fatal("positive plan never reached real Docker SDK synthetic HTTP reads")
 	}
-	t.Log("actual clean-b3 CLI and Brine consumer discovery/validate/plan/diff passed over synthetic Unix HTTP; no real engine, mutation, native qualification, app/browser acceptance")
+	t.Logf("actual clean pinned %s CLI and Brine consumer discovery/validate/plan/diff passed over synthetic Unix HTTP; no real engine, mutation, native qualification, app/browser acceptance", expectedCommit)
 }
