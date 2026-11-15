@@ -360,8 +360,10 @@ func (r *Request) update(change func(*Record) error) error {
 	}
 	// Keep typed known axes in memory even if the prior durable record became
 	// unreadable or a previous write failed. Never reinterpret this as success.
-	_, loadErr := s.load(r.id)
-	if s.failed || loadErr != nil || s.save(current) != nil {
+	durable, loadErr := s.load(r.id)
+	lastBytes, _ := json.Marshal(r.last)
+	durableBytes, _ := json.Marshal(durable)
+	if s.failed || loadErr != nil || !bytes.Equal(lastBytes, durableBytes) || s.save(current) != nil {
 		s.failed = true
 		current.Persistence = "failed_inspect"
 		current.Reason = "history_failure_requires_inspection"

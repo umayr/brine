@@ -120,6 +120,52 @@ func TestPersistenceFaultsPreserveKnownReceiptAndBlockNewRequest(t *testing.T) {
 		t.Fatalf("invented durable completion: %+v %v", durable, e)
 	}
 }
+func TestV1UpdateRejectsChangedCanonicalDurableRecord(t *testing.T) {
+	for name, mutate := range map[string]func(*Record){
+		"actor":    func(r *Record) { r.Actor = Digest("other actor") },
+		"selector": func(r *Record) { r.SelectorDigest = Digest("other selector") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, d := testStore()
+			r, err := s.Begin(testIntent())
+			if err != nil || r.Started() != nil {
+				t.Fatal("setup", err)
+			}
+			durable, err := s.Get(r.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(&durable)
+			changed, err := json.Marshal(durable)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := decode(changed); err != nil {
+				t.Fatal("positive canonical mutation", err)
+			}
+			d.files[r.ID()+".json"] = changed
+			if r.Terminal(terminal(true)) == nil {
+				t.Fatal("overwrote changed record")
+			}
+			if string(d.files[r.ID()+".json"]) != string(changed) {
+				t.Fatal("modified uncertain durable record")
+			}
+			known, err := s.Get(r.ID())
+			if err != nil || known.Persistence != "failed_inspect" || known.Invocation == nil || known.Invocation.Receipt.Outcome != "succeeded" {
+				t.Fatal("known observation lost", err)
+			}
+			known.Invocation.Receipt.Outcome = "unknown"
+			again, err := s.Get(r.ID())
+			if err != nil || again.Invocation.Receipt.Outcome != "succeeded" {
+				t.Fatal("overlay alias", err)
+			}
+			if _, err := s.Begin(testIntent()); err == nil {
+				t.Fatal("poisoned store admitted new intent")
+			}
+		})
+	}
+}
+
 func TestIntentFaultHasNoAcceptedRequestAndStartedFaultFails(t *testing.T) {
 	s, d := testStore()
 	d.fail = true
