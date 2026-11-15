@@ -1,4 +1,4 @@
-# Qualified Alpha operation consumer — candidate b3
+# Qualified Alpha operation consumer — b3 compatibility and accepted successor
 
 This implements Brine #66's bounded **attended CLI consumer**, not #67 durable
 review/source approval, #68 deployment security qualification or #69 native
@@ -12,9 +12,46 @@ mutation stream and adds authenticated GET by Brine request ID. It requires expl
 `--operation-state-dir`, is source **UNBOUND**, and does not expand these qualification
 claims or enable any action. Outside that opt-in the behavior below is unchanged.
 
-## Exact candidate and trust boundary
+## Accepted successor and compatibility boundary
 
-The reviewed Dill candidate is main
+The accepted provider successor is Dill main
+`2d48de89947c1bec0c4e305b6d05e9172cfdaecd` (tree
+`5a4b96b8410be7f852bfcb09f80ddb48469c72e2`), independently received against
+exact-main CI `43666038516` and disposable qualification `43666204662`.
+Docker passed all 30 required Dill-side cases; Podman remains unqualified
+(11 passed / 19 blocked). This is **not Brine source or application qualification**.
+
+Exact Linux amd64 accepted supply:
+
+- Docker artifact `14143195067`, ZIP SHA256
+  `3cbf172ed1b5e802ebe615bba38a9022ee9b17849824357a21831df0386b43bc`,
+  official expiry `2026-11-29T02:16:09Z`.
+- Binary SHA256 `5338c665f0ca710dd6fbc3f0da71db836d73ad9954ff9880a593406e203b72d7`.
+- Handoff v2 tar SHA256
+  `274620193c7d71cf391f9f064ad539ae3ec0ab8edef299ef7ccd07321e3f579c`;
+  manifest SHA256
+  `c63c895d968db91432199d12b2617bac5c36b97b08007a995cd9c1fb44db96d6`.
+
+The pinned synthetic CI matrix preserves `legacy-b3` and adds the closed
+`preflight-main-2d48` selector. Each builds its exact clean source commit/tree
+and checks the same unchanged operation fixtures. Only the successor also
+checks actual offline preflight discovery against the frozen wire object.
+These are **source-built read-only synthetic compatibility tests**, not execution
+of the accepted artifact, native engine qualification, source-boundary proof or
+permission to enable the dormant attended controller. Unknown selectors fail;
+neither branch names nor a same-tree PR commit substitute for the main pin.
+The separate Dill input preparer must explicitly support evidence/handoff v2;
+the old b3/v1 entrypoint is not silently reinterpreted or switched.
+
+No artifact is automatically downloaded or installed by Brine. Artifact expiry
+is an input-receiving bound, not an invitation to use a different or latest run.
+The bundled/released Dill v0.7.0 and legacy secret CI pins remain unchanged.
+Source execution and actual app qualification stay disabled pending their own
+evidence and integration; the original Pkl audit is deferred, not waived.
+
+## Historical b3 candidate and trust boundary
+
+The prior reviewed Dill candidate is main
 `b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2` (tree
 `cc545129c5a178cd07fa97b9e7827f74fe624866`). The Linux amd64 binary SHA256 is
 `3acea65d4121402194787bb0bdccc20a79c725e1ee5bb2337cc5b33b16e12d51`;

@@ -12,8 +12,38 @@ import (
 	"testing"
 )
 
-const operationCandidateCommit = "b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2"
 const operationCandidateSchemaSHA = "b34206d0622fc6c1aa99d5edefb9b6d4b01232635756d2c67fb135161f8db345"
+
+// These pins select source-built synthetic compatibility only, not executable
+// installation, artifact verification, source qualification or engine authority.
+func operationContractCandidatePin(profile string) (commit, tree string, ok bool) {
+	switch profile {
+	case "", "legacy-b3":
+		return "b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2", "cc545129c5a178cd07fa97b9e7827f74fe624866", true
+	case "preflight-main-2d48":
+		return "2d48de89947c1bec0c4e305b6d05e9172cfdaecd", "5a4b96b8410be7f852bfcb09f80ddb48469c72e2", true
+	default:
+		return "", "", false
+	}
+}
+
+func TestOperationContractCandidatePins(t *testing.T) {
+	for _, row := range []struct{ profile, commit, tree string }{
+		{"", "b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2", "cc545129c5a178cd07fa97b9e7827f74fe624866"},
+		{"legacy-b3", "b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2", "cc545129c5a178cd07fa97b9e7827f74fe624866"},
+		{"preflight-main-2d48", "2d48de89947c1bec0c4e305b6d05e9172cfdaecd", "5a4b96b8410be7f852bfcb09f80ddb48469c72e2"},
+	} {
+		commit, tree, ok := operationContractCandidatePin(row.profile)
+		if !ok || commit != row.commit || tree != row.tree {
+			t.Fatalf("wrong closed commit/tree pin for %q", row.profile)
+		}
+	}
+	for _, profile := range []string{"main", "b3", "v0.7.0", "e9de3035f9768bf039c4c60ebc1f0a786731a599", " preflight-main-2d48", "preflight-main-2d48\n", "unreviewed"} {
+		if commit, tree, ok := operationContractCandidatePin(profile); ok || commit != "" || tree != "" {
+			t.Fatalf("unreviewed candidate selector accepted: %q", profile)
+		}
+	}
+}
 
 // Independent hashes bind every public source fixture, including the manifest.
 // Fixture expected statuses are decoder inputs, NEVER process execution evidence.
