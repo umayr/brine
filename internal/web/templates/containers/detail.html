@@ -39,13 +39,9 @@
         <div><a href="/stacks/{{.Container.Stack}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Container.Stack}}</a></div>
       </div>
       {{end}}
-      <div>
-        <div class="field-label mb-1">Labels</div>
-        <div class="font-mono text-xs text-muted">{{len .Container.Labels}}</div>
-      </div>
     </div>
 
-    <div class="flex gap-2">
+    <div class="flex flex-wrap gap-2">
       <button class="ui-button ui-button-primary ui-button-sm gap-1.5"
         hx-post="/web/containers/{{.Container.ID}}/start"
         hx-target="#container-state"
@@ -101,8 +97,8 @@
         {{if .Container.Labels}}
         <div class="space-y-2">
           {{range $key, $value := .Container.Labels}}
-          <div class="grid grid-cols-[12rem_1fr] gap-3 font-mono text-xs">
-            <div class="text-dim truncate" title="{{$key}}">{{$key}}</div>
+          <div class="grid grid-cols-2 gap-3 font-mono text-xs">
+            <div class="text-dim break-all">{{$key}}</div>
             <div class="text-muted break-all">{{$value}}</div>
           </div>
           {{end}}
@@ -116,12 +112,12 @@
 
   <!-- Logs -->
   <div class="rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
-    <div class="terminal-header flex items-center justify-between px-4 py-2">
+    <div class="terminal-header flex flex-wrap items-center justify-between gap-2 px-4 py-2">
       <div class="flex items-center gap-2">
         <span class="font-mono text-xs">logs — {{.Container.Name}}</span>
         <span id="log-status" class="ui-status ui-status-queued ui-status-xs font-mono">connecting</span>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3">
         <label class="flex items-center gap-1.5">
           <span class="text-xs text-muted">filter</span>
           <input id="log-filter" type="search" class="ui-input ui-input-xs font-mono" placeholder="Filter logs">
