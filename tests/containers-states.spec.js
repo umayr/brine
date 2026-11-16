@@ -1,6 +1,17 @@
 const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('container detail keeps labels and log controls usable on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto(new URL('/containers/grafana', baseURL).href);
+  await expect(page.getByRole('heading', { name: 'Labels' })).toBeVisible();
+  await expect(page.getByText('dill.stack', { exact: true })).toBeVisible();
+  await expect(page.getByRole('searchbox', { name: 'filter' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'reload' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+});
+
 test('container inventory loading, empty, request failure and retry', async ({ page }) => {
   let release;
   const pending = new Promise(resolve => { release = resolve; });
