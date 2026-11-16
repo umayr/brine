@@ -5,6 +5,11 @@ test('read-only project preview retains stack controls and explains its boundari
   await page.goto(`${base}/stacks/media`);
   const section = page.locator('#project-preview');
   await expect(section).toContainText('contents can contain secrets');
+  await expect(section.getByText('Preview project file names and sizes.', { exact: false })).toBeVisible();
+  const details = section.locator('details');
+  await expect(details).not.toHaveAttribute('open', '');
+  await section.getByText('Preview scope and limits', { exact: true }).click();
+  await expect(details).toHaveAttribute('open', '');
   for (const warning of ['.git are omitted', 'Symlinks and special files are rejected', 'Ignored, untracked and hidden files are included', '.gitignore is not honored', '.env and keys may be included', 'hard links', 'mounted subdirectories', 'not detected or filtered', 'root ancestors', 'same user must be trusted', 'not a filesystem sandbox', 'Empty directories and file modes are not preserved', 'not an atomic snapshot', 'does not transfer files or authorize deployment']) await expect(section).toContainText(warning);
   await section.getByRole('button', { name: 'Preview project files' }).click();
   await expect(section.locator('#project-preview-result')).toContainText('bytes');
