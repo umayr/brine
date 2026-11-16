@@ -1,0 +1,36 @@
+const { test, expect } = require('@playwright/test');
+const base = process.env.BRINE_STAGING_BASE_URL;
+
+test('attended transfer reviews captured bytes before a separate confirmation', async ({ page }) => {
+  test.skip(!base, 'synthetic staging fixture not configured');
+  await page.goto(`${base}/login`);
+  await page.locator('input[name="user"]').fill('admin');
+  await page.locator('input[name="password"]').fill('fixture-only-not-a-secret');
+  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.goto(`${base}/stacks/homepage`);
+  const audit = async () => (await (await page.request.get(`${base}/fixture-staging-audit`)).json()) || [];
+  const before = (await audit()).length;
+  await page.getByRole('button', { name: 'Prepare local transfer review' }).click();
+  const review = page.locator('#staging-result');
+  await expect(review).toContainText('No bytes have been sent');
+  await expect(review).toContainText('fixture-target');
+  await expect(review).toContainText('captured source root:');
+  await expect(review).toContainText('local stack');
+  await expect(review).toContainText('compose.pkl');
+  await expect(review).toContainText('may contain secrets');
+  await expect(review).toContainText('BRINE_VAR_APP_DOMAIN');
+  expect((await audit()).length).toBe(before);
+  await page.getByRole('button', { name: 'Confirm and transfer these captured bytes' }).click();
+  await expect(review).toContainText('Snapshot staged (transfer only)');
+  const calls = await audit();
+  expect(calls.length).toBe(before + 1);
+  const file = calls.at(-1).files.find(f => f.path === 'compose.pkl');
+  expect(Buffer.from(file.bytes, 'base64').toString()).toBe('amends "package://pkg.ushd.ca/dill@0.4.0#/dill.pkl"\n\nconfig {\n  name = "homepage"\n  engine = "docker"\n}\n');
+  await expect(page.getByRole('button', { name: 'Variables', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Prepare local transfer review' }).click();
+  await expect(review).toContainText('No bytes have been sent');
+  await page.route('**/web/stacks/homepage/staging/confirm', route => route.abort());
+  await page.getByRole('button', { name: 'Confirm and transfer these captured bytes' }).click();
+  await expect(review).toContainText('Transfer outcome unknown');
+  await expect(review).toContainText('Do not retry');
+});

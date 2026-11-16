@@ -1,0 +1,46 @@
+{{template "layout.html" .}}
+{{define "title"}}Variables — Brine{{end}}
+{{define "header"}}Variables{{end}}
+{{define "content"}}
+<div class="variables-page">
+  <div class="index-heading">
+    <div>
+      <span class="section-code">CONFIGURATION</span>
+      <h1>Variables</h1>
+      <p class="text-muted text-sm mt-2">Shared configuration values available to every stack.</p>
+    </div>
+  </div>
+
+  <div class="variables-content">
+    <div class="ui-notice ui-notice-warning" role="note"><span><strong>Not for secrets.</strong> Values are stored on disk and may appear in plans, diagnostics and container inspection. Do not enter passwords or tokens.</span></div>
+    {{if .Disabled}}<div role="alert" class="ui-notice ui-notice-warning"><span>Variables are unavailable for Alpha and strict secret operations. Saved values are not supplied to those operations.</span></div>{{end}}
+    {{if .Error}}<div role="alert" class="ui-notice ui-notice-error"><span>{{.Error}}</span></div>{{end}}
+
+    <section class="ui-panel variables-panel" aria-labelledby="shared-variables-title">
+      <div class="variables-panel-header">
+        <div><h2 id="shared-variables-title" class="font-semibold">Shared variables</h2><p class="text-sm text-muted">Stacks inherit these values unless they define an override.</p></div>
+        <span class="ui-status ui-status-neutral">{{len .Values}} shared</span>
+      </div>
+      {{range $name,$value := .Values}}
+      <form method="post" action="/variables" class="variables-row">
+        <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{$name}}">
+        <div class="variables-name"><span class="field-label">Name</span><code>BRINE_VAR_{{$name}}</code></div>
+        <label class="ui-field"><span class="field-label">Value</span><input class="ui-input ui-input-sm font-mono" aria-label="Value for {{$name}}" name="value" value="{{$value}}" {{if $.Disabled}}disabled{{end}}></label>
+        <div class="variables-actions"><button class="ui-button ui-button-outline ui-button-sm" name="action" value="save" {{if $.Disabled}}disabled{{end}}>Save</button><button class="ui-button ui-button-ghost ui-button-sm" name="action" value="delete" aria-label="Delete {{$name}}" {{if $.Disabled}}disabled{{end}}>Delete</button></div>
+      </form>
+      {{else}}<div class="variables-empty"><p>No shared variables yet.</p><p class="text-sm text-muted">Add one below to make it available to your stacks.</p></div>{{end}}
+    </section>
+
+    <section class="ui-panel variables-panel" aria-labelledby="add-variable-title">
+      <div class="variables-panel-header"><div><h2 id="add-variable-title" class="font-semibold">Add a shared variable</h2><p class="text-sm text-muted">Use uppercase letters, numbers and underscores.</p></div></div>
+      <form method="post" action="/variables" class="variables-add-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <label class="ui-field"><span class="ui-label-text">Name</span><input class="ui-input font-mono" name="name" required pattern="[A-Z][A-Z0-9_]{0,63}" placeholder="APP_DOMAIN" {{if .Disabled}}disabled{{end}}><span class="ui-label-hint">Do not include the BRINE_VAR_ prefix.</span></label>
+        <label class="ui-field"><span class="ui-label-text">Value</span><input class="ui-input font-mono" name="value" placeholder="example.test" {{if .Disabled}}disabled{{end}}></label>
+        <button class="ui-button ui-button-primary" name="action" value="save" {{if .Disabled}}disabled{{end}}>Add variable</button>
+      </form>
+    </section>
+    <p class="variables-help text-sm text-muted">Read a value in Pkl with <code>read("env:BRINE_VAR_APP_DOMAIN")</code>. Changes take effect on the next operation; re-plan before deploying.</p>
+  </div>
+</div>
+{{end}}

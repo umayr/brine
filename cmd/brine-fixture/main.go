@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -12,7 +13,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +23,8 @@ import (
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/config"
+	"github.com/umayr/brine/internal/configvars"
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/git"
@@ -32,6 +37,7 @@ func main() {
 	port := flag.String("port", "18082", "localhost port")
 	withAuth := flag.Bool("auth", false, "enable disposable admin login (fixture-only-not-a-secret)")
 	syntheticAttended := flag.Bool("synthetic-attended", false, "Linux-only synthetic attended test fixture; no qualification or real execution")
+	syntheticStaging := flag.Bool("synthetic-staging", false, "enable disposable fake local snapshot staging fixture")
 	flag.Parse()
 	dir, err := os.MkdirTemp("", "brine-ui-fixture-")
 	if err != nil {
@@ -52,9 +58,29 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	// Exercise receiver-incompatible filenames through the real preview handler.
+	if err := os.WriteFile(filepath.Join(dir, "stacks", "media", "<unsafe>.txt"), []byte("fixture"), 0600); err != nil {
+		log.Fatal(err)
+	}
 	fixtureStacks := &fixtureStore{StackStore: st}
 	eng := &fixtureEngine{}
 	runner := dill.New("/nonexistent-brine-fixture-dill")
+	variables, err := configvars.New(dir, fixtureStacks)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, item := range []struct{ stack, name, value string }{
+		{"", "APP_DOMAIN", "example.test"}, {"", "TIMEZONE", "UTC"},
+		{"homepage", "APP_DOMAIN", "homepage.example.test"},
+	} {
+		if err := variables.Set(item.stack, item.name, item.value, false); err != nil {
+			log.Fatal(err)
+		}
+	}
+	runner.Variables = variables
+	if *syntheticStaging {
+		*withAuth = true
+	}
 	if *syntheticAttended {
 		if err := prepareSyntheticRunner(runner); err != nil {
 			log.Fatal(err)
@@ -68,16 +94,46 @@ func main() {
 		log.Fatal(err)
 	}
 	r := chi.NewRouter()
+	var stagingMu sync.Mutex
+	var stagingBodies []json.RawMessage
+	var stagingSocket string
+	if *syntheticStaging {
+		stagingSocket = filepath.Join(dir, "staging.sock")
+		listener, err := net.Listen("unix", stagingSocket)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fake := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/v1/health":
+				io.WriteString(w, `{"api_version":"v1","capabilities":["health","status","snapshot-staging"]}`)
+			case "/v1/status":
+				io.WriteString(w, `{"stack":"homepage","engine":"docker","containers":[]}`)
+			case "/v1/snapshots":
+				b, _ := io.ReadAll(r.Body)
+				stagingMu.Lock()
+				stagingBodies = append(stagingBodies, b)
+				stagingMu.Unlock()
+				w.WriteHeader(201)
+				io.WriteString(w, `{"status":"staged","stage_id":"0123456789abcdef0123456789abcdef"}`)
+			default:
+				http.NotFound(w, r)
+			}
+		})}
+		go fake.Serve(listener)
+		defer fake.Close()
+	}
 	// Fixture mode is read-only for infrastructure/API/HTMX. Optional auth
 	// permits only local login/logout POSTs, never lifecycle mutations.
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			loginOnly := *withAuth && r.Method == http.MethodPost && (r.URL.Path == "/login" || r.URL.Path == "/logout")
+			stagingOnly := *syntheticStaging && r.Method == http.MethodPost && (r.URL.Path == "/web/stacks/homepage/staging/prepare" || r.URL.Path == "/web/stacks/homepage/staging/confirm")
 			attendedOnly := *syntheticAttended && r.Method == http.MethodPost && (r.URL.Path == "/api/stacks/observability/operations/preview" || r.URL.Path == "/api/stacks/observability/up")
 			if *syntheticAttended {
 				w.Header().Set("X-Brine-Fixture", "synthetic-attended-no-qualification")
 			}
-			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !attendedOnly {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !attendedOnly && !stagingOnly {
 				http.Error(w, "fixture is read-only", http.StatusMethodNotAllowed)
 				return
 			}
@@ -85,11 +141,26 @@ func main() {
 		})
 	})
 	r.Use(authn.Middleware)
+	if *syntheticStaging {
+		r.Get("/fixture-staging-audit", func(w http.ResponseWriter, r *http.Request) {
+			stagingMu.Lock()
+			defer stagingMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(stagingBodies)
+		})
+	}
 	r.Get("/login", authn.HandleLogin)
 	r.Post("/login", authn.HandleLogin)
 	r.Post("/logout", authn.HandleLogout)
 	timeouts := httpx.Timeouts{Default: 30 * time.Second, Lifecycle: 30 * time.Second}
 	webHandler := web.New(ag, fixtureStacks, rs, gr, "docker", true, authn, 30*time.Second)
+	if *syntheticStaging {
+		cfg := config.Default()
+		cfg.StagingSocket = stagingSocket
+		cfg.StagingIdentity = "fixture-target"
+		webHandler.EnableLocalStaging(cfg)
+		defer webHandler.CloseStaging()
+	}
 	if *syntheticAttended {
 		cleanup, err := mountSyntheticAttended(r, ag, runner, fixtureStacks, rs, gr, webHandler, timeouts, dir)
 		if err != nil {
@@ -125,6 +196,10 @@ func (s *fixtureStore) Get(name string) (*store.Stack, error) {
 	stack, err := s.StackStore.Get(name)
 	if err != nil {
 		return nil, err
+	}
+	// A synthetic Git-backed view exercises Git panel controls without a remote.
+	if name == "media" {
+		stack.Git = &store.GitSource{URL: "https://example.invalid/fixture.git", Branch: "main"}
 	}
 	return s.timestamp(stack), nil
 }

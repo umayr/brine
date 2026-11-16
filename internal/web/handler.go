@@ -9,22 +9,28 @@ import (
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
+	"github.com/umayr/brine/internal/projectreview"
 	"github.com/umayr/brine/internal/store"
 )
 
 // Handler holds shared dependencies for all web handlers.
 type Handler struct {
-	attended      *api.AttendedContext
-	agent         agent.Agent
-	store         store.StackStore
-	recipes       store.RecipeStore
-	git           *git.Runner
-	auth          *auth.Authenticator
-	dev           bool // read templates and static files from the source tree
-	devFS         fs.FS
-	engine        string
-	deployTimeout time.Duration
+	attended         *api.AttendedContext
+	agent            agent.Agent
+	store            store.StackStore
+	recipes          store.RecipeStore
+	git              *git.Runner
+	auth             *auth.Authenticator
+	dev              bool // read templates and static files from the source tree
+	devFS            fs.FS
+	engine           string
+	deployTimeout    time.Duration
+	stagingConfig    *config.Config
+	stagingStore     *projectreview.Store
+	stagingAdmission chan struct{}
+	stagingLifecycle *stagingLifecycle
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)

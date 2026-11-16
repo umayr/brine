@@ -77,6 +77,8 @@ type stackNewData struct {
 
 type stackDetailData struct {
 	pageData
+	StagingEnabled  bool
+	Variables       stackVariablesData
 	GitRevision     string
 	GitState        string
 	Stack           *store.Stack

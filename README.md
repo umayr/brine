@@ -36,6 +36,34 @@ with `--operation-state-dir`: existing mutation streaming plus authenticated GET
 not a queue or immutable source approval. Native app qualification is **NOT RUN**;
 legacy behavior outside this opt-in is unchanged.
 
+## Configuration variables
+
+In the legacy profile, use **Variables** in the sidebar for values common to
+stacks. Each stack page shows inherited values and lets you add stack-specific
+values. Stack values win over shared values with the same name. These are **non-secret configuration**:
+values are stored on disk and can appear in Pkl output, plans, diagnostics, and
+container inspection. Do not store credentials or other sensitive values here.
+
+Names are uppercase letters, digits, and underscores, beginning with a letter.
+Enter the short name `APP_DOMAIN` in the UI, and read the namespaced value in Pkl:
+
+```pkl
+local domain = read("env:BRINE_VAR_APP_DOMAIN")
+local logLevel = read?("env:BRINE_VAR_LOG_LEVEL") ?? "info"
+// Example use: ["PUBLIC_URL"] = "https://\(domain)"
+```
+
+Variables are passed only to stack-scoped legacy Dill invocations; they are not
+added to Brine's own environment. Qualified Alpha and strict secret operations
+do not receive them and the variable editor is disabled in those modes. Saving
+or deleting a variable does not redeploy: the next operation uses the current
+values. A change between plan and deploy can change the outcome; re-plan after
+any variable change. Background Git auto-deploy, when enabled in legacy mode,
+uses current values. Global variables are visible to every legacy stack; they are
+not an isolation or authorization mechanism. Back up the private Brine data
+directory if these settings must be retained. One Brine process must own a data
+directory; cross-process variable writes are not coordinated.
+
 ## Requirements
 
 - Go 1.26+ to build from source
@@ -160,6 +188,8 @@ local processes and non-browser clients can still control it.
 | `--profile` | | `legacy` | `alpha` requires auth and an explicit local socket; unqualified engine writes are blocked, except pinned stack stop/down cleanup. See [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
 | `--dill` | | `dill` | Operator-selected Dill binary; bundled v0.7.0 is incompatible with qualified operations |
+| `--staging-socket` | | unset | Opt-in absolute local dill-serve Unix socket; requires `--staging-identity` and authentication |
+| `--staging-identity` | | unset | Stable operator-asserted local staging target identifier; not receiver attestation |
 | `--coordination-state-dir` | | unset | Preexisting canonical shared operator-owned 0700 state outside Brine data; no auto-provisioning |
 | `--coordination-layout` | | unset | Explicit native Linux Docker assertion: `native-local-docker-v1` only |
 | `--coordination-daemon-id` | | unset | Independently provisioned expected daemon ID, never learned from the selected socket |
@@ -173,6 +203,36 @@ local processes and non-browser clients can still control it.
 | `--deploy-timeout` | | `30m` | Timeout for deploy/teardown/git commands |
 | `--dev` | | `false` | Re-parse templates on every request |
 | `--version` | | | Print the version |
+
+## Local snapshot staging
+
+With both staging flags configured, an authenticated browser session can prepare a
+complete immutable project snapshot review, then separately confirm a one-shot
+transfer to the local Unix socket. The receiver must advertise the provisional
+snapshot-staging capability and match the selected stack and engine. Unix socket
+access control is the trust boundary; the asserted identity does not attest the
+receiver. Remote/SSH staging is unsupported. The Alpha attended web boundary
+continues to deny these POSTs.
+
+Snapshots may contain sensitive files, including ignored files and keys; the file
+list is not a secret scanner. Only transfer occurs, never evaluation or deployment.
+Existing secret and downgrade guards remain mandatory for any later operation.
+Reviews show the captured source root and are held in memory for up to five
+minutes, bounded to eight reviews and 64 MiB, and invalidated by restart.
+In-app variable writes are serialized with final consent and transfer. The source
+root is not a filesystem sandbox: external writers and trusted ancestors remain
+outside that coordination. Variable and session lease waits are cancellable.
+Staging admission is limited to eight requests: the shared legacy stack lock
+itself cannot be interrupted, so a cancelled waiter may remain until that lock is
+released, but is checked before further work. Logout prevents a confirmation that
+has not acquired its submission lease; that lease may be acquired just before the
+physical POST, and once it wins, logout waits for the network operation and cannot
+recall an already-started upload. Shutdown cancels staging requests and closes
+the review store. It is serialized with the submission decision: shutdown winning
+first prevents a POST, including during receiver negotiation; if submission wins,
+cancellation cannot recall an already-started POST and its outcome may be unknown.
+If transfer outcome is unknown, do not retry: inspect the receiver before
+preparing another review.
 
 ## Isolated Alpha operation
 

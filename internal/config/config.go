@@ -20,6 +20,8 @@ type Config struct {
 	Engine               string // "docker" | "podman"
 	EngineSocket         string // Docker-compatible engine host/socket, e.g. unix:///var/run/docker.sock
 	DillBin              string // path to dill binary
+	StagingSocket        string // opt-in local dill-serve Unix socket
+	StagingIdentity      string // operator-asserted stable target identifier
 	SecretTarget         string // operator-selected target ID, enables strict secret mode with SecretPolicy
 	SecretPolicy         string // absolute operator-controlled policy path
 	SecretPkl            string // optional absolute operator-installed Pkl binary
@@ -66,6 +68,11 @@ func Default() *Config {
 func (c *Config) Validate() error {
 	if err := target.ValidateProfile(c.Profile, c.Engine, c.EngineSocket); err != nil {
 		return err
+	}
+	if c.StagingSocket != "" || c.StagingIdentity != "" {
+		if c.NoAuth || !filepath.IsAbs(c.StagingSocket) || filepath.Clean(c.StagingSocket) != c.StagingSocket || strings.IndexByte(c.StagingSocket, 0) >= 0 || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`).MatchString(c.StagingIdentity) {
+			return fmt.Errorf("local staging requires authentication, an absolute clean Unix socket and a stable target identifier")
+		}
 	}
 	if c.Profile == target.Alpha && c.NoAuth {
 		return fmt.Errorf("Alpha profile requires authentication, including on loopback")

@@ -58,6 +58,10 @@ config {
 }
 
 func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
+	h.stackDetailWithVariableError(w, r, "")
+}
+
+func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Request, variableError string) {
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
@@ -106,6 +110,7 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.render(w, r, "stacks/detail.html", &stackDetailData{
+		StagingEnabled:  h.stagingStore != nil && h.attended == nil,
 		GitRevision:     revision,
 		GitState:        gitState,
 		pageData:        pageData{Page: "stacks"},
@@ -114,6 +119,7 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 		ActiveFile:      activeFile,
 		FileContents:    fileContents,
 		EngineAlignment: h.engineAlignmentFor(stack, fileContents),
+		Variables:       h.stackVariables(name, variableError),
 	})
 }
 

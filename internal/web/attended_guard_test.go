@@ -54,7 +54,7 @@ func TestAttendedWebCookieCSRFDoesNotBypassGuard(t *testing.T) {
 	if csrf == "" {
 		t.Fatal("no csrf")
 	}
-	for _, path := range []string{"/web/stacks/demo/validate", "/web/stacks/demo/fmt", "/web/stacks/demo/git/pull", "/web/containers/id/start", "/web/containers/id/stop", "/web/containers/id/restart", "/web/images/pull", "/web/stacks", "/web/stacks/git"} {
+	for _, path := range []string{"/web/stacks/demo/staging/prepare", "/web/stacks/demo/staging/confirm", "/web/stacks/demo/validate", "/web/stacks/demo/fmt", "/web/stacks/demo/git/pull", "/web/containers/id/start", "/web/containers/id/stop", "/web/containers/id/restart", "/web/images/pull", "/web/stacks", "/web/stacks/git"} {
 		for _, tc := range []struct {
 			token  string
 			status int
