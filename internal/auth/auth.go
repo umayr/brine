@@ -61,9 +61,11 @@ type Authenticator struct {
 }
 
 type session struct {
-	user    string
-	csrf    string
-	expires time.Time
+	// submission serializes logout with the start and completion of an authorized transfer.
+	submission chan struct{}
+	user       string
+	csrf       string
+	expires    time.Time
 }
 
 type attempt struct {
@@ -216,6 +218,12 @@ func Authenticated(r *http.Request) bool {
 	return ok && (info.method == "cookie" || info.method == "bearer")
 }
 
+// CookieAuthenticated reports whether middleware authenticated this request by cookie.
+func CookieAuthenticated(r *http.Request) bool {
+	info, ok := r.Context().Value(ctxKey{}).(requestInfo)
+	return ok && info.method == "cookie" && info.csrf != ""
+}
+
 // Identity returns only the trusted authenticated account name, never credentials.
 func Identity(r *http.Request) string {
 	if !Authenticated(r) {
@@ -304,13 +312,77 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 	_ = sess
 }
 
+// SubmissionLease revalidates the cookie session and serializes a submission
+// with logout. The caller must release it promptly after the network operation.
+// If logout wins first, acquisition fails. If submission wins, logout waits;
+// a network request already started cannot be recalled. No session identifier
+// is returned. A deadline prevents starting work after session expiry.
+func (a *Authenticator) SubmissionLease(r *http.Request) (context.Context, func(), bool) {
+	if a == nil || !a.Enabled() {
+		return nil, nil, false
+	}
+	info, ok := r.Context().Value(ctxKey{}).(requestInfo)
+	if !ok || info.method != "cookie" || info.csrf == "" {
+		return nil, nil, false
+	}
+	cookie, err := r.Cookie(SessionCookie)
+	if err != nil || cookie.Value == "" {
+		return nil, nil, false
+	}
+	a.mu.Lock()
+	sess := a.sessions[cookie.Value]
+	a.mu.Unlock()
+	if sess == nil {
+		return nil, nil, false
+	}
+	select {
+	case <-r.Context().Done():
+		return nil, nil, false
+	case sess.submission <- struct{}{}:
+	}
+	a.mu.Lock()
+	valid := r.Context().Err() == nil && a.sessions[cookie.Value] == sess && a.now().Before(sess.expires) && subtle.ConstantTimeCompare([]byte(info.csrf), []byte(sess.csrf)) == 1
+	a.mu.Unlock()
+	if !valid {
+		<-sess.submission
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithDeadline(r.Context(), sess.expires)
+	return ctx, func() { cancel(); <-sess.submission }, true
+}
+
 // HandleLogout clears the session and redirects to the login page.
 func (a *Authenticator) HandleLogout(w http.ResponseWriter, r *http.Request) {
 	if a != nil {
 		if c, err := r.Cookie(SessionCookie); err == nil {
 			a.mu.Lock()
-			delete(a.sessions, c.Value)
+			sess := a.sessions[c.Value]
 			a.mu.Unlock()
+			if sess != nil {
+				select {
+				case <-r.Context().Done():
+					http.Error(w, "Logout cancelled; session remains active", http.StatusRequestTimeout)
+					return
+				case sess.submission <- struct{}{}:
+				}
+				if r.Context().Err() != nil {
+					<-sess.submission
+					http.Error(w, "Logout cancelled; session remains active", http.StatusRequestTimeout)
+					return
+				}
+				a.mu.Lock()
+				if r.Context().Err() != nil {
+					a.mu.Unlock()
+					<-sess.submission
+					http.Error(w, "Logout cancelled; session remains active", http.StatusRequestTimeout)
+					return
+				}
+				if a.sessions[c.Value] == sess {
+					delete(a.sessions, c.Value)
+				}
+				a.mu.Unlock()
+				<-sess.submission
+			}
 		}
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -371,9 +443,10 @@ func (a *Authenticator) createSession() (string, *session, error) {
 	}
 	id := base64.RawURLEncoding.EncodeToString(idRaw)
 	sess := &session{
-		user:    a.user,
-		csrf:    base64.RawURLEncoding.EncodeToString(csrfRaw),
-		expires: a.now().Add(a.ttl),
+		submission: make(chan struct{}, 1),
+		user:       a.user,
+		csrf:       base64.RawURLEncoding.EncodeToString(csrfRaw),
+		expires:    a.now().Add(a.ttl),
 	}
 	a.mu.Lock()
 	a.pruneLocked()

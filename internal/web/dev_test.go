@@ -75,6 +75,9 @@ func TestDevReloadsTemplatesAndStaticFiles(t *testing.T) {
 		if w.Code != http.StatusOK || w.Body.String() != static {
 			t.Fatalf("static: status %d, body %q, want %q", w.Code, w.Body.String(), static)
 		}
+		if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Fatalf("dev static cache policy: %q", got)
+		}
 	}
 	check("layout:first", "first partial", "first static")
 	write("templates/layout.html", `updated:{{block "body" .}}{{end}}`)
@@ -118,6 +121,9 @@ func TestProductionUsesEmbeddedAssets(t *testing.T) {
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/static/theme.js", nil))
 	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), want) {
 		t.Fatalf("production static assets did not come from embedded FS: status %d", w.Code)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Fatalf("embedded static cache policy: %q", got)
 	}
 }
 

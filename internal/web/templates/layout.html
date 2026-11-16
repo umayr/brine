@@ -7,7 +7,7 @@
   <title>{{block "title" .}}Brine{{end}}</title>
   <script src="/static/theme.js"></script>
   <link href="/static/theme.css" rel="stylesheet">
-  <link href="/static/vendor/app.css" rel="stylesheet">
+  <link href="/static/vendor/app.css?v=stack-panels-4" rel="stylesheet">
   <script src="/static/vendor/htmx.min.js"></script>
   <script src="/static/vendor/htmx-sse.js"></script>
   <script src="/static/vendor/lucide.min.js"></script>
@@ -41,6 +41,10 @@
       <a href="/images" class="nav-item {{if eq .Page "images"}}active{{end}}" {{if eq .Page "images"}}aria-current="page"{{end}}>
         <i data-lucide="disc-3" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         Images
+      </a>
+      <a href="/variables" class="nav-item {{if eq .Page "variables"}}active{{end}}" {{if eq .Page "variables"}}aria-current="page"{{end}}>
+        <i data-lucide="variable" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
+        Variables
       </a>
       <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}" {{if eq .Page "recipes"}}aria-current="page"{{end}}>
         <i data-lucide="braces" class="w-4 h-4 shrink-0" aria-hidden="true"></i>

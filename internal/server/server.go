@@ -30,6 +30,7 @@ type Server struct {
 	git     *git.Runner
 	syncer  *git.Syncer
 	router  http.Handler
+	web     *web.Handler
 }
 
 // New wires up all dependencies and returns a ready-to-run server.
@@ -59,15 +60,19 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 
 	// Web / HTMX routes
 	h := web.New(ag, st, rs, gr, cfg.Engine, cfg.Dev, authn, cfg.DeployTimeout)
+	if cfg.StagingSocket != "" && cfg.StagingIdentity != "" {
+		h.EnableLocalStaging(cfg)
+	}
 	web.Mount(r, h, timeouts)
 
 	syncer := git.NewSyncer(st, gr, ag.Dill(), cfg.DeployTimeout)
 
-	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r}
+	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r, web: h}
 }
 
 // Run starts the HTTP server and the GitOps syncer, blocking until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
+	defer s.web.CloseStaging()
 	if err := s.cfg.Validate(); err != nil {
 		return err
 	}
@@ -94,6 +99,8 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		// Cancel snapshot transfers before the HTTP shutdown grace period.
+		s.web.CloseStaging()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return srv.Shutdown(shutCtx)

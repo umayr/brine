@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/umayr/brine/internal/configvars"
 	"github.com/umayr/brine/internal/secretbindings"
 )
 
@@ -27,6 +28,7 @@ type Runner struct {
 	Socket       string
 	ResolveStack func(string) (string, error)
 	CheckSource  func(string) error
+	Variables    *configvars.Store // non-secret legacy evaluation variables
 
 	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
 	BeforeLegacyAction   func(context.Context, string) error
@@ -165,6 +167,27 @@ func (r *Runner) command(ctx context.Context, args ...string) (*exec.Cmd, func()
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C", "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config"), "XDG_CACHE_HOME=" + filepath.Join(home, "cache")}
 	if r.PklBinary != "" {
 		cmd.Env = append(cmd.Env, "DILL_PKL_PATH="+r.PklBinary)
+	}
+	// Only legacy stack-scoped invocations receive variables. Qualified and
+	// strict secret operations retain their separately reviewed environment.
+	if r.Variables != nil && r.Profile != "alpha" && r.QualifiedOperation == nil && r.StrictActions == nil && len(args) >= 2 && args[0] == "-f" {
+		if r.ResolveStack == nil {
+			cleanup()
+			return nil, nil, errors.New("variable stack identity unavailable")
+		}
+		stack, err := r.ResolveStack(args[1])
+		if err != nil {
+			cleanup()
+			return nil, nil, errors.New("variable stack identity unavailable")
+		}
+		values, err := r.Variables.Effective(stack)
+		if err != nil {
+			cleanup()
+			return nil, nil, errors.New("configuration variables unavailable")
+		}
+		for key, value := range values {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
 	}
 	return cmd, cleanup, nil
 }

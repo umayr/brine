@@ -53,7 +53,12 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			staticHandler = http.StripPrefix("/static/", http.FileServer(http.FS(staticSub)))
 		}
 	}
-	r.Handle("/static/*", staticHandler)
+	// Require revalidation so a long-running browser session sees updated assets
+	// after a rebuild or upgrade. This applies to embedded and dev files alike.
+	r.Handle("/static/*", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	// Log streaming must not be cut by a request timeout.
 	r.Get("/web/containers/{id}/logs", h.containerLogsSSE)
@@ -71,6 +76,13 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		// Full-page routes
 		r.Get("/", h.dashboard)
 		r.Get("/settings", h.settingsAppearance)
+		r.Get("/variables", h.variablesPage)
+		r.Post("/variables", h.variablesSave)
+		// Keep previously shared bookmarks and form submissions working.
+		r.Get("/settings/variables", h.variablesPage)
+		r.Post("/settings/variables", h.variablesSave)
+		r.Get("/stacks/{name}/variables", h.variablesPage)
+		r.Post("/stacks/{name}/variables", h.variablesSave)
 		r.Get("/stacks", h.stackList)
 		r.Get("/stacks/new", h.stackNew)
 		r.Get("/stacks/{name}", h.stackDetail)
@@ -91,6 +103,9 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			r.Put("/stacks/{name}", h.stackUpdate)
 			r.Post("/stacks/{name}/validate", h.stackValidate)
 			r.Post("/stacks/{name}/fmt", h.stackFmt)
+			r.Get("/stacks/{name}/project-preview", h.projectPreview)
+			r.Post("/stacks/{name}/staging/prepare", h.stagingPrepare)
+			r.Post("/stacks/{name}/staging/confirm", h.stagingConfirm)
 			r.Get("/stacks/{name}/plan", h.stackPlan)
 			r.Get("/stacks/{name}/containers", h.stackContainers)
 
