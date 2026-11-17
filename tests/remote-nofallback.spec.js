@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 for (const mode of ['javascript-disabled', 'csp-blocked']) {
-  test(`no native reveal request when ${mode}`, async ({browser}) => {
+  test(`disabled reveal exposes no control when ${mode}`, async ({browser}) => {
     const fixture=path.join(os.tmpdir(),`brine-nofallback-${process.pid}-${mode}.html`);
     const context=await browser.newContext({javaScriptEnabled:mode!=='javascript-disabled'});
     try {
