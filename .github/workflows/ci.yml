@@ -45,39 +45,6 @@ jobs:
       - name: Test
         # Credential fixtures require ACL-free canonical ancestry, not runner HOME.
         run: bash scripts/ci-test-go.sh
-      - name: Authenticated attended synthetic API and real Linux history
-        # Fake producer only; this is not source/native/application qualification.
-        run: bash scripts/ci-attended-synthetic.sh
-
-  paired-alpha:
-    name: Paired Alpha / ${{ matrix.mode }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 65
-    strategy:
-      fail-fast: false
-      matrix:
-        mode: [docker, podman-rootless]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: brine
-      - uses: actions/checkout@v4
-        with:
-          repository: umayr/dill
-          ref: 258e73e58ba018931be57172908e8e64f433945e
-          path: dill-candidate
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: brine/go.mod
-          cache-dependency-path: brine/go.sum
-      - name: Build exact pinned Podman source
-        if: matrix.mode == 'podman-rootless'
-        working-directory: dill-candidate
-        run: scripts/ci-build-podman-alpha.sh
-      - name: Run paired synthetic qualification on dedicated engine
-        env:
-          BRINE_DILL_CANDIDATE_REPO: ${{ github.workspace }}/dill-candidate
-        run: bash brine/scripts/ci-paired-alpha-secrets.sh '${{ matrix.mode }}'
 
   docker:
     name: Docker image
@@ -100,12 +67,7 @@ jobs:
           docker run --rm brine:ci --version
           docker run --rm --entrypoint /usr/local/bin/dill brine:ci version
           docker run --rm --entrypoint /usr/local/bin/pkl brine:ci --version
-      - name: Bundled Dill 0.7.0 advertises the Alpha contract
-        run: |
-          docker run --rm --entrypoint /usr/local/bin/dill brine:ci version | grep -Fx 'v0.7.0'
-          docker run --rm --entrypoint /usr/local/bin/dill brine:ci secret-capabilities --format json > /tmp/brine-dill-capabilities.json
-          jq -e '.contract == "dill.alpha-secrets/1" and .bindings == "dill.secret-bindings/1" and .policy == "dill.secret-policy/1" and (.engines | sort) == ["docker-host-file", "podman-host-file"]' /tmp/brine-dill-capabilities.json
-      - name: Legacy Dill 0.5.0 rejects Alpha capability discovery
+      - name: Legacy Dill 0.5.0 and disabled Brine features
         run: |
           docker build --build-arg DILL_VERSION=0.5.0 -t brine:legacy-dill .
           if docker run --rm --entrypoint /usr/local/bin/dill brine:legacy-dill secret-capabilities --format json > /tmp/brine-old-dill-output 2>&1; then
@@ -116,10 +78,18 @@ jobs:
             echo 'The legacy Dill advertised an unsupported contract' >&2
             exit 1
           fi
-          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:legacy-dill --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token --secret-target lab-a --secret-policy /synthetic-policy.json --engine-socket unix:///run/synthetic.sock)
+          for image in brine:ci brine:legacy-dill; do
+            for option in '--profile=alpha' '--secret-target=lab-a' '--secret-policy=/synthetic-policy.json' '--secret-pkl=/synthetic-pkl' '--coordination-layout=native-local-docker-v1' '--operation-state-dir=/synthetic-history'; do
+              if docker run --rm "$image" "$option" > /tmp/brine-disabled-flag 2>&1; then
+                echo "Disabled option accepted: $image $option" >&2; exit 1
+              fi
+              grep -qi 'disabled' /tmp/brine-disabled-flag
+            done
+          done
+          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:legacy-dill --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token)
           trap 'docker rm -f "$cid" >/dev/null' EXIT
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18089/api/health >/dev/null && break || sleep 1; done
           curl -fsS -H 'Authorization: Bearer synthetic-ci-token' -H 'Content-Type: application/json' -d '{"name":"demo","pkl_content":"config {}"}' http://127.0.0.1:18089/api/stacks/ >/dev/null
           status=$(curl -sS -o /tmp/brine-old-image-api -w '%{http_code}' -H 'Authorization: Bearer synthetic-ci-token' http://127.0.0.1:18089/api/stacks/demo/secret-bindings)
           test "$status" = 503
-          grep -q 'install a compatible Dill candidate' /tmp/brine-old-image-api
+          grep -q 'disabled' /tmp/brine-old-image-api

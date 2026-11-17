@@ -1,5 +1,7 @@
 # Explicit Alpha target boundary
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 ## Selection and compatibility
 
 Brine defaults to `--profile legacy` (also selected when the profile is omitted).

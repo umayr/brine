@@ -1,5 +1,7 @@
 # Named preflight consumer: dormant runner seam
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 This component implements frozen revision-4 `dill.preflight/1` codecs and dormant runner APIs. **It does not activate a route or establish qualification.** No HTTP endpoint, UI review, history-v2, activation flag, source capture, provider code or candidate pin is changed.
 
 The byte-exact 15-file synthetic fixture corpus and its contract/corpus hashes are recorded in `internal/dill/testdata/preflight-v1/PROVENANCE.md`. These are design vectors, not actual b3 runtime capabilities. Accepted b3 pins remain unchanged; a future candidate without the separate preflight capability must fail without fallback. Existing operation/1 discovery remains separate, and `DecodeOperationInvocation` still rejects `PREFLIGHT_MISMATCH` and `PREFLIGHT_UNAVAILABLE`. `DecodeBoundOperationInvocation` is a separate decoder solely for explicitly negotiated bound-operation context; neither decoder establishes provenance.

@@ -31,8 +31,8 @@ func TestOperationLookupDefenseOnNoAuthAndSyntheticMounts(t *testing.T) {
 				req.Header.Set("Authorization", "Bearer PRIVATE_TOKEN_SENTINEL")
 				w = httptest.NewRecorder()
 				r.ServeHTTP(w, req)
-				if w.Code != 404 || strings.Contains(w.Body.String(), "PRIVATE") {
-					t.Fatalf("invalid/missing ID: %d %s", w.Code, w.Body.String())
+				if w.Code != 503 || !strings.Contains(w.Body.String(), "disabled") || strings.Contains(w.Body.String(), "PRIVATE") {
+					t.Fatalf("disabled history: %d %s", w.Code, w.Body.String())
 				}
 			}
 		}

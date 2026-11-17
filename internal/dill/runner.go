@@ -151,6 +151,9 @@ func (r *Runner) executable() string {
 // server operator's credentials or Pkl configuration. The caller must clean it
 // up after the subprocess exits, including on start failure or cancellation.
 func (r *Runner) command(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
+	if r.Profile == "alpha" {
+		return nil, nil, ErrAlphaDisabled
+	}
 	home, err := os.MkdirTemp("", "brine-dill-home-")
 	if err != nil {
 		return nil, nil, fmt.Errorf("create private Dill runtime home: %w", err)
@@ -302,7 +305,7 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 		return err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Up(ctx, pklPath)
+		return ErrSecretUnavailable
 	}
 	if r.BeforeLegacyAction != nil {
 		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
@@ -314,6 +317,9 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Down stops and removes all containers in the stack.
 func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.Profile == "alpha" {
+		return ErrAlphaDisabled
+	}
 	if r.QualifiedOperation != nil {
 		defer r.lockPath(pklPath)()
 		_, err := r.operation(ctx, pklPath, "down", w)
@@ -325,6 +331,9 @@ func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
 
 // Stop stops running containers without removing them.
 func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
+	if r.Profile == "alpha" {
+		return ErrAlphaDisabled
+	}
 	if r.QualifiedOperation != nil {
 		defer r.lockPath(pklPath)()
 		_, err := r.operation(ctx, pklPath, "stop", w)
@@ -349,7 +358,7 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 		return err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Start(ctx, pklPath, false)
+		return ErrSecretUnavailable
 	}
 	if r.BeforeLegacyAction != nil {
 		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
@@ -374,7 +383,7 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 		return err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Start(ctx, pklPath, true)
+		return ErrSecretUnavailable
 	}
 	if r.BeforeLegacyAction != nil {
 		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
@@ -407,6 +416,9 @@ func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.
 // PS lists containers in the stack using `dill ps --format json`.
 // Returns an empty slice if the stack is not deployed.
 func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) {
+	if r.Profile == "alpha" {
+		return nil, ErrAlphaDisabled
+	}
 	if err := r.checkSource(pklPath); err != nil {
 		return nil, err
 	}
@@ -438,7 +450,7 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 		return nil, err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Plan(ctx, pklPath)
+		return nil, ErrSecretUnavailable
 	}
 	if r.BeforeLegacyAction != nil {
 		if err := r.BeforeLegacyAction(ctx, pklPath); err != nil {
@@ -476,7 +488,7 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 		return err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Validate(ctx, pklPath, nil)
+		return ErrSecretUnavailable
 	}
 	if r.BeforeLegacyValidate != nil {
 		if err := r.BeforeLegacyValidate(ctx, pklPath); err != nil {
@@ -508,7 +520,7 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 		return err
 	}
 	if r.StrictActions != nil {
-		return r.StrictActions.Validate(ctx, pklPath, &content)
+		return ErrSecretUnavailable
 	}
 	if r.BeforeLegacyValidate != nil {
 		if err := r.BeforeLegacyValidate(ctx, pklPath); err != nil {

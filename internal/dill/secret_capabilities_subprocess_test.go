@@ -1,29 +1,20 @@
 package dill
 
 import (
-	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestSecretCapabilitiesSubprocessOutputLimit(t *testing.T) {
-	valid := `{"contract":"dill.alpha-secrets/1","bindings":"dill.secret-bindings/1","policy":"dill.secret-policy/1","engines":["docker-host-file","podman-host-file"]}`
+func TestSecretCapabilityOutputBound(t *testing.T) {
 	for _, size := range []int{8192, 8193, 20000} {
-		t.Run(fmt.Sprint(size), func(t *testing.T) {
-			dir := t.TempDir()
-			bin := filepath.Join(dir, "dill")
-			output := valid + strings.Repeat(" ", size-len(valid))
-			script := "#!/bin/sh\nprintf '%s' '" + output + "'\n"
-			if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
-				t.Fatal(err)
+		var out boundedCapabilityOutput
+		n, err := out.Write([]byte(strings.Repeat("x", size)))
+		if size <= 8192 {
+			if err != nil || n != size {
+				t.Fatalf("size %d: n=%d err=%v", size, n, err)
 			}
-			err := New(bin).CheckSecretCapabilities(context.Background(), "docker")
-			if (err == nil) != (size <= 8192) {
-				t.Fatalf("size %d: %v", size, err)
-			}
-		})
+		} else if err == nil || n != 0 {
+			t.Fatalf("size %d: n=%d err=%v", size, n, err)
+		}
 	}
 }

@@ -34,11 +34,11 @@ func TestPreflightNoChildBeforeIntent(t *testing.T) {
 	r := New(fake)
 	o := &previewTestObserver{failStart: true}
 	v, err := r.PreviewPreflight(context.Background(), "source", "up", false, PreflightBinding{}, o)
-	if err == nil || v.Status != "unknown" || len(o.events) != 2 || o.events[0] != "started" || o.events[1] != "terminal" {
+	if err != ErrAlphaDisabled || len(o.events) != 0 {
 		t.Fatalf("%+v %v %v", v, err, o.events)
 	}
 	if _, err = os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatal("child ran before intent")
+		t.Fatal("disabled preflight launched child")
 	}
 }
 func TestPreflightCaptureFaults(t *testing.T) {

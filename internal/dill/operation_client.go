@@ -170,6 +170,9 @@ type boundOperation struct {
 }
 
 func (r *Runner) operationMode(ctx context.Context, path, op string, w io.Writer, bound *boundOperation) (terminal OperationInvocation, err error) {
+	if SecretFeaturesDisabled() {
+		return terminal, ErrAlphaDisabled
+	}
 	terminal.Status = "unknown"
 	terminal.ExitCode = -1
 	observer, _ := ctx.Value(operationObserverKey{}).(OperationObserver)
@@ -305,6 +308,9 @@ func (r *Runner) operationMode(ctx context.Context, path, op string, w io.Writer
 }
 
 func (r *Runner) operationPlan(ctx context.Context, path string) (*PlanResult, error) {
+	if SecretFeaturesDisabled() {
+		return nil, ErrAlphaDisabled
+	}
 	terminal, e := r.operation(ctx, path, "plan", nil)
 	if terminal.Receipt == nil {
 		return nil, e

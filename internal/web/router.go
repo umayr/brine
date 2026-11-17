@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/api"
+	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/httpx"
 )
 
@@ -18,6 +19,9 @@ var staticFS embed.FS
 // MountAttended must be installed together with api.MountAttended before serving.
 // A missing/unavailable producer still keeps these legacy routes denied.
 func MountAttended(r chi.Router, h *Handler, timeouts httpx.Timeouts, boundary *api.AttendedContext) error {
+	if dill.SecretFeaturesDisabled() {
+		return dill.ErrAlphaDisabled
+	}
 	if h == nil || !boundary.MatchesAgent(h.agent) {
 		return errors.New("invalid attended web configuration")
 	}

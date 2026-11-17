@@ -24,7 +24,7 @@ func TestConfiguredOperationCannotActivateOrApplySecretWorkflow(t *testing.T) {
 		func() error { return s.ApplyActive(ctx, "id", "demo", "/synthetic/recipe") },
 		func() error { _, _, err := s.PreviewLocked(ctx, "id", "demo", "/synthetic/recipe"); return err },
 	} {
-		if err := f(); !errors.Is(err, target.ErrNegotiationUnavailable) {
+		if err := f(); !errors.Is(err, ErrSecretUnavailable) {
 			t.Fatalf("configured secret bypass: %v", err)
 		}
 	}
@@ -42,7 +42,7 @@ func TestAlphaSecretWorkflowCannotActivateOrApply(t *testing.T) {
 		func() error { return s.ApplyActive(ctx, "id", "demo", "/synthetic/recipe") },
 		func() error { _, _, err := s.PreviewLocked(ctx, "id", "demo", "/synthetic/recipe"); return err },
 	} {
-		if err := f(); !errors.Is(err, target.ErrNegotiationUnavailable) {
+		if err := f(); !errors.Is(err, ErrSecretUnavailable) {
 			t.Fatalf("secret profile bypass: %v", err)
 		}
 	}

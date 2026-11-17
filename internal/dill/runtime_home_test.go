@@ -53,8 +53,8 @@ esac
 	if _, err := r.Fmt(ctx, "/synthetic/compose.pkl", "synthetic"); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.CheckSecretCapabilities(ctx, "docker"); err != nil {
-		t.Fatal(err)
+	if err := r.CheckSecretCapabilities(ctx, "docker"); err != ErrSecretUnavailable {
+		t.Fatalf("disabled discovery: %v", err)
 	}
 	s := &SecretRunner{Runner: r, Policy: "/synthetic/policy"}
 	if _, _, err := s.capture(ctx, "other"); err != nil {
@@ -68,8 +68,8 @@ esac
 		t.Fatal(err)
 	}
 	homes := strings.Fields(string(data))
-	if len(homes) != 6 {
-		t.Fatalf("expected 6 runtime homes, got %d", len(homes))
+	if len(homes) != 5 {
+		t.Fatalf("expected 5 runtime homes, got %d", len(homes))
 	}
 	seen := map[string]bool{}
 	for _, home := range homes {
@@ -152,7 +152,7 @@ func TestRuntimeHomeCreationFailureFailsClosed(t *testing.T) {
 	if _, err := r.capture(context.Background(), "test"); err == nil {
 		t.Fatal("runtime home creation failure ignored")
 	}
-	if err := r.CheckSecretCapabilities(context.Background(), "docker"); err != ErrSecretCapabilities {
+	if err := r.CheckSecretCapabilities(context.Background(), "docker"); err != ErrSecretUnavailable {
 		t.Fatalf("capability failure: %v", err)
 	}
 	s := &SecretRunner{Runner: r, Policy: "/synthetic/policy"}

@@ -18,6 +18,10 @@ func (h *stackHandler) beginOperation(ctx context.Context, w http.ResponseWriter
 	if h.history == nil {
 		return ctx, nil, true
 	}
+	if dill.SecretFeaturesDisabled() {
+		writeError(w, http.StatusServiceUnavailable, "Alpha operation history is disabled")
+		return ctx, nil, false
+	}
 	runner := h.agent.Dill()
 	if !auth.Authenticated(r) || runner == nil || runner.Profile != "alpha" || runner.QualifiedOperation == nil {
 		writeError(w, http.StatusUnauthorized, "operation history requires authenticated qualified Alpha")
@@ -46,6 +50,10 @@ func (h *stackHandler) operationGet(w http.ResponseWriter, r *http.Request) {
 	// Defense in depth includes synthetic/no-auth mounts, not just main router.
 	if !auth.Authenticated(r) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if dill.SecretFeaturesDisabled() {
+		writeError(w, http.StatusServiceUnavailable, "Alpha operation history is disabled")
 		return
 	}
 	id := chi.URLParam(r, "id")

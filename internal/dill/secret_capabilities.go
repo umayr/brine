@@ -14,9 +14,11 @@ import (
 // the Alpha secret workflow. No subprocess output is included in this error.
 var ErrSecretCapabilities = errors.New("secret workflow unavailable: install a compatible Dill candidate")
 
-// CheckSecretCapabilities verifies the static Dill contract before any secret
-// workflow is exposed. Discovery is not a readiness or availability check.
+// CheckSecretCapabilities rejects disabled strict-secret discovery before spawning Dill.
 func (r *Runner) CheckSecretCapabilities(ctx context.Context, engine string) error {
+	if SecretFeaturesDisabled() {
+		return ErrSecretUnavailable
+	}
 	if engine != "docker" && engine != "podman" {
 		return ErrSecretCapabilities
 	}

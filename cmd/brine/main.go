@@ -91,12 +91,18 @@ func run() error {
 		return nil
 	}
 
-	var emptyCoordinationOption bool
+	var emptyCoordinationOption, disabledOption bool
 	flag.Visit(func(f *flag.Flag) {
+		if strings.HasPrefix(f.Name, "secret-") || strings.HasPrefix(f.Name, "coordination-") || f.Name == "operation-state-dir" {
+			disabledOption = true
+		}
 		if (strings.HasPrefix(f.Name, "coordination-") || f.Name == "operation-state-dir" || strings.HasPrefix(f.Name, "staging-")) && f.Value.String() == "" {
 			emptyCoordinationOption = true
 		}
 	})
+	if disabledOption {
+		return fmt.Errorf("Alpha and strict secret options are disabled")
+	}
 	if emptyCoordinationOption {
 		return fmt.Errorf("coordination options must not be explicitly empty")
 	}
