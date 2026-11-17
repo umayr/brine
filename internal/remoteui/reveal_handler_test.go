@@ -91,7 +91,7 @@ type blockedResponse struct {
 }
 
 func (w *blockedResponse) SetWriteDeadline(deadline time.Time) error {
-	if !deadline.IsZero() {
+	if !deadline.IsZero() && !deadline.After(time.Now()) {
 		w.once.Do(func() { close(w.unblock) })
 	}
 	return nil

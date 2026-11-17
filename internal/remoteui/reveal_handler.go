@@ -27,13 +27,15 @@ type revealApproval struct {
 	expires            time.Time
 }
 type RevealHandler struct {
-	auth      *auth.Authenticator
-	registry  *targetregistry.Registry
-	executor  *remotereveal.Executor
-	mu        sync.Mutex
-	key       [32]byte
-	approvals map[string]revealApproval
-	now       func() time.Time
+	auth            *auth.Authenticator
+	registry        *targetregistry.Registry
+	executor        *remotereveal.Executor
+	mu              sync.Mutex
+	key             [32]byte
+	approvals       map[string]revealApproval
+	now             func() time.Time
+	requestDuration func() time.Duration // test-only override
+	beforeRelease   func()               // test-only synchronization
 }
 
 // NewRevealHandler is intentionally unmounted. Callers must use Protected and
@@ -102,6 +104,21 @@ func (h *RevealHandler) Protected() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
+		duration := 30 * time.Second
+		if h.requestDuration != nil {
+			duration = h.requestDuration()
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), duration)
+		defer cancel()
+		// Keep this absolute deadline through net/http's final response framing,
+		// including middleware failures. The server clears it after the request.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(duration)); err != nil {
+			if required, _ := r.Context().Value(requireWriteDeadlineKey{}).(bool); required {
+				http.Error(w, "Reveal unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		r = r.WithContext(ctx)
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 		}
@@ -201,10 +218,6 @@ func (h *RevealHandler) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller := http.NewResponseController(w)
-	if controller.SetWriteDeadline(time.Time{}) != nil {
-		http.Error(w, "Reveal unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	done := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() { _ = controller.SetWriteDeadline(time.Now()); close(done) })
 	poison := false
@@ -217,15 +230,25 @@ func (h *RevealHandler) serve(w http.ResponseWriter, r *http.Request) {
 			stopped = true
 		}
 	}
-	defer func() {
-		stopWatcher()
-		if !poison && ctx.Err() == nil {
-			_ = controller.SetWriteDeadline(time.Time{})
-		}
-	}()
+	defer stopWatcher()
 	started := false
 	owned = true
-	err = h.executor.Execute(remotereveal.Submission{Context: ctx, Release: cancel, AdminID: auth.Identity(r), RequestID: a.request}, a.record, a.container, func(c context.Context, result agentclient.RevealResult) error {
+	// Execute releases the submission after delivery and cleanup. Disarm and
+	// join the deadline watcher *before* that intentional cancellation: a
+	// successful flush may still need net/http to write the chunk terminator.
+	// A real revocation observed before release must still poison the socket.
+	release := func() {
+		if h.beforeRelease != nil {
+			h.beforeRelease()
+		}
+		stopWatcher()
+		if ctx.Err() != nil {
+			poison = true
+			_ = controller.SetWriteDeadline(time.Now())
+		}
+		cancel()
+	}
+	err = h.executor.Execute(remotereveal.Submission{Context: ctx, Release: release, AdminID: auth.Identity(r), RequestID: a.request}, a.record, a.container, func(c context.Context, result agentclient.RevealResult) error {
 		if c.Err() != nil {
 			return errors.New("cancelled")
 		}
@@ -255,7 +278,6 @@ func (h *RevealHandler) serve(w http.ResponseWriter, r *http.Request) {
 		// send a second response after delivery has begun.
 		stopWatcher()
 		if r.Context().Err() == nil {
-			_ = controller.SetWriteDeadline(time.Time{})
 			http.Error(w, "Reveal unavailable", http.StatusServiceUnavailable)
 		}
 	}

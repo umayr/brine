@@ -18,22 +18,25 @@ import (
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/operationhistory"
+	"github.com/umayr/brine/internal/remoteui"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/targetregistry"
 	"github.com/umayr/brine/internal/web"
 )
 
 // Server is the brine HTTP server.
 type Server struct {
-	cfg          *config.Config
-	agent        agent.Agent
-	store        store.StackStore
-	recipes      store.RecipeStore
-	git          *git.Runner
-	syncer       *git.Syncer
-	router       http.Handler
-	web          *web.Handler
-	authn        *auth.Authenticator
-	remoteCancel context.CancelFunc
+	cfg               *config.Config
+	agent             agent.Agent
+	store             store.StackStore
+	recipes           store.RecipeStore
+	git               *git.Runner
+	syncer            *git.Syncer
+	router            http.Handler
+	web               *web.Handler
+	authn             *auth.Authenticator
+	remoteCancel      context.CancelFunc
+	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
 // New wires up all dependencies and returns a ready-to-run server.

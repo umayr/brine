@@ -121,10 +121,11 @@ type LogEvent struct {
 }
 
 type Handler struct {
-	backend      Backend
-	auth         *auth.Authenticator
-	logDuration  func(bool) time.Duration // test-only override
-	readDuration func() time.Duration     // test-only override
+	backend       Backend
+	auth          *auth.Authenticator
+	logDuration   func(bool) time.Duration // test-only override
+	readDuration  func() time.Duration     // test-only override
+	revealEnabled bool
 }
 
 // New requires the same authenticator's authentication and CSRF middleware
@@ -154,6 +155,7 @@ type page struct {
 	Hosts                                             []Host
 	Containers                                        []Container
 	Inspection                                        *Inspection
+	RevealEnabled                                     bool
 }
 
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +181,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	p := page{CSRF: h.auth.CSRFFor(r), Host: r.FormValue("host"), Container: r.FormValue("container")}
+	p := page{CSRF: h.auth.CSRFFor(r), Host: r.FormValue("host"), Container: r.FormValue("container"), RevealEnabled: h.revealEnabled}
 	ctx, cancelSession, ok := h.auth.SessionContext(r)
 	if !ok {
 		http.Error(w, "Session expired", http.StatusForbidden)

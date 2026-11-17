@@ -47,7 +47,21 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if err != nil {
 		return err
 	}
-	remote, err := remoteui.ProtectedRoutes(reads, enrollment)
+	var reveals []*remoteui.RevealHandler
+	if s.cfg.RemoteRevealEnabled {
+		reveal, err := remoteui.OpenRevealHandler(context.Background(), s.authn, registry, s.cfg.RemoteRevealAuditDir, s.cfg.RemoteRevealSeedPath, transport)
+		if err != nil {
+			return errors.New("remote reveal configuration unavailable or insecure")
+		}
+		if s.testRevealFactory != nil {
+			reveal, err = s.testRevealFactory(s.authn, registry)
+			if err != nil {
+				return errors.New("remote reveal test handler unavailable")
+			}
+		}
+		reveals = append(reveals, reveal)
+	}
+	remote, err := remoteui.ProtectedRoutes(reads, enrollment, reveals...)
 	if err != nil {
 		return err
 	}

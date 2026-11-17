@@ -32,10 +32,13 @@ type Config struct {
 	Dev                  bool   // hot-reload templates in dev mode
 
 	// Remote read-only access is opt-in; paths must be operator-controlled.
-	RemoteEnabled     bool
-	RemoteRegistryDir string
-	RemoteForwardDir  string
-	RemoteTimeout     time.Duration
+	RemoteEnabled        bool
+	RemoteRegistryDir    string
+	RemoteForwardDir     string
+	RemoteTimeout        time.Duration
+	RemoteRevealEnabled  bool
+	RemoteRevealSeedPath string
+	RemoteRevealAuditDir string
 
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
@@ -72,6 +75,16 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	validRevealPath := func(p string) bool {
+		return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
+	}
+	if c.RemoteRevealEnabled {
+		if !c.RemoteEnabled || c.NoAuth || !validRevealPath(c.RemoteRevealSeedPath) || !validRevealPath(c.RemoteRevealAuditDir) {
+			return fmt.Errorf("remote reveal requires authenticated remote access and explicit absolute seed and audit paths")
+		}
+	} else if c.RemoteRevealSeedPath != "" || c.RemoteRevealAuditDir != "" {
+		return fmt.Errorf("remote reveal settings require explicit enablement")
+	}
 	if !c.RemoteEnabled {
 		if c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 {
 			return fmt.Errorf("remote settings require explicit enablement")
