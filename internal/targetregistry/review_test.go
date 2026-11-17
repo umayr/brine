@@ -12,11 +12,12 @@ import (
 )
 
 func TestCanonicalKeys(t *testing.T) {
-	b, err := json.Marshal(disk{Version: 1, Targets: []Record{record()}})
+	b, err := json.MarshalIndent(disk{Version: 2, Targets: []Record{record()}}, "", "  ")
+	b = append(b, '\n')
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, pair := range [][2]string{{`"version":1`, `"version":1,"VERSION":1`}, {`"version":1`, `"VERSION":1`}, {`"host_key_sha256":`, `"HOST_KEY_SHA256":`}, {`"host_key_sha256":`, `"HOST_KEY_SHA256":"SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","host_key_sha256":`}, {`"host_public_key":`, `"Host_Public_Key":`}} {
+	for _, pair := range [][2]string{{`"version": 2`, `"version": 2,"VERSION":2`}, {`"version": 2`, `"VERSION": 2`}, {`"host_key_sha256":`, `"HOST_KEY_SHA256":`}, {`"host_key_sha256":`, `"HOST_KEY_SHA256":"SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","host_key_sha256":`}, {`"host_public_key":`, `"Host_Public_Key":`}} {
 		t.Run(pair[1], func(t *testing.T) {
 			r := registry(t)
 			s := strings.Replace(string(b), pair[0], pair[1], 1)
@@ -29,7 +30,7 @@ func TestCanonicalKeys(t *testing.T) {
 			if _, err := r.List(); err == nil {
 				t.Fatal("accepted noncanonical fields")
 			}
-			if err := r.Add(record(), true); err == nil {
+			if err := r.Add(record(), record()); err == nil {
 				t.Fatal("overwrote corrupt file")
 			}
 		})

@@ -2,6 +2,9 @@ package targetregistry
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,7 +24,9 @@ var testKey, pin = func() (string, string) {
 }()
 
 func record() Record {
-	return Record{ID: "server", Host: "host.example", Port: 22, User: "operator", KeyPath: "/home/operator/.ssh/id_ed25519", HostPublicKey: testKey, HostKeySHA256: pin, AgentInstallationID: "install-1", EngineID: "engine-1"}
+	key := ed25519.NewKeyFromSeed(make([]byte, 32)).Public().(ed25519.PublicKey)
+	h := sha256.Sum256(key)
+	return Record{Revision: 1, RemoteSocket: "/run/brine.sock", AgentPublicKey: base64.RawURLEncoding.EncodeToString(key), AgentFingerprint: "SHA256:" + base64.RawStdEncoding.EncodeToString(h[:]), EngineKind: "docker", EngineSocket: "unix:///run/docker.sock", DaemonID: "daemon", Generation: 1, RevealKeyFingerprint: pin, ID: "server", Host: "host.example", Port: 22, User: "operator", KeyPath: "/home/operator/.ssh/id_ed25519", HostPublicKey: testKey, HostKeySHA256: pin, AgentInstallationID: hex.EncodeToString(h[:]), EngineID: "11111111-1111-4111-8111-111111111111"}
 }
 func registry(t *testing.T) *Registry {
 	t.Helper()
@@ -34,42 +39,46 @@ func registry(t *testing.T) *Registry {
 func TestEnrollmentAndIdentity(t *testing.T) {
 	r := registry(t)
 	v := record()
-	if !errors.Is(r.Add(v, false), ErrUnconfirmed) {
+	if !errors.Is(r.Add(v, Record{}), ErrUnconfirmed) {
 		t.Fatal("unconfirmed add")
 	}
-	if e := r.Add(v, true); e != nil {
+	if e := r.Add(v, v); e != nil {
 		t.Fatal(e)
 	}
-	if !errors.Is(r.Add(v, true), ErrConflict) {
+	if !errors.Is(r.Add(v, v), ErrConflict) {
 		t.Fatal("duplicate accepted")
 	}
 	got, e := r.Get(v.ID)
 	if e != nil || got != v {
 		t.Fatal(got, e)
 	}
-	good := Identity{pin, v.AgentInstallationID, v.EngineID}
+	good := v
 	if e = v.Verify(good); e != nil {
 		t.Fatal(e)
 	}
-	for _, bad := range []Identity{{}, {"SHA256:AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", good.AgentInstallationID, good.EngineID}, {pin, "other", good.EngineID}, {pin, good.AgentInstallationID, "other"}, {pin, "", good.EngineID}} {
+	for _, mutate := range []func(*Record){func(r *Record) { r.HostKeySHA256 = "bad" }, func(r *Record) { r.AgentInstallationID = "other" }, func(r *Record) { r.EngineID = "other" }} {
+		bad := good
+		mutate(&bad)
 		if !errors.Is(v.Verify(bad), ErrMismatch) {
-			t.Fatalf("accepted %+v", bad)
+			t.Fatal("accepted mismatch")
 		}
 	}
 	next := v
 	next.Host = "new.example"
-	if !errors.Is(r.Update(v, next, false), ErrUnconfirmed) {
+	next.Revision++
+	if !errors.Is(r.Update(v, next, ReviewedUpdate{}), ErrUnconfirmed) {
 		t.Fatal("unconfirmed update")
 	}
-	if e = r.Update(v, next, true); e != nil {
+	if e = r.Update(v, next, ReviewedUpdate{v, next}); e != nil {
 		t.Fatal(e)
 	}
-	if !errors.Is(r.Update(v, next, true), ErrConflict) {
+	if !errors.Is(r.Update(v, next, ReviewedUpdate{v, next}), ErrConflict) {
 		t.Fatal("stale update accepted")
 	}
 	changed := next
 	changed.ID = "other"
-	if !errors.Is(r.Update(next, changed, true), ErrConflict) {
+	changed.Revision++
+	if !errors.Is(r.Update(next, changed, ReviewedUpdate{next, changed}), ErrConflict) {
 		t.Fatal("renamed")
 	}
 }
@@ -83,13 +92,13 @@ func TestCorruptionFailsClosed(t *testing.T) {
 			if _, e := r.List(); e == nil {
 				t.Fatal("accepted corrupt data")
 			}
-			if e := r.Add(record(), true); e == nil {
+			if e := r.Add(record(), record()); e == nil {
 				t.Fatal("overwrote corrupt data")
 			}
 		})
 	}
 	r := registry(t)
-	if e := r.Add(record(), true); e != nil {
+	if e := r.Add(record(), record()); e != nil {
 		t.Fatal(e)
 	}
 	b, e := os.ReadFile(filepath.Join(r.dir, "targets.json"))
@@ -116,11 +125,11 @@ func TestValidationAndStorage(t *testing.T) {
 	for _, mutate := range []func(*Record){func(x *Record) { x.KeyPath = "relative" }, func(x *Record) { x.Host = "user:password@host" }, func(x *Record) { x.HostKeySHA256 = "SHA256:bad" }, func(x *Record) { x.EngineID = "" }, func(x *Record) { x.User = "user:password" }, func(x *Record) { x.KeyPath = "/key\nPRIVATE KEY" }} {
 		x := v
 		mutate(&x)
-		if r.Add(x, true) == nil {
+		if r.Add(x, x) == nil {
 			t.Fatalf("accepted %+v", x)
 		}
 	}
-	if e := r.Add(v, true); e != nil {
+	if e := r.Add(v, v); e != nil {
 		t.Fatal(e)
 	}
 	b, e := os.ReadFile(filepath.Join(r.dir, "targets.json"))
@@ -141,7 +150,7 @@ func TestConcurrentAdd(t *testing.T) {
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); errs <- r.Add(record(), true) }()
+		go func() { defer wg.Done(); errs <- r.Add(record(), record()) }()
 	}
 	wg.Wait()
 	close(errs)

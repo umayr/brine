@@ -4,7 +4,14 @@ package targetregistry
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
+	"path"
+	"unicode/utf8"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +21,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/umayr/brine/internal/agentclient"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/unix"
@@ -31,20 +40,94 @@ var (
 // Record contains public metadata and a private-key path, never private key bytes.
 // HostPublicKey is a canonical OpenSSH authorized-key entry without a comment.
 type Record struct {
-	ID                  string `json:"id"`
-	Host                string `json:"host"`
-	Port                uint16 `json:"port"`
-	User                string `json:"user"`
-	KeyPath             string `json:"key_path"`
-	HostPublicKey       string `json:"host_public_key"`
-	HostKeySHA256       string `json:"host_key_sha256"`
-	AgentInstallationID string `json:"agent_installation_id"`
-	EngineID            string `json:"engine_id"`
+	ID                   string `json:"id"`
+	Revision             uint64 `json:"revision"`
+	Host                 string `json:"host"`
+	Port                 uint16 `json:"port"`
+	User                 string `json:"user"`
+	KeyPath              string `json:"key_path"`
+	HostPublicKey        string `json:"host_public_key"`
+	HostKeySHA256        string `json:"host_key_sha256"`
+	AgentInstallationID  string `json:"agent_installation_id"`
+	EngineID             string `json:"engine_id"`
+	RemoteSocket         string `json:"remote_socket"`
+	AgentPublicKey       string `json:"agent_public_key"`
+	AgentFingerprint     string `json:"agent_fingerprint"`
+	EngineKind           string `json:"engine_kind"`
+	EngineSocket         string `json:"engine_socket"`
+	DaemonID             string `json:"daemon_id"`
+	Generation           uint64 `json:"generation"`
+	RevealKeyFingerprint string `json:"reveal_key_fingerprint"`
 }
 
 // Identity must be obtained from the connected endpoint by a future authenticated
 // transport; missing fields are failures, never a request to trust on first use.
-type Identity struct{ HostKeySHA256, AgentInstallationID, EngineID string }
+type Identity = Record
+
+// Binding returns a fresh agentclient binding; its public-key slice does not
+// share storage with the record or other calls.
+func (r Record) Binding() (agentclient.Binding, error) {
+	if err := r.Validate(); err != nil {
+		return agentclient.Binding{}, err
+	}
+	key, _ := base64.RawURLEncoding.DecodeString(r.AgentPublicKey)
+	return agentclient.Binding{AgentPublicKey: ed25519.PublicKey(key), EngineID: r.EngineID, Generation: r.Generation, EngineKind: r.EngineKind, EngineSocket: r.EngineSocket, DaemonID: r.DaemonID}, nil
+}
+
+// VerifiedRevealKey returns a private copy of the supplied public key only if
+// its raw Ed25519 SHA-256 fingerprint matches this complete validated record.
+// Pass the returned copy, not the input, to agentclient.NewWithRevealKey.
+func (r Record) VerifiedRevealKey(key ed25519.PublicKey) (ed25519.PublicKey, error) {
+	if r.Validate() != nil || len(key) != ed25519.PublicKeySize {
+		return nil, ErrMismatch
+	}
+	copyKey := append(ed25519.PublicKey(nil), key...)
+	h := sha256.Sum256(copyKey)
+	fingerprint := "SHA256:" + base64.RawStdEncoding.EncodeToString(h[:])
+	if subtle.ConstantTimeCompare([]byte(fingerprint), []byte(r.RevealKeyFingerprint)) != 1 {
+		return nil, ErrMismatch
+	}
+	return copyKey, nil
+}
+
+func safeText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, c := range s {
+		if c < 0x20 || c > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+
+func cleanPath(s string) bool {
+	return len(s) <= 4096 && utf8.ValidString(s) && path.IsAbs(s) && path.Clean(s) == s && s != "/" && !strings.ContainsAny(s, "\x00\r\n?#")
+}
+func validAgent(key, id, fingerprint string) bool {
+	b, err := base64.RawURLEncoding.Strict().DecodeString(key)
+	if err != nil || len(b) != ed25519.PublicKeySize || base64.RawURLEncoding.EncodeToString(b) != key {
+		return false
+	}
+	h := sha256.Sum256(b)
+	return id == hex.EncodeToString(h[:]) && fingerprint == "SHA256:"+base64.RawStdEncoding.EncodeToString(h[:])
+}
+func validUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
 
 func validFingerprint(s string) bool {
 	if !strings.HasPrefix(s, "SHA256:") {
@@ -83,16 +166,22 @@ func validHost(s string) bool {
 	return true
 }
 func (r Record) Validate() error {
-	if !token.MatchString(r.ID) || !validHost(r.Host) || r.Port == 0 || !token.MatchString(r.User) ||
+	for _, s := range []string{r.ID, r.Host, r.User, r.KeyPath, r.HostPublicKey, r.HostKeySHA256, r.AgentInstallationID, r.EngineID, r.RemoteSocket, r.AgentPublicKey, r.AgentFingerprint, r.EngineKind, r.EngineSocket, r.DaemonID, r.RevealKeyFingerprint} {
+		if !safeText(s) {
+			return errors.New("invalid target record text")
+		}
+	}
+	if r.Revision == 0 || !token.MatchString(r.ID) || !validHost(r.Host) || r.Port == 0 || !token.MatchString(r.User) ||
 		!filepath.IsAbs(r.KeyPath) || filepath.Clean(r.KeyPath) != r.KeyPath || len(r.KeyPath) > 4096 || strings.ContainsAny(r.KeyPath, "\x00\r\n") ||
-		!validHostKey(r.HostPublicKey, r.HostKeySHA256) || !token.MatchString(r.AgentInstallationID) || !token.MatchString(r.EngineID) {
+		!validHostKey(r.HostPublicKey, r.HostKeySHA256) || !validAgent(r.AgentPublicKey, r.AgentInstallationID, r.AgentFingerprint) || !validUUID(r.EngineID) ||
+		!cleanPath(r.RemoteSocket) || !strings.HasPrefix(r.EngineSocket, "unix://") || !cleanPath(strings.TrimPrefix(r.EngineSocket, "unix://")) ||
+		(r.EngineKind != "docker" && r.EngineKind != "podman") || r.Generation == 0 || r.DaemonID == "" || len(r.DaemonID) > 4096 || !utf8.ValidString(r.DaemonID) || strings.ContainsAny(r.DaemonID, "\x00\r\n") || !validFingerprint(r.RevealKeyFingerprint) {
 		return errors.New("invalid target record")
 	}
 	return nil
 }
 func (r Record) Verify(i Identity) error {
-	if r.Validate() != nil || !validFingerprint(i.HostKeySHA256) || !token.MatchString(i.AgentInstallationID) || !token.MatchString(i.EngineID) ||
-		r.HostKeySHA256 != i.HostKeySHA256 || r.AgentInstallationID != i.AgentInstallationID || r.EngineID != i.EngineID {
+	if r.Validate() != nil || i.Validate() != nil || r != i {
 		return ErrMismatch
 	}
 	return nil
@@ -145,7 +234,7 @@ func (r *Registry) locked(fn func() error) error {
 	return fn()
 }
 func (r *Registry) load() (disk, error) {
-	d := disk{Version: 1, Targets: []Record{}}
+	d := disk{Version: 2, Targets: []Record{}}
 	fd, err := unix.Open(filepath.Join(r.dir, "targets.json"), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return d, nil
@@ -182,8 +271,12 @@ func (r *Registry) load() (disk, error) {
 	if dec.Decode(new(any)) != io.EOF {
 		return d, errors.New("trailing registry data")
 	}
-	if d.Version != 1 || d.Targets == nil {
+	if d.Version != 2 || d.Targets == nil {
 		return d, errors.New("invalid registry version or targets")
+	}
+	canonical, err := json.MarshalIndent(d, "", "  ")
+	if err != nil || !bytes.Equal(b, append(canonical, '\n')) {
+		return d, errors.New("noncanonical registry JSON")
 	}
 	seen := map[string]bool{}
 	for _, t := range d.Targets {
@@ -218,7 +311,7 @@ func rejectDuplicateKeys(b []byte) error {
 					return err
 				}
 				s, ok := k.(string)
-				allowed := kind == "envelope" && (s == "version" || s == "targets") || kind == "record" && (s == "id" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id")
+				allowed := kind == "envelope" && (s == "version" || s == "targets") || kind == "record" && (s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
 				if !ok || !allowed || seen[s] {
 					return errors.New("noncanonical, unknown or duplicate JSON key")
 				}
@@ -312,13 +405,16 @@ func (r *Registry) Get(id string) (Record, error) {
 	return Record{}, ErrNotFound
 }
 
-// Add requires a fresh explicit confirmation; duplicate IDs never overwrite.
-func (r *Registry) Add(t Record, confirmed bool) error {
-	if !confirmed {
+// Add requires the exact reviewed record; duplicate IDs never overwrite.
+func (r *Registry) Add(t Record, reviewed Record) error {
+	if t != reviewed {
 		return ErrUnconfirmed
 	}
 	if err := t.Validate(); err != nil {
 		return err
+	}
+	if t.Revision != 1 {
+		return ErrConflict
 	}
 	return r.locked(func() error {
 		d, e := r.load()
@@ -336,9 +432,14 @@ func (r *Registry) Add(t Record, confirmed bool) error {
 }
 
 // Update uses the complete previously reviewed record as a compare-and-swap;
-// changing an ID is not an update. Callers must confirm every new value.
-func (r *Registry) Update(old, next Record, confirmed bool) error {
-	if !confirmed {
+// changing an ID is not an update. The next revision must increment by one;
+// reviewed must be an exact copy of the record the operator approved.
+// ReviewedUpdate is a value snapshot of both sides presented for approval.
+// It is not an authentication token; callers must protect the review flow.
+type ReviewedUpdate struct{ Previous, Next Record }
+
+func (r *Registry) Update(old, next Record, reviewed ReviewedUpdate) error {
+	if old != reviewed.Previous || next != reviewed.Next {
 		return ErrUnconfirmed
 	}
 	if err := old.Validate(); err != nil {
@@ -346,6 +447,9 @@ func (r *Registry) Update(old, next Record, confirmed bool) error {
 	}
 	if err := next.Validate(); err != nil {
 		return err
+	}
+	if old.Revision == ^uint64(0) || next.Revision != old.Revision+1 {
+		return ErrConflict
 	}
 	if old.ID != next.ID {
 		return fmt.Errorf("%w: cannot change ID", ErrConflict)
