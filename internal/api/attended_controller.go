@@ -158,6 +158,10 @@ func attendedBinding(i operationhistory.BoundIntent) dill.PreflightBinding {
 }
 
 func (h *stackHandler) attendedPreview(w http.ResponseWriter, r *http.Request) {
+	if dill.SecretFeaturesDisabled() {
+		writeError(w, http.StatusServiceUnavailable, "Alpha functionality is disabled")
+		return
+	}
 	if !attendedAuthenticated(w, r) {
 		return
 	}
@@ -228,6 +232,10 @@ func (h *stackHandler) attendedPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) attendedApply(w http.ResponseWriter, r *http.Request, action string) {
+	if dill.SecretFeaturesDisabled() {
+		writeError(w, http.StatusServiceUnavailable, "Alpha functionality is disabled")
+		return
+	}
 	if !attendedAuthenticated(w, r) {
 		return
 	}

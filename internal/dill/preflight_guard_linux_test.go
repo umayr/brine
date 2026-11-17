@@ -51,7 +51,7 @@ func TestPreflightLinuxMissingGuardsNeverLaunch(t *testing.T) {
 					observer := testObserver{start: func() error { return nil }, finish: func(OperationInvocation) error { persisted = true; return nil }}
 					var out bytes.Buffer
 					_, err = r.ApplyBoundPreflight(WithOperationObserver(context.Background(), observer), "synthetic", nil, binding, false, observerWriter{t: t, terminal: &persisted, calls: &calls, output: &out})
-					if err == nil || !persisted || calls != 1 {
+					if err != ErrAlphaDisabled || persisted || calls != 0 {
 						t.Fatalf("apply err=%v persisted=%v markers=%d", err, persisted, calls)
 					}
 					if _, err = os.Stat(log); !os.IsNotExist(err) {

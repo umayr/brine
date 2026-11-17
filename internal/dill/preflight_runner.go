@@ -48,6 +48,9 @@ func (r *Runner) checkPreflightCapabilities(ctx context.Context) error {
 // an independently trusted binding. It does not establish source provenance,
 // confirmation authority, native placement or actual provider qualification.
 func (r *Runner) PreviewPreflight(ctx context.Context, path, op string, forceRecreate bool, binding PreflightBinding, observer PreflightObserver) (v PreflightInvocation, err error) {
+	if SecretFeaturesDisabled() {
+		return v, ErrAlphaDisabled
+	}
 	v.Status = "unknown"
 	if observer == nil {
 		return v, ErrPreflightContract
@@ -125,6 +128,9 @@ func (r *Runner) PreviewPreflight(ctx context.Context, path, op string, forceRec
 // must separately enforce immutable captured-source and confirmation authority.
 // WithOperationObserver is mandatory even when legacy observation is optional.
 func (r *Runner) ApplyBoundPreflight(ctx context.Context, path string, review *PreflightInvocation, binding PreflightBinding, forceRecreate bool, w io.Writer) (OperationInvocation, error) {
+	if SecretFeaturesDisabled() {
+		return OperationInvocation{}, ErrAlphaDisabled
+	}
 	if !preflightAction(binding.Operation) {
 		return OperationInvocation{Status: "unknown", ExitCode: -1}, ErrPreflightBinding
 	}

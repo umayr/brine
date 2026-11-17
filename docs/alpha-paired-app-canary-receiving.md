@@ -1,5 +1,7 @@
 # Paired Alpha application canary: receiving boundary
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 This document records the reviewed attended **component** interface and the
 remaining receiving contracts. It does not freeze an external proof format,
 authorize a driver, or qualify the Brine application. The component remains

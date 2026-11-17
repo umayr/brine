@@ -12,12 +12,12 @@ func TestAlphaRequiresAuthenticationWithoutSecretOptions(t *testing.T) {
 		c.Profile = "alpha"
 		c.EngineSocket = "/synthetic/selected.sock"
 		c.NoAuth = true
-		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "requires authentication") {
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "disabled") {
 			t.Fatalf("Alpha no-auth accepted on %s: %v", bind, err)
 		}
 		c.NoAuth = false
-		if err := c.Validate(); err != nil {
-			t.Fatalf("authenticated Alpha rejected: %v", err)
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "disabled") {
+			t.Fatalf("authenticated Alpha accepted: %v", err)
 		}
 		c.Profile = "legacy"
 		c.NoAuth = true

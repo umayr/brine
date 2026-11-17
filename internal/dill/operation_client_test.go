@@ -3,14 +3,11 @@ package dill
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/umayr/brine/internal/target"
 )
@@ -30,222 +27,7 @@ func consumerScript(t *testing.T, discovery, receipt []byte, exit int, extra str
 	r.ResolveStack = func(string) (string, error) { return "app", nil }
 	return r, log
 }
-func TestOperationProcessCaptureDoesNotLeakOrRetry(t *testing.T) {
-	for _, test := range []struct {
-		name, mode string
-		exit       int
-		status     string
-	}{
-		{"success", "valid", 0, "succeeded"}, {"missing", "missing", 0, "unknown"}, {"malformed", "malformed", 0, "unknown"}, {"unsupported", "unsupported", 2, "unknown"}, {"wrong-target", "wrong-target", 0, "unknown"}, {"cancelled", "cancelled", 1, "cancelled"}, {"declined", "declined", 0, "cancelled"}, {"exit-mismatch", "valid", 2, "unknown"}, {"duplicate", "duplicate", 0, "unknown"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			receipt := consumerReceipt("plan")
-			switch test.mode {
-			case "wrong-target":
-				receipt.Stack = "other"
-			case "cancelled":
-				receipt.Outcome = "cancelled"
-				receipt.Errors = []OperationDiagnostic{{Code: "CANCELLED", Message: operationMessages["CANCELLED"]}}
-			case "declined":
-				receipt.Outcome = "cancelled"
-			}
-			data := append(consumerJSON(t, receipt), '\n')
-			switch test.mode {
-			case "missing":
-				data = nil
-			case "malformed":
-				data = []byte("PRIVATE_STDOUT\n")
-			case "unsupported":
-				data = []byte("unsupported PRIVATE_STDOUT\n")
-			case "duplicate":
-				data = bytes.Replace(data, []byte(`"outcome":`), []byte(`"outcome":"succeeded","outcome":`), 1)
-			}
-			r, log := consumerScript(t, consumerDiscovery(false), data, test.exit, "")
-			var out bytes.Buffer
-			terminal, e := r.operation(context.Background(), "/synthetic/config.pkl", "plan", &out)
-			if terminal.Status != test.status {
-				t.Fatalf("status=%s error=%v", terminal.Status, e)
-			}
-			if (e == nil) != (test.status == "succeeded") {
-				t.Fatalf("incorrect overall error: %v", e)
-			}
-			if strings.Contains(out.String(), "PRIVATE") || (e != nil && strings.Contains(e.Error(), "PRIVATE")) {
-				t.Fatal("raw diagnostics leaked")
-			}
-			if strings.Count(out.String(), OperationMarker) != 1 {
-				t.Fatal("terminal not emitted exactly once")
-			}
-			if _, err := DecodeOperationInvocation([]byte(strings.TrimSuffix(strings.TrimPrefix(out.String(), OperationMarker), "\n"))); err != nil {
-				t.Fatal(err)
-			}
-			calls, err := os.ReadFile(log)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(strings.Split(strings.TrimSpace(string(calls)), "\n")) != 2 {
-				t.Fatalf("fallback/retry: %s", calls)
-			}
-			if strings.Contains(string(calls), "--coordination-") {
-				t.Fatal("read-only operation coordinated")
-			}
-		})
-	}
-}
-func TestOperationDiscoveryFailureNeverDispatches(t *testing.T) {
-	r, log := consumerScript(t, []byte("UNSUPPORTED PRIVATE\n"), nil, 0, "")
-	var out bytes.Buffer
-	terminal, e := r.operation(context.Background(), "/synthetic/config.pkl", "plan", &out)
-	if e == nil || terminal.Receipt != nil || terminal.Status != "unknown" {
-		t.Fatal("discovery accepted")
-	}
-	calls, _ := os.ReadFile(log)
-	if strings.Count(string(calls), "\n") != 1 {
-		t.Fatal("operation ran after discovery failed")
-	}
-}
-func TestOperationSubprocessCancellationStartAndOverflow(t *testing.T) {
-	for _, mode := range []string{"cancel", "stdout-overflow", "stderr-overflow", "start"} {
-		t.Run(mode, func(t *testing.T) {
-			barrier := t.TempDir()
-			ready := filepath.Join(barrier, "ready")
-			release := filepath.Join(barrier, "release")
-			// Discovery does not execute this branch. The action explicitly
-			// witnesses readiness, then waits for the parent to release its burst.
-			// Without capture cancellation the final exec sleeps for 30 seconds.
-			extra := "printf ready > '" + ready + "'\n"
-			if mode != "cancel" {
-				extra += "while [ ! -f '" + release + "' ]; do /bin/sleep 0.01; done\n"
-			}
-			if mode == "stdout-overflow" {
-				extra += "/usr/bin/head -c 2200000 /dev/zero\n"
-			}
-			if mode == "stderr-overflow" {
-				extra += "/usr/bin/head -c 9000 /dev/zero >&2\n"
-			}
-			extra += "exec /bin/sleep 30"
-			r, log := consumerScript(t, consumerDiscovery(false), nil, 0, extra)
-			if mode == "start" {
-				r.Binary = "/must-not-run"
-			}
-			// Startup/discovery get an independent safety budget, not the
-			// post-readiness termination budget measured below.
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			type result struct {
-				terminal OperationInvocation
-				err      error
-				output   string
-			}
-			done := make(chan result, 1)
-			go func() {
-				var out bytes.Buffer
-				terminal, err := r.operation(ctx, "/synthetic/config.pkl", "plan", &out)
-				done <- result{terminal: terminal, err: err, output: out.String()}
-			}()
-			// Always settle the subprocess/goroutine if a readiness/assertion
-			// failure occurs, including the deliberately broken negative control.
-			settled := false
-			defer func() {
-				cancel()
-				if !settled {
-					select {
-					case <-done:
-					case <-time.After(5 * time.Second):
-						t.Error("subprocess did not settle after cleanup cancellation")
-					}
-				}
-			}()
-			if mode != "start" {
-				ticker := time.NewTicker(5 * time.Millisecond)
-				defer ticker.Stop()
-			waitReady:
-				for {
-					if data, err := os.ReadFile(ready); err == nil && string(data) == "ready" {
-						break
-					}
-					select {
-					case got := <-done:
-						settled = true
-						t.Fatalf("action exited before readiness: %v", got.err)
-					case <-ctx.Done():
-						t.Fatal("action readiness deadline exceeded")
-					case <-ticker.C:
-						continue waitReady
-					}
-				}
-				calls, err := os.ReadFile(log)
-				if err != nil || strings.Count(string(calls), "\n") != 2 {
-					t.Fatalf("readiness did not witness exactly discovery and action: %s (%v)", calls, err)
-				}
-			}
-			// Measure only from the explicit cancellation or burst release,
-			// excluding process startup and discovery under parallel/race load.
-			started := time.Now()
-			if mode == "cancel" {
-				cancel()
-			}
-			if mode == "stdout-overflow" || mode == "stderr-overflow" {
-				if err := os.WriteFile(release, []byte("release"), 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			var got result
-			select {
-			case got = <-done:
-				settled = true
-			case <-time.After(5 * time.Second):
-				t.Fatal("action did not terminate promptly after cancellation or overflow release")
-			}
-			if time.Since(started) > 5*time.Second {
-				t.Fatal("post-readiness termination budget exceeded")
-			}
-			if got.err == nil || got.terminal.Receipt != nil || got.terminal.Status != "unknown" {
-				t.Fatal("uncertain invocation accepted")
-			}
-			if strings.Contains(got.output, "PRIVATE") {
-				t.Fatal("raw leak")
-			}
-		})
-	}
-}
-func TestOperationConfiguredRoutingCannotDowngrade(t *testing.T) {
-	r := New("/must-not-run")
-	r.Profile = target.Alpha
-	r.Engine = "docker"
-	r.Socket = "/synthetic/engine.sock"
-	r.ResolveStack = func(string) (string, error) { return "app", nil }
-	r.QualifiedOperation = &QualifiedOperationConfig{}
-	r.BeforeLegacyAction = func(context.Context, string) error { t.Fatal("invalid config reached legacy/secret guard"); return nil }
-	r.CheckSource = func(string) error { t.Fatal("invalid config consulted source"); return nil }
-	ctx := context.Background()
-	for _, action := range []func(io.Writer) error{func(w io.Writer) error { return r.Up(ctx, "missing", w) }, func(w io.Writer) error { return r.Start(ctx, "missing", w) }, func(w io.Writer) error { return r.Restart(ctx, "missing", w) }, func(w io.Writer) error { return r.Stop(ctx, "missing", w) }, func(w io.Writer) error { return r.Down(ctx, "missing", w) }} {
-		var out bytes.Buffer
-		e := action(&out)
-		var oe *OperationError
-		if !errors.As(e, &oe) || oe.Invocation.Receipt != nil || oe.Invocation.Status != "unknown" {
-			t.Fatalf("bad routing result: %v", e)
-		}
-		if strings.Count(out.String(), OperationMarker) != 1 {
-			t.Fatal("missing failed terminal")
-		}
-	}
-	if e := r.Teardown(ctx, "missing", true, io.Discard); e == nil {
-		t.Fatal("qualified teardown accepted")
-	}
-	if _, e := r.Plan(ctx, "missing"); e == nil {
-		t.Fatal("bad-config plan accepted")
-	}
-	if e := r.ValidateContent(ctx, "missing", "SECRET"); !errors.Is(e, ErrOperationContract) {
-		t.Fatal("stdin fallback")
-	}
-	if e := r.checkExecutionContract(); !errors.Is(e, target.ErrNegotiationUnavailable) {
-		t.Fatal("secret controller bypass")
-	}
-	r.Profile = target.Legacy
-	if e := r.checkExecutionContract(); e == nil {
-		t.Fatal("configured legacy secret bypass")
-	}
-}
+
 func TestOperationConfigurationAndSocketValidation(t *testing.T) {
 	state := t.TempDir()
 	if e := os.Chmod(state, 0700); e != nil {
@@ -312,21 +94,12 @@ func TestQualifiedOperationProcessesLinuxOnly(t *testing.T) {
 			r.Profile = target.Alpha
 			r.QualifiedOperation = &QualifiedOperationConfig{StateDir: state, Layout: "native-local-docker-v1", DaemonID: "independently-provisioned-id"}
 			var out bytes.Buffer
-			terminal, e := r.operation(context.Background(), "/synthetic/config.pkl", op, &out)
-			if e != nil || terminal.Status != "succeeded" {
-				t.Fatalf("qualified operation failed: %v %s", e, out.String())
+			_, e := r.operation(context.Background(), "/synthetic/config.pkl", op, &out)
+			if e != ErrAlphaDisabled || out.Len() != 0 {
+				t.Fatalf("disabled qualified operation: %v %s", e, out.String())
 			}
-			calls, _ := os.ReadFile(log)
-			for _, flag := range []string{"operation " + op + " --contract dill.operation/1", "--coordination-source brine", "--coordination-state-dir " + state, "--coordination-layout native-local-docker-v1", "--coordination-daemon-id independently-provisioned-id"} {
-				if !strings.Contains(string(calls), flag) {
-					t.Fatalf("missing %s", flag)
-				}
-			}
-			if op == "up" && !strings.Contains(string(calls), "--no-prune --pull never") {
-				t.Fatal("unsafe up defaults")
-			}
-			if strings.Contains(string(calls), "--attended") {
-				t.Fatal("invented attended flag")
+			if _, e := os.Stat(log); !os.IsNotExist(e) {
+				t.Fatalf("disabled operation launched child: %v", e)
 			}
 		})
 	}

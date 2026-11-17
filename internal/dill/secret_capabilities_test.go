@@ -3,6 +3,7 @@ package dill
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,24 +31,27 @@ func TestSecretCapabilitiesStrictDiscovery(t *testing.T) {
 	}
 }
 
-func TestSecretCapabilitiesProcessIsolation(t *testing.T) {
-	t.Setenv("BRINE_SYNTHETIC_SECRET", "synthetic-canary")
+func TestSecretCapabilitiesDisabledBeforeDiscovery(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "dill")
-	script := `#!/bin/sh
-if [ -n "$BRINE_SYNTHETIC_SECRET" ]; then exit 1; fi
-printf '%s' '{"contract":"dill.alpha-secrets/1","bindings":"dill.secret-bindings/1","policy":"dill.secret-policy/1","engines":["docker-host-file","podman-host-file"]}'
-`
+	binary, marker := filepath.Join(dir, "dill"), filepath.Join(dir, "called")
+	script := "#!/bin/sh\nprintf 'called\\n' >> '" + marker + "'\nexit 0\n"
 	if err := os.WriteFile(binary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := New(binary).CheckSecretCapabilities(context.Background(), "docker"); err != nil {
-		t.Fatal(err)
+	if err := exec.Command(binary, "positive").Run(); err != nil {
+		t.Fatalf("fake positive control: %v", err)
 	}
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho synthetic-canary >&2\nexit 1\n"), 0700); err != nil {
-		t.Fatal(err)
+	before, err := os.ReadFile(marker)
+	if err != nil || string(before) != "called\n" {
+		t.Fatalf("fake did not write marker: %q %v", before, err)
 	}
-	if err := New(binary).CheckSecretCapabilities(context.Background(), "docker"); err != ErrSecretCapabilities {
-		t.Fatalf("unexpected error: %v", err)
+	for _, engine := range []string{"docker", "podman", "invalid"} {
+		if err := New(binary).CheckSecretCapabilities(context.Background(), engine); err != ErrSecretUnavailable {
+			t.Fatalf("%s: %v", engine, err)
+		}
+	}
+	after, err := os.ReadFile(marker)
+	if err != nil || string(after) != string(before) {
+		t.Fatalf("discovery spawned child: %q %v", after, err)
 	}
 }

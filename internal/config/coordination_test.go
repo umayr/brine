@@ -29,7 +29,7 @@ func TestCoordinationConfigurationFailsClosed(t *testing.T) {
 		{"partial-daemon", "all three", func(c *Config) { c.CoordinationDaemonID = "" }},
 		{"legacy", "authenticated Alpha", func(c *Config) { c.Profile = "legacy" }},
 		{"podman", "Docker", func(c *Config) { c.Engine = "podman" }},
-		{"noauth", "authentication", func(c *Config) { c.NoAuth = true }},
+		{"noauth", "authenticated", func(c *Config) { c.NoAuth = true }},
 		{"bundled-binary", "operator-selected", func(c *Config) { c.DillBin = "dill" }},
 		{"layout", "layout", func(c *Config) { c.CoordinationLayout = "desktop" }},
 		{"relative-state", "canonical", func(c *Config) { c.CoordinationStateDir = "state" }},
@@ -42,13 +42,13 @@ func TestCoordinationConfigurationFailsClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := operationConfig()
 			tc.change(c)
-			if err := c.Validate(); err == nil || !strings.Contains(err.Error(), tc.contains) {
+			if err := c.validateCoordination(); err == nil || !strings.Contains(err.Error(), tc.contains) {
 				t.Fatalf("want %s rejection, got %v", tc.contains, err)
 			}
 		})
 	}
 	c := operationConfig()
-	err := c.Validate()
+	err := c.validateCoordination()
 	if runtime.GOOS != "linux" && (err == nil || !strings.Contains(err.Error(), "native Linux")) {
 		t.Fatalf("unsupported host accepted: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestCoordinationRejectsDataAlias(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.CoordinationStateDir = filepath.Join(canonicalData, "state")
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "outside") {
+	if err := c.validateCoordination(); err == nil || !strings.Contains(err.Error(), "outside") {
 		t.Fatalf("data alias accepted: %v", err)
 	}
 }

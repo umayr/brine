@@ -26,6 +26,10 @@ func (h *stackHandler) secretRunner(w http.ResponseWriter, r *http.Request) (*di
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return nil, nil, "", false
 	}
+	if dill.SecretFeaturesDisabled() {
+		writeError(w, http.StatusServiceUnavailable, "strict secret functionality is disabled")
+		return nil, nil, "", false
+	}
 	if h.agent == nil || h.agent.Dill() == nil {
 		writeError(w, http.StatusServiceUnavailable, "secret workflow unavailable")
 		return nil, nil, "", false
@@ -190,13 +194,13 @@ func readPreviewToken(r *http.Request) (string, error) {
 func (h *stackHandler) secretConfirm(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
+	s, stack, id, ok := h.secretRunner(w, r)
+	if !ok {
+		return
+	}
 	token, err := readPreviewToken(r)
 	if err != nil {
 		secretFailure(w, err)
-		return
-	}
-	s, stack, id, ok := h.secretRunner(w, r)
-	if !ok {
 		return
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)

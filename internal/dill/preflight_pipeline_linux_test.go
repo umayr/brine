@@ -6,13 +6,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
-	"time"
 )
 
 type pipelinePreviewObserver struct {
@@ -126,131 +123,4 @@ func pipelineSetup(t *testing.T, action, mode string) (*Runner, PreflightBinding
 		t.Fatal(e)
 	}
 	return r, binding, log
-}
-func TestLinuxSyntheticPreflightFullPipeline(t *testing.T) {
-	for _, action := range []string{"up", "start", "restart", "stop", "down"} {
-		t.Run(action, func(t *testing.T) {
-			r, binding, log := pipelineSetup(t, action, "")
-			path := "/synthetic/export.pkl"
-			previewPersisted := false
-			observer := pipelinePreviewObserver{before: func() {
-				if n := len(pipelineLines(t, log)); n != 0 {
-					t.Fatalf("child before preview intent: %d", n)
-				}
-			}, terminal: func(v PreflightInvocation) error {
-				if v.Result == nil || v.Status != "succeeded" {
-					t.Error("invalid preview terminal")
-				}
-				previewPersisted = true
-				return nil
-			}}
-			preview, e := r.PreviewPreflight(context.Background(), path, action, false, binding, observer)
-			if e != nil || !previewPersisted || preview.ProcessExit == nil || *preview.ProcessExit != 0 || preview.Result == nil || preview.Status != "succeeded" {
-				t.Fatalf("preview %+v %v", preview, e)
-			}
-			lines := pipelineLines(t, log)
-			if len(lines) != 3 || lines[0] != "operation-capabilities --format json" || lines[1] != "preflight-capabilities --format json" {
-				t.Fatalf("preview calls %v", lines)
-			}
-			want := []string{"preflight", action, "--contract", "dill.preflight/1", "--format", "json", "--engine", "docker", "--engine-socket", "unix:///synthetic/pinned.sock", "-p", "synthetic", "-f", path, "--timeout", "5m", "--coordination-layout", "native-local-docker-v1", "--coordination-daemon-id", "independent-daemon", "--coordination-state-dir", r.QualifiedOperation.StateDir, "--coordination-source", "brine"}
-			if action == "up" {
-				want = append(want, "--no-prune", "--pull", "never")
-			}
-			if !reflect.DeepEqual(strings.Fields(lines[2]), want) {
-				t.Fatalf("preview argv %s", lines[2])
-			}
-			persisted := false
-			calls := 0
-			var out bytes.Buffer
-			opObserver := testObserver{start: func() error {
-				if len(pipelineLines(t, log)) != 3 {
-					t.Error("child before apply intent")
-				}
-				return nil
-			}, finish: func(v OperationInvocation) error {
-				if v.Receipt == nil || v.ExitCode != 0 || v.Status != "succeeded" {
-					t.Error("invalid operation terminal")
-				}
-				persisted = true
-				return nil
-			}}
-			v, e := r.ApplyBoundPreflight(WithOperationObserver(context.Background(), opObserver), path, &preview, binding, false, observerWriter{t: t, terminal: &persisted, calls: &calls, output: &out})
-			if e != nil || v.Receipt == nil || v.ExitCode != 0 || v.Status != "succeeded" || !persisted || calls != 1 {
-				t.Fatalf("apply %+v %v", v, e)
-			}
-			lines = pipelineLines(t, log)
-			if len(lines) != 6 || lines[3] != "operation-capabilities --format json" || lines[4] != "preflight-capabilities --format json" {
-				t.Fatalf("apply calls %v", lines)
-			}
-			want[0] = "operation"
-			want[3] = "dill.operation/1"
-			want = append(want, "--preflight-contract", "dill.preflight/1", "--expect-preflight", *preview.Result.SelectionDigest)
-			if !reflect.DeepEqual(strings.Fields(lines[5]), want) {
-				t.Fatalf("apply argv %s", lines[5])
-			}
-			if _, e = DecodeBoundOperationInvocation([]byte(strings.TrimSpace(strings.TrimPrefix(out.String(), OperationMarker)))); e != nil {
-				t.Fatal(e)
-			}
-		})
-	}
-}
-func TestLinuxSyntheticPreflightFaults(t *testing.T) {
-	for _, mode := range []string{"unsupported", "overflow", "cancel", "exit-disagree", "mismatch"} {
-		t.Run(mode, func(t *testing.T) {
-			r, binding, log := pipelineSetup(t, "up", mode)
-			ctx := context.Background()
-			if mode == "cancel" {
-				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
-				defer cancel()
-			}
-			observer := pipelinePreviewObserver{before: func() {
-				if len(pipelineLines(t, log)) != 0 {
-					t.Error("child before intent")
-				}
-			}, terminal: func(PreflightInvocation) error { return nil }}
-			preview, e := r.PreviewPreflight(ctx, "/synthetic/export.pkl", "up", false, binding, observer)
-			if mode != "mismatch" {
-				if e == nil || preview.Status != "unknown" || preview.Result != nil {
-					t.Fatalf("bad preview %+v %v", preview, e)
-				}
-				n := len(pipelineLines(t, log))
-				want := 3
-				if mode == "unsupported" {
-					want = 2
-				}
-				if n != want {
-					t.Fatalf("fallback or replay: %v", pipelineLines(t, log))
-				}
-				return
-			}
-			if e != nil {
-				t.Fatal(e)
-			}
-			persisted := false
-			calls := 0
-			op := testObserver{start: func() error { return nil }, finish: func(OperationInvocation) error { persisted = true; return nil }}
-			v, e := r.ApplyBoundPreflight(WithOperationObserver(ctx, op), "/synthetic/export.pkl", &preview, binding, false, observerWriter{t: t, terminal: &persisted, calls: &calls})
-			if e == nil || v.Receipt == nil || v.Receipt.Outcome != "failed" || v.Receipt.Effects != "none" || v.ExitCode != 1 || v.Status != "failed" || !persisted || calls != 1 || len(pipelineLines(t, log)) != 6 {
-				t.Fatalf("mismatch %+v %v", v, e)
-			}
-		})
-	}
-	t.Run("observer-failures", func(t *testing.T) {
-		r, binding, log := pipelineSetup(t, "up", "")
-		p := pipelinePreviewObserver{before: func() {}, terminal: func(PreflightInvocation) error { return errors.New("history") }}
-		v, e := r.PreviewPreflight(context.Background(), "/synthetic/export.pkl", "up", false, binding, p)
-		var he *PreflightHistoryError
-		if !errors.As(e, &he) || v.Result == nil {
-			t.Fatalf("preview history %v", e)
-		}
-		calls := 0
-		persisted := false
-		op := testObserver{start: func() error { return nil }, finish: func(OperationInvocation) error { return errors.New("history") }}
-		_, e = r.ApplyBoundPreflight(WithOperationObserver(context.Background(), op), "/synthetic/export.pkl", &v, binding, false, observerWriter{t: t, terminal: &persisted, calls: &calls})
-		var oe *OperationHistoryError
-		if !errors.As(e, &oe) || calls != 0 || len(pipelineLines(t, log)) != 6 {
-			t.Fatalf("apply history %v %d", e, calls)
-		}
-	})
 }

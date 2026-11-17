@@ -47,12 +47,7 @@ func TestScopedConfigurationEnvironment(t *testing.T) {
 		t.Fatal("missing override")
 	}
 	r.Profile = "alpha"
-	cmd, cleanup2, err := r.command(context.Background(), "-f", stack.PklPath, "validate")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cleanup2()
-	if strings.Contains(strings.Join(cmd.Env, "\n"), "BRINE_VAR_DOMAIN=") {
-		t.Fatal("leaked into alpha")
+	if _, _, err := r.command(context.Background(), "-f", stack.PklPath, "validate"); err == nil {
+		t.Fatal("disabled Alpha command accepted")
 	}
 }

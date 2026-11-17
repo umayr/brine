@@ -67,6 +67,9 @@ func (a *AttendedContext) MatchesAgent(base agent.Agent) bool {
 // work. The caller must propagate any error and abort startup. Profile must have
 // been set before NewLocalAgent so AlphaReadOnly was actually installed.
 func NewAttendedContext(base agent.Agent, shared *dill.Runner, producer AttendedProducer) (*AttendedContext, error) {
+	if dill.SecretFeaturesDisabled() {
+		return nil, dill.ErrAlphaDisabled
+	}
 	local, ok := base.(*agent.LocalAgent)
 	if !ok || local == nil || shared == nil || local.Dill() != shared || shared.Profile != target.Alpha {
 		return nil, errAttendedConfiguration
