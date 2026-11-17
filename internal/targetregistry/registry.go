@@ -4,12 +4,15 @@ package targetregistry
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"path"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"encoding/json"
@@ -212,26 +215,112 @@ func Open(dir string) (*Registry, error) {
 	}
 	return &Registry{dir: dir}, nil
 }
-func (r *Registry) locked(fn func() error) error {
-	// O_NOFOLLOW prevents replacing the coordination file with a symlink.
-	fd, err := unix.Open(filepath.Join(r.dir, ".lock"), unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0600)
+
+// ReadLease holds the shared kernel lock until Close. It must not be copied.
+// Keep it open until all work using the returned record, including streams, ends.
+type ReadLease struct {
+	once sync.Once
+	file *os.File
+	err  error
+}
+
+// Close releases the lease. Concurrent and repeated calls are safe.
+func (l *ReadLease) Close() error {
+	l.once.Do(func() { l.err = l.file.Close() })
+	return l.err
+}
+
+func (r *Registry) lock(ctx context.Context, shared bool) (*os.File, error) {
+	return r.lockFile(ctx, shared, !shared)
+}
+
+func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	flags := unix.O_RDWR | unix.O_CLOEXEC | unix.O_NOFOLLOW | unix.O_NONBLOCK
+	if create {
+		flags |= unix.O_CREAT
+	}
+	fd, err := unix.Open(filepath.Join(r.dir, ".lock"), flags, 0600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	f := os.NewFile(uintptr(fd), "lock")
-	defer f.Close()
+	fail := func(err error) (*os.File, error) { f.Close(); return nil, err }
 	st, err := f.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	if !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 {
+		return fail(errors.New("invalid registry lock file"))
+	}
+	mode := unix.LOCK_EX
+	if shared {
+		mode = unix.LOCK_SH
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return fail(err)
+		}
+		err = unix.Flock(fd, mode|unix.LOCK_NB)
+		if err == nil {
+			if err := ctx.Err(); err != nil {
+				return fail(err)
+			}
+			return f, nil
+		}
+		if err == unix.EINTR {
+			continue
+		}
+		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
+			return fail(err)
+		}
+		timer := time.NewTimer(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return fail(ctx.Err())
+		case <-timer.C:
+		}
+	}
+}
+func (r *Registry) lockedContext(ctx context.Context, fn func() error) error {
+	f, err := r.lock(ctx, false)
 	if err != nil {
 		return err
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 {
-		return errors.New("invalid registry lock file")
-	}
-	if err = unix.Flock(fd, unix.LOCK_EX); err != nil {
-		return err
-	}
-	defer unix.Flock(fd, unix.LOCK_UN)
+	defer f.Close()
 	return fn()
+}
+func (r *Registry) locked(fn func() error) error { return r.lockedContext(context.Background(), fn) }
+
+// AcquireRead returns an exact validated value and a shared-lock lease. The
+// caller must close the lease only after the entire operation/stream completes.
+// The lease protects against cooperating writers, not direct filesystem edits.
+func (r *Registry) AcquireRead(ctx context.Context, id string) (Record, *ReadLease, error) {
+	f, err := r.lock(ctx, true)
+	if err != nil {
+		return Record{}, nil, err
+	}
+	lease := &ReadLease{file: f}
+	d, err := r.load()
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err != nil {
+		lease.Close()
+		return Record{}, nil, err
+	}
+	for _, t := range d.Targets {
+		if t.ID == id {
+			return t, lease, nil
+		}
+	}
+	lease.Close()
+	return Record{}, nil, ErrNotFound
 }
 func (r *Registry) load() (disk, error) {
 	d := disk{Version: 2, Targets: []Record{}}
@@ -382,18 +471,27 @@ func (r *Registry) save(d disk) error {
 }
 
 // List fails closed if any record or the storage envelope is malformed.
-func (r *Registry) List() (out []Record, err error) {
-	err = r.locked(func() error {
-		d, e := r.load()
-		if e == nil {
-			out = d.Targets
-		}
-		return e
-	})
-	return
+func (r *Registry) List() ([]Record, error) { return r.ListContext(context.Background()) }
+
+// ListContext loads a validated snapshot under a shared lock. Its context
+// bounds lock acquisition, not filesystem I/O after acquisition.
+func (r *Registry) ListContext(ctx context.Context) ([]Record, error) {
+	f, err := r.lockFile(ctx, true, true)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	d, err := r.load()
+	if err != nil {
+		return nil, err
+	}
+	return d.Targets, nil
 }
-func (r *Registry) Get(id string) (Record, error) {
-	ts, err := r.List()
+func (r *Registry) Get(id string) (Record, error) { return r.GetContext(context.Background(), id) }
+
+// GetContext returns a validated snapshot, but does not pin it after return.
+func (r *Registry) GetContext(ctx context.Context, id string) (Record, error) {
+	ts, err := r.ListContext(ctx)
 	if err != nil {
 		return Record{}, err
 	}
@@ -407,6 +505,11 @@ func (r *Registry) Get(id string) (Record, error) {
 
 // Add requires the exact reviewed record; duplicate IDs never overwrite.
 func (r *Registry) Add(t Record, reviewed Record) error {
+	return r.AddContext(context.Background(), t, reviewed)
+}
+
+// AddContext is Add with a cancellable lock wait.
+func (r *Registry) AddContext(ctx context.Context, t Record, reviewed Record) error {
 	if t != reviewed {
 		return ErrUnconfirmed
 	}
@@ -416,7 +519,7 @@ func (r *Registry) Add(t Record, reviewed Record) error {
 	if t.Revision != 1 {
 		return ErrConflict
 	}
-	return r.locked(func() error {
+	return r.lockedContext(ctx, func() error {
 		d, e := r.load()
 		if e != nil {
 			return e
@@ -439,6 +542,11 @@ func (r *Registry) Add(t Record, reviewed Record) error {
 type ReviewedUpdate struct{ Previous, Next Record }
 
 func (r *Registry) Update(old, next Record, reviewed ReviewedUpdate) error {
+	return r.UpdateContext(context.Background(), old, next, reviewed)
+}
+
+// UpdateContext is Update with a cancellable lock wait.
+func (r *Registry) UpdateContext(ctx context.Context, old, next Record, reviewed ReviewedUpdate) error {
 	if old != reviewed.Previous || next != reviewed.Next {
 		return ErrUnconfirmed
 	}
@@ -454,7 +562,7 @@ func (r *Registry) Update(old, next Record, reviewed ReviewedUpdate) error {
 	if old.ID != next.ID {
 		return fmt.Errorf("%w: cannot change ID", ErrConflict)
 	}
-	return r.locked(func() error {
+	return r.lockedContext(ctx, func() error {
 		d, e := r.load()
 		if e != nil {
 			return e
