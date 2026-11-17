@@ -69,9 +69,40 @@ func (c Container) IDPrefix() string {
 	return "Invalid ID"
 }
 
+// Inspection is the bounded v1 normalized profile, not raw engine inspect data.
+// Nullable fields use pointers so unavailable values remain distinct from zero.
 type Inspection struct {
-	ID, Name, Stack, Service string
-	EnvKeys                  []string
+	ID, Name, Stack, Service, ObservedAt string
+	Image, ImageID, State                string
+	CreatedAt, User, RestartPolicy       *string
+	Command, EnvKeys, Networks           []string
+	Labels                               map[string]string
+	Ports                                []InspectionPort
+	Mounts                               []InspectionMount
+	Health                               InspectionHealth
+	Resources                            InspectionResources
+	Security                             InspectionSecurity
+}
+
+type InspectionPort struct {
+	Protocol, HostIP        string
+	HostPort, ContainerPort int
+}
+type InspectionMount struct {
+	Type, Source, Destination string
+	ReadOnly                  bool
+}
+type InspectionHealth struct {
+	Status *string
+	Test   []string
+}
+type InspectionResources struct {
+	MemoryBytes, CPUNano, PidsLimit *int64
+}
+type InspectionSecurity struct {
+	Privileged                    *bool
+	CapAdd                        []string
+	NetworkMode, PIDMode, IPCMode *string
 }
 
 // Confirmation is created only after cookie authentication, CSRF middleware,
@@ -275,6 +306,8 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			p.Error = "Inspection unavailable"
 		} else if item.ID != p.Container || !safeText(item.ID) || !safeText(p.Host) {
 			p.Error = "Inspection identity mismatch"
+		} else if !validInspectionMetadata(item) {
+			p.Error = "Inspection unavailable"
 		} else {
 			p.Inspection = &item
 		}
@@ -446,6 +479,21 @@ func fullID(s string) bool {
 	}
 	return true
 }
+
+// Reject malformed names and any unexpected label before rendering anything.
+// Other permitted inspection metadata can still contain secrets.
+func validInspectionMetadata(i Inspection) bool {
+	if len(i.Labels) != 3 || i.Labels["dill.managed"] != "true" || i.Stack == "" || i.Service == "" || i.Labels["dill.stack"] != i.Stack || i.Labels["dill.service"] != i.Service || len(i.EnvKeys) > 256 {
+		return false
+	}
+	for n, key := range i.EnvKeys {
+		if key == "" || len(key) > 8192 || !utf8.ValidString(key) || strings.ContainsAny(key, "=\x00") || (n > 0 && i.EnvKeys[n-1] >= key) {
+			return false
+		}
+	}
+	return true
+}
+
 func safeText(s string) bool {
 	if s == "" || len(s) > 4096 || !utf8.ValidString(s) {
 		return false

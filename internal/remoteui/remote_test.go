@@ -25,6 +25,7 @@ type fake struct {
 	enrolledHost                         string
 	enrolledIdentity                     Identity
 	inspectID                            string
+	inspection                           *Inspection
 	reviewOverride                       *Identity
 	inventory                            []Container
 }
@@ -50,11 +51,14 @@ func (f *fake) Inventory(context.Context, string) ([]Container, error) {
 }
 func (f *fake) Inspect(context.Context, string, string) (Inspection, error) {
 	f.inspects++
+	if f.inspection != nil {
+		return *f.inspection, nil
+	}
 	id := f.inspectID
 	if id == "" {
 		id = testID
 	}
-	return Inspection{ID: id, Name: "app", EnvKeys: []string{"TOKEN"}}, nil
+	return Inspection{ID: id, Name: "app", Stack: "app", Service: "web", EnvKeys: []string{"TOKEN"}, Labels: map[string]string{"dill.managed": "true", "dill.stack": "app", "dill.service": "web"}}, nil
 }
 
 type fakeStream struct {
@@ -158,6 +162,7 @@ func TestBrowserFixture(t *testing.T) {
 		t.Skip("browser fixture only")
 	}
 	_, f, h, c, _ := setup(t)
+	f.inspection = inspectionFixture()
 	fixturePath := "/remote/inspect?host=h&container=" + testID
 	if os.Getenv("BRINE_REMOTE_INVENTORY") != "" {
 		f.inventory = []Container{{ID: testID, Name: "same", Stack: "app", Service: "web"}, {ID: otherID, Name: "same", Stack: "app", Service: "web"}}

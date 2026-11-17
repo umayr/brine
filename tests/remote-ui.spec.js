@@ -19,6 +19,7 @@ test('remote inspect reveals only after confirmation and clears values', async (
       } else await route.fulfill({ contentType: 'text/html', body: html });
     });
     await page.goto('http://remote.test/remote/inspect');
+    await page.getByText('Command and environment names').click();
     await expect(page.getByText('Environment names only')).toBeVisible();
     await expect(page.locator('#values')).toBeEmpty();
     await page.getByRole('button', { name: 'Reveal values' }).click();
