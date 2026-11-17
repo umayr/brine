@@ -27,13 +27,14 @@ func record() targetregistry.Record {
 }
 
 type fakeForward struct {
-	ctx    context.Context
-	closed atomic.Int32
+	ctx      context.Context
+	closed   atomic.Int32
+	closeErr error
 }
 
 func (f *fakeForward) Context() context.Context { return f.ctx }
 func (f *fakeForward) Socket() string           { return "/tmp/owned.sock" }
-func (f *fakeForward) Close() error             { f.closed.Add(1); return nil }
+func (f *fakeForward) Close() error             { f.closed.Add(1); return f.closeErr }
 
 type fakeClient struct {
 	epoch  string
@@ -63,6 +64,27 @@ func (c *fakeClient) Logs(ctx context.Context, _ string, _ string, _ agentclient
 	}
 	return c.err
 }
+func TestTransportCleanupFailureIsDistinguishable(t *testing.T) {
+	d := dependencies{open: func(context.Context, agenttransport.Config) (forward, error) {
+		return nil, errors.Join(errors.New("transport failed"), agenttransport.ErrCleanup)
+	}}
+	_, err := open(context.Background(), record(), Config{}, d)
+	if !errors.Is(err, ErrCleanup) {
+		t.Fatal("transport cleanup not marked", err)
+	}
+}
+
+func TestSetupCleanupFailureIsDistinguishable(t *testing.T) {
+	f := &fakeForward{ctx: context.Background(), closeErr: errors.New("sensitive cleanup")}
+	d := dependencies{open: func(context.Context, agenttransport.Config) (forward, error) { return f, nil }, newClient: func(context.Context, string, agentclient.Binding) (client, error) {
+		return nil, errors.New("client failed")
+	}}
+	_, err := open(context.Background(), record(), Config{}, d)
+	if !errors.Is(err, ErrCleanup) {
+		t.Fatal("cleanup failure not marked", err)
+	}
+}
+
 func TestComposition(t *testing.T) {
 	r := record()
 	f := &fakeForward{ctx: context.Background()}

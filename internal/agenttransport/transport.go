@@ -20,6 +20,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// ErrCleanup marks a failed filesystem cleanup during transport setup.
+var ErrCleanup = errors.New("agenttransport: cleanup failed")
+
+func cleanupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.Join(ErrCleanup, err)
+}
+
 // Config contains independently provisioned connection details. KeyPath must
 // name a dedicated, unencrypted SSH private key owned by the current user.
 // LocalDir must be an existing private directory owned by the current user.
@@ -214,12 +224,12 @@ func Open(ctx context.Context, cfg Config) (*Forward, error) {
 	addr := &net.UnixAddr{Name: f.Socket(), Net: "unix"}
 	f.listener, err = net.ListenUnix("unix", addr)
 	if err != nil {
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, cleanupError(f.Close()))
 	}
 	// Remove explicitly during Close so filesystem cleanup failures are visible.
 	f.listener.SetUnlinkOnClose(false)
 	if err = os.Chmod(f.Socket(), 0600); err != nil {
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, cleanupError(f.Close()))
 	}
 	// Stop the setup cancellation before publishing; if it already fired, fail.
 	if !stop() || setup.Err() != nil {
@@ -227,7 +237,7 @@ func Open(ctx context.Context, cfg Config) (*Forward, error) {
 		if err == nil {
 			err = context.Canceled
 		}
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, cleanupError(f.Close()))
 	}
 	go func() { <-f.ctx.Done(); f.Close() }()
 	go func() { _ = client.Wait(); f.Close() }()

@@ -16,8 +16,7 @@ for (const mode of ['javascript-disabled', 'csp-blocked']) {
         else await route.fulfill({contentType:'text/html',headers:mode==='csp-blocked'?{'Content-Security-Policy':"script-src 'none'"}:{},body:html});
       });
       const page=await context.newPage();await page.goto('http://remote.test/remote/inspect');
-      await page.getByLabel('Reveal environment values for this container now').check();
-      await page.getByRole('button',{name:'Reveal values'}).click();
+      await expect(page.getByRole('button',{name:'Reveal values'})).toHaveCount(0);
       await expect(page.locator('#values')).toBeEmpty();expect(reveals).toBe(0);expect(page.url()).toContain('/remote/inspect');
     } finally {await context.close();if(fs.existsSync(fixture))fs.unlinkSync(fixture)}
   });

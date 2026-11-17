@@ -63,6 +63,7 @@ type Authenticator struct {
 type session struct {
 	// submission serializes logout with the start and completion of an authorized transfer.
 	submission chan struct{}
+	done       chan struct{} // closed under a.mu when the session is revoked
 	user       string
 	csrf       string
 	expires    time.Time
@@ -317,6 +318,41 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 // If logout wins first, acquisition fails. If submission wins, logout waits;
 // a network request already started cannot be recalled. No session identifier
 // is returned. A deadline prevents starting work after session expiry.
+// SessionContext is a revocable lifetime for an authenticated cookie request.
+// Unlike SubmissionLease it does not delay logout. Logout and expiration cancel
+// the context; already written or buffered response bytes cannot be recalled.
+func (a *Authenticator) SessionContext(r *http.Request) (context.Context, func(), bool) {
+	if a == nil || !a.Enabled() {
+		return nil, nil, false
+	}
+	info, ok := r.Context().Value(ctxKey{}).(requestInfo)
+	if !ok || info.method != "cookie" || info.csrf == "" {
+		return nil, nil, false
+	}
+	cookie, err := r.Cookie(SessionCookie)
+	if err != nil || cookie.Value == "" {
+		return nil, nil, false
+	}
+	a.mu.Lock()
+	sess := a.sessions[cookie.Value]
+	valid := sess != nil && a.now().Before(sess.expires) && subtle.ConstantTimeCompare([]byte(info.csrf), []byte(sess.csrf)) == 1 && r.Context().Err() == nil
+	if !valid {
+		a.mu.Unlock()
+		return nil, nil, false
+	}
+	ctx, cancel := context.WithDeadline(r.Context(), sess.expires)
+	done := sess.done
+	a.mu.Unlock()
+	go func() {
+		select {
+		case <-done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return ctx, cancel, true
+}
+
 func (a *Authenticator) SubmissionLease(r *http.Request) (context.Context, func(), bool) {
 	if a == nil || !a.Enabled() {
 		return nil, nil, false
@@ -379,6 +415,7 @@ func (a *Authenticator) HandleLogout(w http.ResponseWriter, r *http.Request) {
 				}
 				if a.sessions[c.Value] == sess {
 					delete(a.sessions, c.Value)
+					close(sess.done)
 				}
 				a.mu.Unlock()
 				<-sess.submission
@@ -444,6 +481,7 @@ func (a *Authenticator) createSession() (string, *session, error) {
 	id := base64.RawURLEncoding.EncodeToString(idRaw)
 	sess := &session{
 		submission: make(chan struct{}, 1),
+		done:       make(chan struct{}),
 		user:       a.user,
 		csrf:       base64.RawURLEncoding.EncodeToString(csrfRaw),
 		expires:    a.now().Add(a.ttl),
@@ -468,6 +506,7 @@ func (a *Authenticator) sessionFromRequest(r *http.Request) *session {
 	}
 	if a.now().After(sess.expires) {
 		delete(a.sessions, c.Value)
+		close(sess.done)
 		return nil
 	}
 	return sess
@@ -479,6 +518,7 @@ func (a *Authenticator) pruneLocked() {
 	for id, sess := range a.sessions {
 		if now.After(sess.expires) {
 			delete(a.sessions, id)
+			close(sess.done)
 		}
 	}
 }

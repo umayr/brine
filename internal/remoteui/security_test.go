@@ -4,71 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestEnrollmentReviewBoundAndOneShot(t *testing.T) {
-	a, f, h, c, csrf := setup(t)
-	reviewToken := func() string {
-		r := httptest.NewRequest("GET", "/remote/review?host=host-A", nil)
-		r.AddCookie(c)
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		m := regexp.MustCompile(`name="reviewToken" value="([^"]+)"`).FindStringSubmatch(w.Body.String())
-		if len(m) != 2 {
-			t.Fatalf("review failed %s", w.Body.String())
-		}
-		return m[1]
-	}
-	post := func(cookie *http.Cookie, form url.Values) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "/remote/enroll", strings.NewReader(form.Encode()))
-		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		r.AddCookie(cookie)
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, r)
-		return w
-	}
-	token := reviewToken()
-	form := url.Values{"_csrf": {csrf}, "confirm": {"yes"}, "reviewToken": {token}, "host": {"host-B"}}
-	if w := post(c, form); w.Code != 400 || f.enrolls != 0 {
-		t.Fatalf("substitution: %d", w.Code)
-	}
-	token = reviewToken()
-	form = url.Values{"_csrf": {csrf}, "confirm": {"yes"}, "reviewToken": {token}}
-	// Same authenticator, different cookie and CSRF session.
-	l := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/login", strings.NewReader("user=admin&password=secret"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	a.HandleLogin(l, req)
-	other := l.Result().Cookies()[0]
-	get := httptest.NewRequest("GET", "/remote/review?host=other", nil)
-	get.AddCookie(other)
-	gw := httptest.NewRecorder()
-	h.ServeHTTP(gw, get)
-	m := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindStringSubmatch(gw.Body.String())
-	if len(m) != 2 {
-		t.Fatal("other CSRF")
-	}
-	otherForm := url.Values{"_csrf": {m[1]}, "confirm": {"yes"}, "reviewToken": {token}}
-	if w := post(other, otherForm); w.Code != 403 || f.enrolls != 0 {
-		t.Fatalf("other session: %d", w.Code)
-	}
-	if w := post(c, form); w.Code != 200 || f.enrolls != 1 || f.enrolledHost != "host-A" || f.enrolledIdentity.DaemonID != "daemon" {
-		t.Fatalf("enroll: %d", w.Code)
-	}
-	if w := post(c, form); w.Code != 403 || f.enrolls != 1 {
-		t.Fatalf("replay: %d", w.Code)
-	}
-	if safeText("safe\u202eevil") || safeText("bad\nname") {
-		t.Fatal("control accepted")
-	}
-}
 func TestRevealAuditFailClosed(t *testing.T) {
 	_, f, h, c, csrf := setup(t)
 	post := func() *httptest.ResponseRecorder {
@@ -145,36 +87,9 @@ func TestInspectIdentityAndUnsafeReview(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "identity mismatch") || strings.Contains(w.Body.String(), "Reveal values") {
 		t.Fatal("mismatched inspect shown")
 	}
-	id, _ := f.Review(context.Background(), "h")
-	id.DaemonID = "evil\u202eidentity"
-	f.reviewOverride = &id
-	r = httptest.NewRequest("GET", "/remote/review?host=h", nil)
-	r.AddCookie(c)
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-	if strings.Contains(w.Body.String(), "reviewToken") {
-		t.Fatal("unsafe identity reviewed")
-	}
+
 }
 func TestExpiredReviewAndEventCap(t *testing.T) {
-	a, f, _, cookie, _ := setup(t)
-	h, err := New(f, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := httptest.NewRequest("GET", "/remote/review", nil)
-	r.AddCookie(cookie)
-	id, _ := f.Review(context.Background(), "h")
-	token, err := h.saveReview(r, "h", id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry := h.reviews[token]
-	entry.expires = time.Now().Add(-time.Second)
-	h.reviews[token] = entry
-	if _, ok := h.takeReview(r, token); ok {
-		t.Fatal("expired review accepted")
-	}
 	events := make([]LogEvent, 4100)
 	for i := range events {
 		events[i] = LogEvent{Type: "chunk", Stream: "stdout", Bytes: []byte("x")}

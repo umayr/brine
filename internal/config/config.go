@@ -31,6 +31,13 @@ type Config struct {
 	CoordinationDaemonID string // independently provisioned expected daemon ID
 	Dev                  bool   // hot-reload templates in dev mode
 
+	// Remote read-only access remains disabled until registry leases and the
+	// production backend are integrated. Paths must be operator-controlled.
+	RemoteEnabled     bool
+	RemoteRegistryDir string
+	RemoteForwardDir  string
+	RemoteTimeout     time.Duration
+
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
 	AuthUser      string
@@ -66,6 +73,9 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	if c.RemoteEnabled || c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 {
+		return fmt.Errorf("remote read-only access is not yet available")
+	}
 	if c.Profile == target.Alpha {
 		return fmt.Errorf("Alpha profile is disabled")
 	}

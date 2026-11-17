@@ -197,7 +197,10 @@ type disk struct {
 
 // Registry uses an operator-chosen private directory. All cooperating processes
 // must use this API and the same canonical directory.
-type Registry struct{ dir string }
+type Registry struct {
+	dir           string
+	beforePublish func() // test-only synchronization hook
+}
 
 func Open(dir string) (*Registry, error) {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
@@ -431,7 +434,10 @@ func rejectDuplicateKeys(b []byte) error {
 	}
 	return walk("envelope")
 }
-func (r *Registry) save(d disk) error {
+func (r *Registry) save(ctx context.Context, d disk) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
@@ -459,6 +465,14 @@ func (r *Registry) save(d disk) error {
 	if closeErr != nil {
 		return closeErr
 	}
+	if r.beforePublish != nil {
+		r.beforePublish()
+	}
+	// Cancellation can race the OS rename. Once publication begins, an error
+	// or cancellation may mean the value was installed; reconcile, never retry blindly.
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 	if err = os.Rename(name, filepath.Join(r.dir, "targets.json")); err != nil {
 		return err
 	}
@@ -467,7 +481,11 @@ func (r *Registry) save(d disk) error {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	if err := dir.Sync(); err != nil {
+		return err
+	}
+	// The rename may already have committed even if the context has expired.
+	return ctx.Err()
 }
 
 // List fails closed if any record or the storage envelope is malformed.
@@ -529,8 +547,11 @@ func (r *Registry) AddContext(ctx context.Context, t Record, reviewed Record) er
 				return ErrConflict
 			}
 		}
+		if e := ctx.Err(); e != nil {
+			return e
+		}
 		d.Targets = append(d.Targets, t)
-		return r.save(d)
+		return r.save(ctx, d)
 	})
 }
 
@@ -572,8 +593,11 @@ func (r *Registry) UpdateContext(ctx context.Context, old, next Record, reviewed
 				if v != old {
 					return ErrConflict
 				}
+				if e := ctx.Err(); e != nil {
+					return e
+				}
 				d.Targets[i] = next
-				return r.save(d)
+				return r.save(ctx, d)
 			}
 		}
 		return ErrNotFound

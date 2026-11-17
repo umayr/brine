@@ -22,27 +22,16 @@ type fake struct {
 	reveals, enrolls, inspects, logCalls int
 	audits                               []string
 	beginErr, finishErr                  error
-	enrolledHost                         string
-	enrolledIdentity                     Identity
 	inspectID                            string
 	inspection                           *Inspection
-	reviewOverride                       *Identity
 	inventory                            []Container
 }
 
+func (*fake) AcquireRead(ctx context.Context, _ string) (context.Context, func() error, error) {
+	return ctx, func() error { return nil }, nil
+}
+
 func (*fake) Hosts(context.Context) ([]Host, error) { return []Host{{"h", "Host <one>", "ready"}}, nil }
-func (f *fake) Review(context.Context, string) (Identity, error) {
-	if f.reviewOverride != nil {
-		return *f.reviewOverride, nil
-	}
-	return Identity{"SHA256:host", "/agent.sock", "SHA256:agent", "agent", "engine", "docker", "unix:///engine.sock", "daemon", "1", "SHA256:reveal"}, nil
-}
-func (f *fake) Enroll(_ context.Context, host string, id Identity) error {
-	f.enrolls++
-	f.enrolledHost = host
-	f.enrolledIdentity = id
-	return nil
-}
 func (f *fake) Inventory(context.Context, string) ([]Container, error) {
 	if f.inventory != nil {
 		return f.inventory, nil
@@ -112,14 +101,15 @@ func setup(t *testing.T) (*auth.Authenticator, *fake, http.Handler, *http.Cookie
 	a.HandleLogin(login, req)
 	cookie := login.Result().Cookies()[0]
 	handler := h.Protected()
-	get := httptest.NewRequest("GET", "/remote/review?host=h", nil)
+	get := httptest.NewRequest("GET", "/remote/inspect?host=h&container="+testID, nil)
 	get.AddCookie(cookie)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, get)
-	m := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindStringSubmatch(rec.Body.String())
+	m := regexp.MustCompile(`data-csrf="([^"]+)"`).FindStringSubmatch(rec.Body.String())
 	if len(m) != 2 {
 		t.Fatalf("missing CSRF: %s", rec.Body.String())
 	}
+	f.inspects = 0 // discard the setup inspection used to obtain the CSRF token
 	return a, f, handler, cookie, m[1]
 }
 func TestRevealAuthorizationAndNoStore(t *testing.T) {
@@ -195,7 +185,7 @@ func TestInventoryDuplicateNamesHaveAccessibleIDs(t *testing.T) {
 }
 func TestViewsAndCSRF(t *testing.T) {
 	_, f, h, c, _ := setup(t)
-	for _, path := range []string{"/remote", "/remote/review?host=h", "/remote/inventory?host=h", "/remote/inspect?host=h&container=" + testID} {
+	for _, path := range []string{"/remote", "/remote/inventory?host=h", "/remote/inspect?host=h&container=" + testID} {
 		r := httptest.NewRequest("GET", path, nil)
 		r.AddCookie(c)
 		w := httptest.NewRecorder()

@@ -17,6 +17,16 @@ import (
 
 var ErrInventoryLimit = errors.New("remoteagent: inventory pagination limit exceeded or cursor repeated")
 
+// ErrCleanup marks failed cleanup during session setup.
+var ErrCleanup = errors.New("remoteagent: cleanup failed")
+
+func cleanupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.Join(ErrCleanup, err)
+}
+
 // Config supplies local transport settings; all endpoint details come from Record.
 type Config struct {
 	LocalDir string
@@ -63,21 +73,24 @@ func open(ctx context.Context, r targetregistry.Record, cfg Config, d dependenci
 	}
 	f, err := d.open(ctx, agenttransport.Config{Address: net.JoinHostPort(r.Host, strconv.Itoa(int(r.Port))), User: r.User, KeyPath: r.KeyPath, HostPublicKey: r.HostPublicKey, RemoteSocket: r.RemoteSocket, LocalDir: cfg.LocalDir, Timeout: cfg.Timeout})
 	if err != nil {
+		if errors.Is(err, agenttransport.ErrCleanup) {
+			err = errors.Join(ErrCleanup, err)
+		}
 		return nil, err
 	}
 	c, err := d.newClient(f.Context(), f.Socket(), b)
 	if err != nil {
-		return nil, errors.Join(err, f.Close())
+		return nil, errors.Join(err, cleanupError(f.Close()))
 	}
 	epoch, err := c.Session(ctx)
 	if err != nil || epoch == "" {
 		if err == nil {
 			err = errors.New("remoteagent: empty epoch")
 		}
-		return nil, errors.Join(err, c.Close(), f.Close())
+		return nil, errors.Join(err, cleanupError(errors.Join(c.Close(), f.Close())))
 	}
 	if ctx.Err() != nil || f.Context().Err() != nil {
-		return nil, errors.Join(errors.New("remoteagent: forward closed"), c.Close(), f.Close())
+		return nil, errors.Join(errors.New("remoteagent: forward closed"), cleanupError(errors.Join(c.Close(), f.Close())))
 	}
 	return &Session{forward: f, client: c, epoch: epoch}, nil
 }

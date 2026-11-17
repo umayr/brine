@@ -4,17 +4,13 @@ package remoteui
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"html/template"
 	"io"
+	"log"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -27,8 +23,6 @@ import (
 // Implementations must not retain reveal values or log sensitive content.
 type Backend interface {
 	Hosts(context.Context) ([]Host, error)
-	Review(context.Context, string) (Identity, error)
-	Enroll(context.Context, string, Identity) error
 	Inventory(context.Context, string) ([]Container, error)
 	Inspect(context.Context, string, string) (Inspection, error)
 	Logs(context.Context, string, string, int, bool) (LogStream, error)
@@ -44,21 +38,16 @@ type Backend interface {
 	FinishRevealAudit(context.Context, string, bool) error
 }
 
+// ReadLeaseBackend pins the complete registry record for a request. Its lease
+// must remain valid until release and exclude all cooperating registry writers.
+// The returned context carries the verified connection used by Backend reads;
+// release cancels streams and closes that connection before unlocking.
+type ReadLeaseBackend interface {
+	AcquireRead(context.Context, string) (context.Context, func() error, error)
+}
+
 type Host struct{ ID, Name, State string }
 
-// Identity is the complete independently verified enrollment tuple.
-type Identity struct {
-	HostFingerprint      string
-	RemoteSocket         string
-	AgentFingerprint     string
-	AgentID              string
-	EngineID             string
-	EngineKind           string
-	EngineSocket         string
-	DaemonID             string
-	Generation           string
-	RevealKeyFingerprint string
-}
 type Container struct{ ID, Name, Stack, Service, State, Image string }
 
 // IDPrefix is a display hint only; requests always use the complete ID.
@@ -132,17 +121,9 @@ type LogEvent struct {
 }
 
 type Handler struct {
-	backend Backend
-	auth    *auth.Authenticator
-	key     [32]byte
-	mu      sync.Mutex
-	reviews map[string]review
-}
-type review struct {
-	host     string
-	identity Identity
-	session  [32]byte
-	expires  time.Time
+	backend     Backend
+	auth        *auth.Authenticator
+	logDuration func(bool) time.Duration // test-only override
 }
 
 // New requires the same authenticator's authentication and CSRF middleware
@@ -151,11 +132,7 @@ func New(b Backend, a *auth.Authenticator) (*Handler, error) {
 	if b == nil || a == nil || !a.Enabled() {
 		return nil, errors.New("remote UI requires backend and enabled authentication")
 	}
-	h := &Handler{backend: b, auth: a, reviews: make(map[string]review)}
-	if _, err := rand.Read(h.key[:]); err != nil {
-		return nil, err
-	}
-	return h, nil
+	return &Handler{backend: b, auth: a}, nil
 }
 
 // Protected installs the body limit before authentication/CSRF can parse it.
@@ -174,7 +151,6 @@ func (h *Handler) Protected() http.Handler {
 type page struct {
 	CSRF, Host, Container, Error, Notice, ReviewToken string
 	Hosts                                             []Host
-	Identity                                          *Identity
 	Containers                                        []Container
 	Inspection                                        *Inspection
 }
@@ -183,8 +159,8 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	if !auth.Authenticated(r) {
-		http.Error(w, "Authentication required", http.StatusForbidden)
+	if !auth.Authenticated(r) || !auth.CookieAuthenticated(r) || strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
+		http.Error(w, "Interactive admin session required", http.StatusForbidden)
 		return
 	}
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
@@ -203,7 +179,58 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p := page{CSRF: h.auth.CSRFFor(r), Host: r.FormValue("host"), Container: r.FormValue("container")}
-	ctx := r.Context()
+	ctx, cancelSession, ok := h.auth.SessionContext(r)
+	if !ok {
+		http.Error(w, "Session expired", http.StatusForbidden)
+		return
+	}
+	defer cancelSession()
+	// Interrupt a blocked network write when the authenticated session ends.
+	// Wait for the deadline callback before clearing it, so it cannot affect a
+	// later request on the same connection. Wrappers should support Unwrap.
+	controller := http.NewResponseController(w)
+	deadlineDone := make(chan struct{})
+	stopDeadline := context.AfterFunc(ctx, func() {
+		_ = controller.SetWriteDeadline(time.Now())
+		close(deadlineDone)
+	})
+	defer func() {
+		if !stopDeadline() {
+			<-deadlineDone
+		}
+		_ = controller.SetWriteDeadline(time.Time{})
+	}()
+	w = &sessionWriter{ResponseWriter: w, ctx: ctx}
+	// The protected dispatcher requires this capability. The lease surrounds
+	// rendering and streaming, not merely the backend method call.
+	needsLease := r.URL.Path == "/remote/inventory" && r.Method == http.MethodGet && p.Host != "" ||
+		r.URL.Path == "/remote/inspect" && r.Method == http.MethodGet && p.Host != "" && fullID(p.Container) ||
+		r.URL.Path == "/remote/logs" && r.Method == http.MethodPost && auth.CookieAuthenticated(r) && p.Host != "" && fullID(p.Container)
+	if needsLease {
+		if required, _ := r.Context().Value(requireWriteDeadlineKey{}).(bool); required {
+			if err := controller.SetWriteDeadline(time.Time{}); err != nil {
+				http.Error(w, "Streaming unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		if b, ok := h.backend.(ReadLeaseBackend); ok {
+			var release func() error
+			var err error
+			ctx, release, err = b.AcquireRead(ctx, p.Host)
+			if err != nil || ctx == nil || release == nil {
+				if errors.Is(err, ErrReadCleanup) {
+					log.Print("remote read cleanup failed; operator reconciliation required")
+				}
+				http.Error(w, "Target unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			defer func() {
+				if release() != nil {
+					log.Print("remote read cleanup failed; operator reconciliation required")
+				}
+			}()
+		}
+	}
 	switch r.URL.Path {
 	case "/remote/session":
 		if r.Method != http.MethodGet || !auth.CookieAuthenticated(r) {
@@ -234,54 +261,6 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			p.Error = "Host list unavailable"
 		} else {
 			p.Hosts = hosts
-		}
-		h.render(w, p)
-		return
-	case "/remote/review":
-		if r.Method != http.MethodGet || !auth.CookieAuthenticated(r) || !safeText(p.Host) {
-			break
-		}
-		id, err := h.backend.Review(ctx, p.Host)
-		if err != nil || !complete(id) {
-			p.Error = "Identity unavailable; reads remain disabled"
-		} else {
-			token, err := h.saveReview(r, p.Host, id)
-			if err != nil {
-				p.Error = "Identity review unavailable"
-			} else {
-				p.Identity = &id
-				p.ReviewToken = token
-			}
-		}
-		h.render(w, p)
-		return
-	case "/remote/enroll":
-		if r.Method != http.MethodPost || r.PostForm.Get("confirm") != "yes" {
-			break
-		}
-		lease, release, ok := h.auth.SubmissionLease(r)
-		if !ok {
-			http.Error(w, "Session expired", http.StatusForbidden)
-			return
-		}
-		defer release()
-		rev, ok := h.takeReview(r, r.PostForm.Get("reviewToken"))
-		if !ok {
-			http.Error(w, "Review expired or invalid", http.StatusForbidden)
-			return
-		}
-		// No client-submitted host or identity is accepted as authority.
-		if len(r.PostForm) != 3 || len(r.PostForm["_csrf"]) != 1 || len(r.PostForm["confirm"]) != 1 || len(r.PostForm["reviewToken"]) != 1 {
-			http.Error(w, "Invalid request", http.StatusBadRequest)
-			return
-		}
-		p.Host = rev.host
-		err := h.backend.Enroll(lease, rev.host, rev.identity)
-		h.backend.Audit(ctx, "enroll", err == nil)
-		if err != nil {
-			p.Error = "Enrollment failed; verify identity out of band"
-		} else {
-			p.Notice = "Identity approved"
 		}
 		h.render(w, p)
 		return
@@ -322,8 +301,21 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		if follow {
 			duration = 5 * time.Minute
 		}
+		if h.logDuration != nil {
+			duration = h.logDuration(follow)
+		}
 		ctx, cancel := context.WithTimeout(ctx, duration)
 		defer cancel()
+		operationDeadlineDone := make(chan struct{})
+		stopOperationDeadline := context.AfterFunc(ctx, func() {
+			_ = controller.SetWriteDeadline(time.Now())
+			close(operationDeadlineDone)
+		})
+		defer func() {
+			if !stopOperationDeadline() {
+				<-operationDeadlineDone
+			}
+		}()
 		stream, err := h.backend.Logs(ctx, p.Host, p.Container, 100, follow)
 		h.backend.Audit(ctx, "logs", err == nil)
 		if err != nil {
@@ -375,6 +367,33 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Invalid request", http.StatusBadRequest)
 }
 
+// sessionWriter suppresses subsequent writes after logout or expiry; it cannot
+// recall writes already buffered or in progress when cancellation happens.
+type sessionWriter struct {
+	http.ResponseWriter
+	ctx context.Context
+}
+
+func (w *sessionWriter) Write(p []byte) (int, error) {
+	if err := w.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return w.ResponseWriter.Write(p)
+}
+func (w *sessionWriter) WriteHeader(code int) {
+	if w.ctx.Err() == nil {
+		w.ResponseWriter.WriteHeader(code)
+	}
+}
+func (w *sessionWriter) FlushError() error {
+	if err := w.ctx.Err(); err != nil {
+		return err
+	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
+}
+func (w *sessionWriter) Flush()                      { _ = w.FlushError() }
+func (w *sessionWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 // writeLogStream never treats EOF, errors, cancellation or a local cap as a
 // successful agent end. Fixed errors do not reflect untrusted backend text.
 func writeLogStream(ctx context.Context, w http.ResponseWriter, s LogStream) {
@@ -398,6 +417,9 @@ func writeLogStreamClock(ctx context.Context, w http.ResponseWriter, s LogStream
 		wire += len(b)
 		if _, err = w.Write(b); err != nil {
 			return false
+		}
+		if f, ok := w.(interface{ FlushError() error }); ok {
+			return f.FlushError() == nil
 		}
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -505,70 +527,6 @@ func safeText(s string) bool {
 	}
 	return true
 }
-func complete(i Identity) bool {
-	for _, s := range []string{i.HostFingerprint, i.RemoteSocket, i.AgentFingerprint, i.AgentID, i.EngineID, i.EngineKind, i.EngineSocket, i.DaemonID, i.Generation, i.RevealKeyFingerprint} {
-		if !safeText(s) {
-			return false
-		}
-	}
-	return true
-}
-func (h *Handler) sessionHash(r *http.Request) ([32]byte, bool) {
-	var sum [32]byte
-	c, err := r.Cookie(auth.SessionCookie)
-	if err != nil || c.Value == "" {
-		return sum, false
-	}
-	mac := hmac.New(sha256.New, h.key[:])
-	_, _ = mac.Write([]byte(c.Value))
-	copy(sum[:], mac.Sum(nil))
-	return sum, true
-}
-func (h *Handler) saveReview(r *http.Request, host string, id Identity) (string, error) {
-	session, ok := h.sessionHash(r)
-	if !ok {
-		return "", errors.New("session unavailable")
-	}
-	var b [32]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	token := base64.RawURLEncoding.EncodeToString(b[:])
-	now := time.Now()
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	for k, v := range h.reviews {
-		if !now.Before(v.expires) {
-			delete(h.reviews, k)
-		}
-	}
-	if len(h.reviews) >= 1000 {
-		return "", errors.New("review capacity")
-	}
-	if _, exists := h.reviews[token]; exists {
-		return "", errors.New("review collision")
-	}
-	h.reviews[token] = review{host, id, session, now.Add(2 * time.Minute)}
-	return token, nil
-}
-func (h *Handler) takeReview(r *http.Request, token string) (review, bool) {
-	session, ok := h.sessionHash(r)
-	if !ok {
-		return review{}, false
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	v, ok := h.reviews[token]
-	if !ok || !hmac.Equal(v.session[:], session[:]) {
-		return review{}, false
-	}
-	delete(h.reviews, token)
-	if !time.Now().Before(v.expires) {
-		return review{}, false
-	}
-	return v, true
-}
-
 func (h *Handler) render(w http.ResponseWriter, p page) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = view.Execute(w, p)
