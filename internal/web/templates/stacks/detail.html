@@ -143,9 +143,12 @@
   <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
     <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
     <div id="project-preview-content" class="space-y-3">
-      <p>Preview canonical regular files and byte counts in the current project. File contents can contain secrets. Local projects include Brine's meta.json; Git projects use the repository root. Git subfolder previews are unavailable.</p>
-      <p class="text-sm text-muted">Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the entire preview.</p>
-      <ul class="text-sm text-muted">
+      <p>Preview project file names and sizes. Ignored and hidden files may be included; file contents can contain secrets. This preview is not an atomic snapshot and does not transfer files or authorize deployment.</p>
+      <details class="text-sm text-muted">
+      <summary class="cursor-pointer">Preview scope and limits</summary>
+      <p>Local projects include Brine's meta.json; Git projects use the repository root. Git subfolder previews are unavailable.</p>
+      <p>Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the entire preview.</p>
+      <ul>
         <li>Entries named .git are omitted. Symlinks and special files are rejected.</li>
         <li>Ignored, untracked and hidden files are included; .gitignore is not honored. Files such as .env and keys may be included.</li>
         <li>Regular files with hard links and files under mounted subdirectories are included; these are not detected or filtered.</li>
@@ -154,6 +157,7 @@
         <li>Concurrent changes mean this is not an atomic snapshot; a later preview may differ.</li>
         <li>Preview does not transfer files or authorize deployment; it does not confirm immutable snapshot bytes.</li>
       </ul>
+      </details>
       <button type="button" class="ui-button ui-button-outline ui-button-sm" hx-get="/web/stacks/{{.Stack.Name}}/project-preview" hx-target="#project-preview-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('project-preview-result').textContent = 'Project preview unavailable. Check project files, file types and size limits, then retry.'">Preview project files</button>
       <div id="project-preview-result" aria-live="polite"></div>
       {{if .StagingEnabled}}<div class="space-y-2"><p>Local transfer is opt-in and requires a separate review and confirmation. Remote/SSH staging is unsupported.</p><button type="button" class="ui-button ui-button-outline ui-button-sm" hx-post="/web/stacks/{{.Stack.Name}}/staging/prepare" hx-target="#staging-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('staging-result').textContent = event.detail.xhr.responseText">Prepare local transfer review</button><div id="staging-result" aria-live="polite"></div></div>{{end}}

@@ -197,6 +197,11 @@ local processes and non-browser clients can still control it.
 | `--dill` | | `dill` | Operator-selected Dill binary; bundled v0.7.0 is incompatible with qualified operations |
 | `--staging-socket` | | unset | Opt-in absolute local dill-serve Unix socket; requires `--staging-identity` and authentication |
 | `--staging-identity` | | unset | Stable operator-asserted local staging target identifier; not receiver attestation |
+| `--remote-enabled` | | `false` | Opt in to authenticated remote read-only UI |
+| `--remote-registry-dir` | | unset | Explicit initialized private remote registry directory |
+| `--remote-forward-dir` | | unset | Explicit existing private local forwarding directory |
+| `--remote-timeout` | | unset | Explicit positive SSH transport timeout |
+| `--init-remote-registry` | | `false` | Initialize a new registry and exit; does not start or enable the server |
 | `--coordination-state-dir` | | unset | Preexisting canonical shared operator-owned 0700 state outside Brine data; no auto-provisioning |
 | `--coordination-layout` | | unset | Explicit native Linux Docker assertion: `native-local-docker-v1` only |
 | `--coordination-daemon-id` | | unset | Independently provisioned expected daemon ID, never learned from the selected socket |
@@ -210,6 +215,22 @@ local processes and non-browser clients can still control it.
 | `--deploy-timeout` | | `30m` | Timeout for deploy/teardown/git commands |
 | `--dev` | | `false` | Re-parse templates on every request |
 | `--version` | | | Print the version |
+
+## Remote read-only hosts
+
+**“Read-only” applies to the remote host integration, not the entire Brine process.** The same server retains its local stack and container controls, and its GitOps syncer can deploy existing auto-deploy stacks. Do not use an existing data directory if you require an observation-only process; this release has no enforced whole-server read-only mode.
+
+Remote access is disabled by default and requires all four remote flags, an authenticated administrator and an explicitly initialized registry. For example, after independently provisioning private, service-owned directories and trusted ancestors:
+
+```sh
+brine --init-remote-registry --remote-registry-dir /private/brine-registry
+brine --remote-enabled --remote-registry-dir /private/brine-registry \
+  --remote-forward-dir /private/brine-forwards --remote-timeout 10s
+```
+
+Initialization is exclusive and does not repair existing or partial state. **On any initialization I/O, sync, rollback or final-lock-close error, stop and quarantine all consumers and reconcile out of band before access or retry.** Quarantine is not automatically enforced across processes after such an error; another opener may see apparently valid state. Never delete or recreate the root or lock during use. Missing, corrupt or insecure registry state fails closed rather than starting an empty registry. See [registry initialization and filesystem assumptions](internal/targetregistry/README.md). The operator must protect and verify ACLs, ancestors and backups; filesystem rollback, whole-root removal/replacement and noncooperating writers are outside the locking guarantee. Restart signs out sessions and invalidates pending enrollment approvals.
+
+For the proposed manual agent installation and identity-gathering procedure, see [Dill's pinned provisioning guide](https://github.com/umayr/dill/blob/5e493fdaf1b32363b4b3d620b1422be77725d280/docs/host-agent-install.md) and the [Brine enrollment field contract](docs/target-registry.md). The guide and remote SSH path are **not real-SSH qualified**; in particular, same-UID SSH access can expose other sockets and Docker access is highly privileged. Independently verify all endpoint and agent/engine identity fields and pins out of band. The SSH connection pins the supplied host key and authenticates the agent binding; it does not discover trustworthy pins or verify the local key path or reveal-verifier fingerprint. Use a dedicated private SSH key, trusted agent and isolated engine. Access to a container engine may grant host-level privileges. Inspection metadata, commands, paths, health tests and logs may contain secrets. Restrict Brine and any TLS reverse proxy to the administrator. This UI provides enrollment and reads. Environment reveal is disabled by default and requires separate explicit provisioning and opt-in; see [remote reveal](docs/remote-reveal.md). Remote lifecycle actions and staging are not enabled. Shutdown cancels active remote operations and streams, then allows ten seconds for all requests to drain; on timeout it force-closes connections and reports a shutdown error. Delivered or buffered bytes cannot be recalled, and failed cleanup requires operator investigation.
 
 ## Local snapshot staging
 
