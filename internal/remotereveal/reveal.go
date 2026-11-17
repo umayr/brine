@@ -88,6 +88,9 @@ func (e *Executor) Execute(s Submission, reviewed targetregistry.Record, contain
 	}
 	r, lease, err := e.Registry.AcquireRead(ctx, reviewed.ID)
 	if err != nil {
+		if errors.Is(err, targetregistry.ErrCleanup) {
+			return cleanupFailure(ErrCleanup)
+		}
 		return ErrDenied
 	}
 	defer func() {
