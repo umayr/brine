@@ -1,6 +1,8 @@
 # Qualified Alpha operation consumer — b3 compatibility and accepted successor
 
 > **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+>
+> **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
 This implements Brine #66's bounded **attended CLI consumer**, not #67 durable
 review/source approval, #68 deployment security qualification or #69 native

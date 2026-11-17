@@ -1,6 +1,8 @@
 # S1: opt-in honest Alpha request history
 
 > **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+>
+> **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
 This is **the existing bounded mutation stream plus authenticated GET lookup**, not asynchronous submission, a queue, a saved-plan executor, reconciliation or new execution authority. Outside explicit `--operation-state-dir`, merged #75 behavior remains unchanged. Legacy is outside this durable profile. This slice does not qualify source execution (#67), complete resource/retention inventory (#66), or actual native app acceptance (#69). **Native app/engine qualification: NOT RUN.** Future actual #69 acceptance must explicitly require this flag and all separately approved source/provider qualification gates; merely writing a record never enables an action.
 

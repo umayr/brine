@@ -1,6 +1,8 @@
 # Paired Alpha application canary: receiving boundary
 
 > **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+>
+> **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
 This document records the reviewed attended **component** interface and the
 remaining receiving contracts. It does not freeze an external proof format,

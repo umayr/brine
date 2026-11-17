@@ -1,6 +1,8 @@
 # Named preflight consumer: dormant runner seam
 
 > **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+>
+> **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
 This component implements frozen revision-4 `dill.preflight/1` codecs and dormant runner APIs. **It does not activate a route or establish qualification.** No HTTP endpoint, UI review, history-v2, activation flag, source capture, provider code or candidate pin is changed.
 
