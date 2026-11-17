@@ -26,11 +26,16 @@ func (c *Client) consume(g Grant) bool {
 			delete(c.used, k)
 		}
 	}
-	k := g.Epoch + ":" + g.Nonce
-	if _, ok := c.used[k]; ok || len(c.used) >= 10000 {
+	k := "nonce:" + g.Epoch + ":" + g.Nonce
+	id := "request:" + g.RequestID
+	if _, ok := c.used[k]; ok {
+		return false
+	}
+	if _, ok := c.used[id]; ok || len(c.used) > 9998 {
 		return false
 	}
 	c.used[k] = g.ExpiresAt
+	c.used[id] = g.ExpiresAt
 	return true
 }
 

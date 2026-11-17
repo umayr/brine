@@ -209,12 +209,54 @@ func TestPairProcess(t *testing.T) {
 	}
 	now := uint64(time.Now().Unix())
 	enc := base64.RawURLEncoding.EncodeToString
-	g := Grant{AgentID: shaAgent(binding.AgentPublicKey), EngineID: engineID, Generation: 1, Epoch: epoch, ContainerID: id, SessionID: enc(make([]byte, 16)), Nonce: enc(make([]byte, 32)), IssuedAt: now, ExpiresAt: now + 30, Scope: "env.values", Interactive: true}
+	requestID, err := NewRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := Grant{AgentID: shaAgent(binding.AgentPublicKey), EngineID: engineID, Generation: 1, Epoch: epoch, ContainerID: id, SessionID: enc(make([]byte, 16)), Nonce: enc(make([]byte, 32)), RequestID: requestID, IssuedAt: now, ExpiresAt: now + 30, Scope: "env.values", Interactive: true}
 	msg, err := GrantBytes(g)
 	if err != nil {
 		t.Fatal(err)
 	}
 	g.Signature = enc(ed25519.Sign(signer, msg))
+	// Bypass the client guard deliberately to verify the agent independently
+	// rejects substituting an HTTP request ID for a different signed ID.
+	cs, es := newClient(binding)
+	if es != epoch {
+		t.Fatal("unexpected epoch change")
+	}
+	sub := g
+	sub.Nonce = enc(bytes.Repeat([]byte{1}, 32))
+	sub.RequestID, err = NewRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subBytes, err := GrantBytes(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub.Signature = enc(ed25519.Sign(signer, subBytes))
+	otherID, err := NewRequestID()
+	if err != nil || otherID == sub.RequestID {
+		t.Fatal("could not generate distinct request ID")
+	}
+	resp, responseID, err := cs.requestWithID(base, nil, "/v1/reveal", epoch, struct {
+		ID    string `json:"containerId"`
+		Grant Grant  `json:"grant"`
+	}{id, sub}, otherID)
+	if err != nil {
+		t.Fatal("substitution request failed:", err)
+	}
+	denial, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024+1))
+	_ = resp.Body.Close()
+	if err != nil || len(denial) > 512*1024 || bytes.Contains(denial, []byte(secret)) {
+		t.Fatal("invalid substitution response")
+	}
+	_, denialErr := parseEnvelope(denial, responseID, resp.StatusCode)
+	var remoteErr *RemoteError
+	if !errors.As(denialErr, &remoteErr) || (remoteErr.Code != "INVALID" && remoteErr.Code != "UNAUTHORIZED") {
+		t.Fatalf("agent did not deny substituted header: status=%d err=%v", resp.StatusCode, denialErr)
+	}
 	result, err := c.Reveal(base, epoch, id, g)
 	if err != nil {
 		t.Fatal("reveal:", err)

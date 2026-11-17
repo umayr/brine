@@ -3,8 +3,6 @@ package agentclient
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +38,13 @@ func decodeStrict(raw []byte, v any) error {
 	return nil
 }
 func (c *Client) request(ctx context.Context, activeCtx context.Context, path, epoch string, body any) (*http.Response, string, error) {
+	return c.requestWithID(ctx, activeCtx, path, epoch, body, "")
+}
+
+func (c *Client) requestWithID(ctx context.Context, activeCtx context.Context, path, epoch string, body any, rid string) (*http.Response, string, error) {
+	if rid != "" && !validRequestID(rid) {
+		return nil, "", ErrProtocol
+	}
 	if _, e := binaryText(epoch, 32); e != nil {
 		return nil, "", ErrProtocol
 	}
@@ -54,11 +59,12 @@ func (c *Client) request(ctx context.Context, activeCtx context.Context, path, e
 	if e != nil || len(raw) > 32768 {
 		return nil, "", ErrProtocol
 	}
-	id := make([]byte, 16)
-	if _, e = rand.Read(id); e != nil {
-		return nil, "", ErrProtocol
+	if rid == "" {
+		rid, e = NewRequestID()
+		if e != nil {
+			return nil, "", ErrProtocol
+		}
 	}
-	rid := hex.EncodeToString(id)
 	requestCtx, cancel := context.WithCancel(ctx)
 	// Forward lifetime and explicit Close remain attached even if this request
 	// retires the epoch after receiving an error status.
@@ -158,9 +164,13 @@ func parseEnvelope(raw []byte, rid string, status int) (json.RawMessage, error) 
 	return nil, &RemoteError{e.Error.Code, e.Error.Retryable}
 }
 func (c *Client) call(ctx context.Context, path, epoch string, body, out any) error {
+	return c.callWithID(ctx, path, epoch, body, out, "")
+}
+
+func (c *Client) callWithID(ctx context.Context, path, epoch string, body, out any, rid string) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	res, id, e := c.request(ctx, nil, path, epoch, body)
+	res, id, e := c.requestWithID(ctx, nil, path, epoch, body, rid)
 	if e != nil {
 		return e
 	}
@@ -427,10 +437,10 @@ func (c *Client) Reveal(ctx context.Context, epoch, id string, g Grant) (RevealR
 	if !c.consume(g) {
 		return r, ErrProtocol
 	}
-	e := c.call(ctx, "/v1/reveal", epoch, struct {
+	e := c.callWithID(ctx, "/v1/reveal", epoch, struct {
 		ID    string `json:"containerId"`
 		Grant Grant  `json:"grant"`
-	}{id, g}, &r)
+	}{id, g}, &r, g.RequestID)
 	if e != nil {
 		return RevealResult{}, e
 	}

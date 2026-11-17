@@ -3,6 +3,8 @@ package agentclient
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/hex"
 )
 
 // Grant is issued by an authorized upstream signer after interactive confirmation.
@@ -15,11 +17,33 @@ type Grant struct {
 	ContainerID string `json:"containerId"`
 	SessionID   string `json:"sessionId"`
 	Nonce       string `json:"nonce"`
+	RequestID   string `json:"requestId"`
 	IssuedAt    uint64 `json:"issuedAt"`
 	ExpiresAt   uint64 `json:"expiresAt"`
 	Scope       string `json:"scope"`
 	Interactive bool   `json:"interactive"`
 	Signature   string `json:"signature"`
+}
+
+// NewRequestID generates a unique random request ID for inclusion before signing.
+func NewRequestID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
+}
+
+func validRequestID(id string) bool {
+	if len(id) != 32 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // GrantBytes returns the prescribed signature input. It does not check time or
@@ -34,18 +58,21 @@ func GrantBytes(g Grant) ([]byte, error) {
 	if _, e := binaryText(g.Nonce, 32); e != nil {
 		return nil, e
 	}
+	if !validRequestID(g.RequestID) {
+		return nil, ErrProtocol
+	}
 	if g.Scope != "env.values" || !g.Interactive || !fullID(g.ContainerID) || g.AgentID == "" || !validUUID(g.EngineID) || g.Generation == 0 || g.ExpiresAt < g.IssuedAt || g.ExpiresAt-g.IssuedAt > 30 {
 		return nil, ErrProtocol
 	}
 	var b bytes.Buffer
-	b.WriteString("brine-agent-reveal/1\x00")
+	b.WriteString("brine-agent-reveal/2\x00")
 	for _, s := range []string{g.AgentID, g.EngineID} {
 		if e := lp(&b, s); e != nil {
 			return nil, e
 		}
 	}
 	u64(&b, g.Generation)
-	for _, s := range []string{g.Epoch, g.ContainerID, g.SessionID, g.Nonce} {
+	for _, s := range []string{g.Epoch, g.ContainerID, g.SessionID, g.Nonce, g.RequestID} {
 		if e := lp(&b, s); e != nil {
 			return nil, e
 		}

@@ -22,7 +22,7 @@ func TestRevealDroppedResponseConsumes(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(make([]byte, 32))
 	c.revealKey = priv.Public().(ed25519.PublicKey)
 	now := uint64(time.Now().Unix())
-	g := Grant{AgentID: shaAgent(c.binding.AgentPublicKey), EngineID: fixtureEngine, Generation: 1, Epoch: testEpoch, ContainerID: fixtureID, SessionID: "AAAAAAAAAAAAAAAAAAAAAA", Nonce: testEpoch, IssuedAt: now, ExpiresAt: now + 30, Scope: "env.values", Interactive: true}
+	g := Grant{AgentID: shaAgent(c.binding.AgentPublicKey), EngineID: fixtureEngine, Generation: 1, Epoch: testEpoch, ContainerID: fixtureID, SessionID: "AAAAAAAAAAAAAAAAAAAAAA", Nonce: testEpoch, RequestID: "0123456789abcdef0123456789abcdef", IssuedAt: now, ExpiresAt: now + 30, Scope: "env.values", Interactive: true}
 	b, _ := GrantBytes(g)
 	g.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, b))
 	for i := 0; i < 2; i++ {
