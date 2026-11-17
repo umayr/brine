@@ -3,7 +3,7 @@
 package api
 
 import (
-	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -18,7 +18,7 @@ import (
 	"github.com/umayr/brine/internal/operationhistory"
 )
 
-func TestAuthenticatedLookupReturnsOriginalV2Record(t *testing.T) {
+func TestAuthenticatedLookupDisabledPreservesOriginalV2Record(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -63,14 +63,14 @@ func TestAuthenticatedLookupReturnsOriginalV2Record(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer synthetic-token")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("lookup: %d %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "Alpha operation history is disabled") {
+		t.Fatalf("lookup should fail closed: %d %s", w.Code, w.Body.String())
 	}
-	var record operationhistory.RecordV2
-	if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil || record.Version != operationhistory.VersionV2 || record.RequestID != pending.ID() || record.Phase != "accepted" {
-		t.Fatalf("incorrect record: %s (%v)", w.Body.String(), err)
+	if strings.Contains(w.Body.String(), pending.ID()) {
+		t.Fatal("disabled response exposed operation record")
 	}
-	if strings.Contains(w.Body.String(), `"V2"`) || strings.Contains(w.Body.String(), `"V1"`) {
-		t.Fatal("internal union exposed")
+	record, err := s.GetV2(pending.ID())
+	if err != nil || record.Version != operationhistory.VersionV2 || record.RequestID != pending.ID() || record.Phase != "accepted" {
+		t.Fatalf("stored record changed: %+v (%v)", record, err)
 	}
 }
