@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// ErrCleanup marks a failed filesystem cleanup during transport setup.
+// ErrCleanup marks failed resource cleanup during transport setup.
 var ErrCleanup = errors.New("agenttransport: cleanup failed")
 
 func cleanupError(err error) error {
@@ -55,6 +55,7 @@ type Forward struct {
 	once     sync.Once
 	closeErr error
 	client   *ssh.Client
+	conn     *trackedConn
 	listener *net.UnixListener
 	remote   net.Conn
 	local    net.Conn
@@ -65,7 +66,7 @@ type Forward struct {
 func (f *Forward) Context() context.Context { return f.ctx }
 func (f *Forward) Socket() string           { return filepath.Join(f.dir, "agent.sock") }
 
-// Close tears down the forward and returns any filesystem cleanup errors.
+// Close tears down the forward and returns transport and filesystem cleanup errors.
 // Repeated or concurrent calls return the same cleanup result.
 func (f *Forward) Close() error {
 	f.once.Do(func() {
@@ -81,6 +82,9 @@ func (f *Forward) Close() error {
 		// a channel close packet could not otherwise be written.
 		if f.client != nil {
 			_ = f.client.Close()
+		}
+		if f.conn != nil {
+			f.closeErr = errors.Join(f.closeErr, f.conn.Close())
 		}
 		if f.remote != nil {
 			_ = f.remote.Close()
@@ -163,12 +167,34 @@ func pinned(s string) (ssh.PublicKey, error) {
 	return k, nil
 }
 
+// trackedConn records the first close result even when SSH or cancellation
+// closes the socket first. Repeated close calls return that same result.
+type trackedConn struct {
+	net.Conn
+	once sync.Once
+	err  error
+}
+
+func (c *trackedConn) Close() error {
+	c.once.Do(func() { c.err = c.Conn.Close() })
+	return c.err
+}
+
 // Open establishes SSH and a local listener. The sole remote streamlocal
 // channel is opened after the first local client connects; channel-open errors
 // cancel the forward context and close that connection. Open never invokes a remote command,
 // forwards TCP, consults known_hosts, or retries. Cancellation tears down all
 // resources, including handshakes in progress. No SSH agent is consulted.
+type setupDeps struct {
+	dial      func(context.Context, string, string) (net.Conn, error)
+	mkdirTemp func(string, string) (string, error)
+}
+
 func Open(ctx context.Context, cfg Config) (*Forward, error) {
+	return open(ctx, cfg, setupDeps{dial: (&net.Dialer{}).DialContext, mkdirTemp: os.MkdirTemp})
+}
+
+func open(ctx context.Context, cfg Config, d setupDeps) (*Forward, error) {
 	if ctx == nil || cfg.Timeout <= 0 || cfg.User == "" || !cleanAbs(cfg.RemoteSocket) {
 		return nil, errors.New("invalid transport configuration")
 	}
@@ -185,13 +211,14 @@ func Open(ctx context.Context, cfg Config) (*Forward, error) {
 	}
 	setup, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
-	conn, err := (&net.Dialer{}).DialContext(setup, "tcp", cfg.Address)
+	rawConn, err := d.dial(setup, "tcp", cfg.Address)
 	if err != nil {
 		if setup.Err() != nil {
 			return nil, setup.Err()
 		}
 		return nil, err
 	}
+	conn := &trackedConn{Conn: rawConn}
 	stop := context.AfterFunc(setup, func() { _ = conn.Close() })
 	defer stop()
 	_ = conn.SetDeadline(time.Now().Add(cfg.Timeout))
@@ -202,25 +229,25 @@ func Open(ctx context.Context, cfg Config) (*Forward, error) {
 		return nil
 	}})
 	if err != nil {
-		_ = conn.Close()
+		closeErr := conn.Close()
 		if setup.Err() != nil {
-			return nil, setup.Err()
+			return nil, errors.Join(setup.Err(), cleanupError(closeErr))
 		}
-		return nil, fmt.Errorf("SSH handshake: %w", err)
+		return nil, errors.Join(fmt.Errorf("SSH handshake: %w", err), cleanupError(closeErr))
 	}
 	client := ssh.NewClient(cc, chans, reqs)
 	if setup.Err() != nil {
-		_ = client.Close()
-		return nil, setup.Err()
+		closeErr := client.Close()
+		return nil, errors.Join(setup.Err(), cleanupError(errors.Join(closeErr, conn.Close())))
 	}
 	_ = conn.SetDeadline(time.Time{})
-	dir, err := os.MkdirTemp(cfg.LocalDir, "agent-forward-")
+	dir, err := d.mkdirTemp(cfg.LocalDir, "agent-forward-")
 	if err != nil {
-		_ = client.Close()
-		return nil, err
+		closeErr := client.Close()
+		return nil, errors.Join(err, cleanupError(errors.Join(closeErr, conn.Close())))
 	}
 	fctx, fcancel := context.WithCancel(ctx)
-	f := &Forward{ctx: fctx, cancel: fcancel, client: client, dir: dir}
+	f := &Forward{ctx: fctx, cancel: fcancel, client: client, conn: conn, dir: dir}
 	addr := &net.UnixAddr{Name: f.Socket(), Net: "unix"}
 	f.listener, err = net.ListenUnix("unix", addr)
 	if err != nil {
