@@ -18,6 +18,15 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+func testRequestID(t *testing.T) string {
+	t.Helper()
+	id, err := agentclient.NewRequestID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 type testSigner struct {
 	key    ed25519.PrivateKey
 	events *[]string
@@ -94,7 +103,7 @@ func TestExecution(t *testing.T) {
 		name                                   string
 		begin, finish, cancel, mismatch, wrong bool
 		want                                   string
-	}{{"success", false, false, false, false, false, "open,intent,sign,send,close,finish,deliver,release"}, {"intent failure", true, false, false, false, false, "open,intent,close,release"}, {"outcome failure", false, true, false, false, false, "open,intent,sign,send,close,finish,release"}, {"cancel", false, false, true, false, false, "open,intent,sign,send,finish,close,release"}, {"target mismatch", false, false, false, true, false, "release"}, {"key mismatch", false, false, false, false, true, "release"}} {
+	}{{"success", false, false, false, false, false, "open,intent,sign,send,close,finish,deliver,release"}, {"intent failure", true, false, false, false, false, "open,intent,close,release"}, {"outcome failure", false, true, false, false, false, "open,intent,sign,send,close,finish,release"}, {"cancel", false, false, true, false, false, "open,intent,sign,send,close,release"}, {"target mismatch", false, false, false, true, false, "release"}, {"key mismatch", false, false, false, false, true, "release"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg, r, key := fixture(t)
 			events := []string{}
@@ -116,7 +125,7 @@ func TestExecution(t *testing.T) {
 				r.Generation++
 			}
 			id := strings.Repeat("a", 64)
-			err := e.Execute(Submission{Context: ctx, AdminID: "admin", Release: func() { events = append(events, "release") }}, r, id, func(context.Context, agentclient.RevealResult) error { events = append(events, "deliver"); return nil })
+			err := e.Execute(Submission{Context: ctx, AdminID: "admin", RequestID: testRequestID(t), Release: func() { events = append(events, "release") }}, r, id, func(context.Context, agentclient.RevealResult) error { events = append(events, "deliver"); return nil })
 			if (err == nil) != (tc.name == "success") {
 				t.Fatalf("unexpected error %v", err)
 			}

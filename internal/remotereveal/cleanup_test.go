@@ -20,7 +20,7 @@ func TestOpenFailureClosesReturnedSession(t *testing.T) {
 	e := Executor{Registry: reg, Audit: testAudit{events: &events}, Signer: testSigner{key, &events}, Open: func(context.Context, targetregistry.Record, ed25519.PublicKey) (Session, error) {
 		return &faultSession{testSession: testSession{events: &events, grant: &grant}, closeErr: true}, rawFailure
 	}}
-	err := e.Execute(Submission{context.Background(), func() {}, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
+	err := e.Execute(Submission{context.Background(), func() {}, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
 	if !errors.Is(err, ErrCleanup) || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("%v", err)
 	}
@@ -35,7 +35,7 @@ func TestTransportCleanupCauseSanitizedAtExecutor(t *testing.T) {
 		return nil, errors.Join(agenttransport.ErrCleanup, rawFailure)
 	}}
 	e := Executor{Registry: reg, Audit: testAudit{events: &events}, Signer: testSigner{key, &events}, Open: pinnedOpener(remoteagent.Config{}, d)}
-	err := e.Execute(Submission{context.Background(), func() {}, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
+	err := e.Execute(Submission{context.Background(), func() {}, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
 	if !errors.Is(err, ErrCleanup) || errors.Is(err, rawFailure) || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestAlreadyCanceled(t *testing.T) {
 		t.Fatal("open")
 		return nil, nil
 	}}
-	err := e.Execute(Submission{ctx, func() { released = true }, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
+	err := e.Execute(Submission{ctx, func() { released = true }, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { t.Fatal("delivery"); return nil })
 	if err == nil || !released {
 		t.Fatal("did not deny and release")
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net"
 	"strconv"
@@ -61,19 +62,23 @@ type Executor struct {
 
 // Submission is trusted integration input, not proof of authentication. The
 // caller MUST first use auth middleware on a state-changing CSRF-protected
-// confirmation request, require CookieAuthenticated and acquire SubmissionLease.
-// Context must be that lease's context; Release must be its release function.
-// Execute owns and releases the lease, including on failure. Logout waits while
-// this submission is held, per auth.SubmissionLease; cancellation/expiry deny.
+// confirmation request, require CookieAuthenticated, atomically consume a
+// one-shot confirmation bound to that same cookie session, and acquire the real
+// revocable auth.SessionContext. Context and Release must be that context and
+// its cancel function. Execute owns Release, including on failure. Logout and
+// expiry cancel the context, but cannot recall a request or bytes already sent.
 // AdminID is the trusted auth.Identity, never a request parameter.
 type Submission struct {
 	Context context.Context
 	Release func()
 	AdminID string
+	// RequestID is generated before confirmation and retained with the exact
+	// reviewed target. The trusted caller must consume that confirmation once.
+	RequestID string
 }
 
 // Execute requires the exact record shown at confirmation. It holds the registry
-// read lease and submission lease through synchronous delivery. deliver must not
+// read lease and session context through synchronous delivery. deliver must not
 // retain values, spawn work, log them, or write after ctx cancellation. As with
 // any stream, bytes already delivered cannot be recalled. Caller must prevent
 // multiple invocations of a Submission and must not release it independently.
@@ -84,6 +89,10 @@ func (e *Executor) Execute(s Submission, reviewed targetregistry.Record, contain
 	defer s.Release()
 	ctx := s.Context
 	if ctx == nil || ctx.Err() != nil || e == nil || e.Registry == nil || e.Audit == nil || e.Signer == nil || e.Open == nil || deliver == nil || s.AdminID == "" {
+		return ErrDenied
+	}
+	id, err := hex.DecodeString(s.RequestID)
+	if err != nil || len(id) != 16 || hex.EncodeToString(id) != s.RequestID {
 		return ErrDenied
 	}
 	r, lease, err := e.Registry.AcquireRead(ctx, reviewed.ID)
@@ -120,18 +129,19 @@ func (e *Executor) Execute(s Submission, reviewed targetregistry.Record, contain
 		return ErrDenied
 	}
 	epoch := session.Epoch()
+	if ctx.Err() != nil {
+		return ErrDenied
+	}
 	intent, err := e.Audit.BeginRevealAudit(ctx, s.AdminID, r.ID, containerID)
 	if err != nil {
 		return ErrDenied
 	}
 	outcome := revealaudit.Failed
 	// A canceled context intentionally leaves an auditable pending intent.
-	finish := func() bool { return e.Audit.Finish(ctx, intent.Correlation, outcome) == nil && ctx.Err() == nil }
-	fail := func() error { _ = finish(); return ErrDenied }
-	request, err := agentclient.NewRequestID()
-	if err != nil {
-		return fail()
+	finish := func() bool {
+		return ctx.Err() == nil && e.Audit.Finish(ctx, intent.Correlation, outcome) == nil && ctx.Err() == nil
 	}
+	fail := func() error { _ = finish(); return ErrDenied }
 	random := func(n int) (string, error) {
 		b := make([]byte, n)
 		if _, err := rand.Read(b); err != nil {
@@ -153,7 +163,7 @@ func (e *Executor) Execute(s Submission, reviewed targetregistry.Record, contain
 	if now < 0 || ctx.Err() != nil {
 		return fail()
 	}
-	g := agentclient.Grant{AgentID: r.AgentInstallationID, EngineID: r.EngineID, Generation: r.Generation, Epoch: epoch, ContainerID: containerID, SessionID: sid, Nonce: nonce, RequestID: request, IssuedAt: uint64(now), ExpiresAt: uint64(now) + 30, Scope: "env.values", Interactive: true}
+	g := agentclient.Grant{AgentID: r.AgentInstallationID, EngineID: r.EngineID, Generation: r.Generation, Epoch: epoch, ContainerID: containerID, SessionID: sid, Nonce: nonce, RequestID: s.RequestID, IssuedAt: uint64(now), ExpiresAt: uint64(now) + 30, Scope: "env.values", Interactive: true}
 	msg, err := agentclient.GrantBytes(g)
 	if err != nil || ctx.Err() != nil {
 		return fail()

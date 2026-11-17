@@ -105,7 +105,7 @@ func TestFailurePhases(t *testing.T) {
 			s := &faultSession{testSession: testSession{events: &events, grant: &grant}, closeErr: kind == "close error" || kind == "begin and close error", malformed: kind == "bad response", revealErr: kind == "agent error"}
 			e := Executor{Registry: reg, Audit: a, Signer: signer, Open: func(context.Context, targetregistry.Record, ed25519.PublicKey) (Session, error) { return s, nil }}
 			delivered := false
-			err := e.Execute(Submission{ctx, func() {}, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { delivered = true; return nil })
+			err := e.Execute(Submission{ctx, func() {}, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { delivered = true; return nil })
 			if err == nil || delivered || strings.Contains(err.Error(), "secret") {
 				t.Fatalf("err=%v delivered=%v", err, delivered)
 			}
@@ -188,7 +188,7 @@ func TestReadLeaseHeldThroughDelivery(t *testing.T) {
 	e := Executor{Registry: reg, Audit: testAudit{events: &events}, Signer: testSigner{key, &events}, Open: func(context.Context, targetregistry.Record, ed25519.PublicKey) (Session, error) {
 		return &testSession{events: &events, grant: &grant}, nil
 	}}
-	err := e.Execute(Submission{context.Background(), func() {}, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error {
+	err := e.Execute(Submission{context.Background(), func() {}, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error {
 		next := r
 		next.Revision++
 		next.Generation++
@@ -224,7 +224,7 @@ func TestPersistentAuditNoSecrets(t *testing.T) {
 	e := Executor{Registry: reg, Audit: a, Signer: testSigner{key, &events}, Open: func(context.Context, targetregistry.Record, ed25519.PublicKey) (Session, error) {
 		return &testSession{events: &events, grant: &grant}, nil
 	}}
-	if err = e.Execute(Submission{context.Background(), func() {}, "admin"}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { return nil }); err != nil {
+	if err = e.Execute(Submission{context.Background(), func() {}, "admin", testRequestID(t)}, r, strings.Repeat("a", 64), func(context.Context, agentclient.RevealResult) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(root)
