@@ -31,8 +31,7 @@ type Config struct {
 	CoordinationDaemonID string // independently provisioned expected daemon ID
 	Dev                  bool   // hot-reload templates in dev mode
 
-	// Remote read-only access remains disabled until registry leases and the
-	// production backend are integrated. Paths must be operator-controlled.
+	// Remote read-only access is opt-in; paths must be operator-controlled.
 	RemoteEnabled     bool
 	RemoteRegistryDir string
 	RemoteForwardDir  string
@@ -73,8 +72,17 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
-	if c.RemoteEnabled || c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 {
-		return fmt.Errorf("remote read-only access is not yet available")
+	if !c.RemoteEnabled {
+		if c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 {
+			return fmt.Errorf("remote settings require explicit enablement")
+		}
+	} else {
+		validPath := func(p string) bool {
+			return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
+		}
+		if c.NoAuth || !validPath(c.RemoteRegistryDir) || !validPath(c.RemoteForwardDir) || c.RemoteRegistryDir == c.RemoteForwardDir || c.RemoteTimeout <= 0 {
+			return fmt.Errorf("remote access requires authentication, distinct absolute private paths and an explicit positive timeout")
+		}
 	}
 	if c.Profile == target.Alpha {
 		return fmt.Errorf("Alpha profile is disabled")

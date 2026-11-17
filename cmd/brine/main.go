@@ -22,6 +22,7 @@ import (
 	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/server"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/targetregistry"
 )
 
 var version = "dev"
@@ -73,6 +74,11 @@ func run() error {
 	flag.StringVar(&cfg.SecretPolicy, "secret-policy", "", "absolute path to operator-controlled Alpha secret policy")
 	flag.StringVar(&cfg.SecretPkl, "secret-pkl", "", "optional absolute path to operator-installed Pkl for Alpha secret mode")
 	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: serve templates and static files from the repository (run from repo root)")
+	flag.BoolVar(&cfg.RemoteEnabled, "remote-enabled", false, "enable authenticated remote read-only UI")
+	flag.StringVar(&cfg.RemoteRegistryDir, "remote-registry-dir", "", "absolute private remote registry directory")
+	flag.StringVar(&cfg.RemoteForwardDir, "remote-forward-dir", "", "existing private directory for remote Unix socket forwards")
+	flag.DurationVar(&cfg.RemoteTimeout, "remote-timeout", 0, "explicit remote connection and transport timeout")
+	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")
@@ -88,6 +94,14 @@ func run() error {
 
 	if *ver {
 		fmt.Println(version)
+		return nil
+	}
+
+	if *initRemoteRegistry {
+		// Initialization is an explicit local operation; it never starts the server.
+		if err := targetregistry.Init(cfg.RemoteRegistryDir); err != nil {
+			return fmt.Errorf("initialize remote registry: %w", err)
+		}
 		return nil
 	}
 

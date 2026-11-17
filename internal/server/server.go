@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,14 +24,16 @@ import (
 
 // Server is the brine HTTP server.
 type Server struct {
-	cfg     *config.Config
-	agent   agent.Agent
-	store   store.StackStore
-	recipes store.RecipeStore
-	git     *git.Runner
-	syncer  *git.Syncer
-	router  http.Handler
-	web     *web.Handler
+	cfg          *config.Config
+	agent        agent.Agent
+	store        store.StackStore
+	recipes      store.RecipeStore
+	git          *git.Runner
+	syncer       *git.Syncer
+	router       http.Handler
+	web          *web.Handler
+	authn        *auth.Authenticator
+	remoteCancel context.CancelFunc
 }
 
 // New wires up all dependencies and returns a ready-to-run server.
@@ -67,7 +70,7 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 
 	syncer := git.NewSyncer(st, gr, ag.Dill(), cfg.DeployTimeout)
 
-	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r, web: h}
+	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r, web: h, authn: authn}
 }
 
 // Run starts the HTTP server and the GitOps syncer, blocking until ctx is cancelled.
@@ -75,6 +78,14 @@ func (s *Server) Run(ctx context.Context) error {
 	defer s.web.CloseStaging()
 	if err := s.cfg.Validate(); err != nil {
 		return err
+	}
+	if s.cfg.RemoteEnabled {
+		if err := s.prepareRemote(nil, nil); err != nil {
+			return err
+		}
+	}
+	if s.remoteCancel != nil {
+		defer s.remoteCancel()
 	}
 	// Do not start background mutations until the configuration is validated.
 	go s.syncer.Run(ctx)
@@ -101,8 +112,19 @@ func (s *Server) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		// Cancel snapshot transfers before the HTTP shutdown grace period.
 		s.web.CloseStaging()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		return srv.Shutdown(shutCtx)
+		if s.remoteCancel != nil {
+			s.remoteCancel()
+		}
+		return shutdownHTTP(srv, 10*time.Second)
 	}
+}
+
+func shutdownHTTP(srv *http.Server, grace time.Duration) error {
+	shutCtx, cancel := context.WithTimeout(context.Background(), grace)
+	defer cancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		// Report the failed drain and force-close lingering connections.
+		return errors.Join(err, srv.Close())
+	}
+	return nil
 }

@@ -121,9 +121,10 @@ type LogEvent struct {
 }
 
 type Handler struct {
-	backend     Backend
-	auth        *auth.Authenticator
-	logDuration func(bool) time.Duration // test-only override
+	backend      Backend
+	auth         *auth.Authenticator
+	logDuration  func(bool) time.Duration // test-only override
+	readDuration func() time.Duration     // test-only override
 }
 
 // New requires the same authenticator's authentication and CSRF middleware
@@ -185,12 +186,35 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer cancelSession()
-	// Interrupt a blocked network write when the authenticated session ends.
+	if r.Method == http.MethodGet && (r.URL.Path == "/remote/inventory" || r.URL.Path == "/remote/inspect") {
+		duration := 30 * time.Second
+		if h.readDuration != nil {
+			duration = h.readDuration()
+		}
+		var cancelRead context.CancelFunc
+		ctx, cancelRead = context.WithTimeout(ctx, duration)
+		defer cancelRead()
+	} else if r.Method == http.MethodPost && r.URL.Path == "/remote/logs" {
+		follow := r.PostForm.Get("follow") == "yes"
+		duration := 15 * time.Second
+		if follow {
+			duration = 5 * time.Minute
+		}
+		if h.logDuration != nil {
+			duration = h.logDuration(follow)
+		}
+		var cancelLogs context.CancelFunc
+		ctx, cancelLogs = context.WithTimeout(ctx, duration)
+		defer cancelLogs()
+	}
+	// Interrupt a blocked network write when the authenticated session ends or an operation deadline expires.
 	// Wait for the deadline callback before clearing it, so it cannot affect a
 	// later request on the same connection. Wrappers should support Unwrap.
 	controller := http.NewResponseController(w)
 	deadlineDone := make(chan struct{})
-	stopDeadline := context.AfterFunc(ctx, func() {
+	poisonConnection := false
+	deadlineCtx := ctx
+	stopDeadline := context.AfterFunc(deadlineCtx, func() {
 		_ = controller.SetWriteDeadline(time.Now())
 		close(deadlineDone)
 	})
@@ -198,7 +222,12 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		if !stopDeadline() {
 			<-deadlineDone
 		}
-		_ = controller.SetWriteDeadline(time.Time{})
+		// A failed or cancelled flush may leave buffered bytes. Do not clear the
+		// expired write deadline and allow net/http's final flush to send them
+		// after the registry lease has been released.
+		if !poisonConnection && deadlineCtx.Err() == nil {
+			_ = controller.SetWriteDeadline(time.Time{})
+		}
 	}()
 	w = &sessionWriter{ResponseWriter: w, ctx: ctx}
 	// The protected dispatcher requires this capability. The lease surrounds
@@ -225,6 +254,13 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			defer func() {
+				// net/http buffers small responses until the handler returns. Flush
+				// explicitly while the lease and cancellation deadline are active.
+				if err := http.NewResponseController(w).Flush(); err != nil {
+					poisonConnection = true
+					_ = controller.SetWriteDeadline(time.Now())
+					log.Print("remote response flush failed; delivery incomplete")
+				}
 				if release() != nil {
 					log.Print("remote read cleanup failed; operator reconciliation required")
 				}
@@ -297,25 +333,6 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		follow := r.PostForm.Get("follow") == "yes"
-		duration := 15 * time.Second
-		if follow {
-			duration = 5 * time.Minute
-		}
-		if h.logDuration != nil {
-			duration = h.logDuration(follow)
-		}
-		ctx, cancel := context.WithTimeout(ctx, duration)
-		defer cancel()
-		operationDeadlineDone := make(chan struct{})
-		stopOperationDeadline := context.AfterFunc(ctx, func() {
-			_ = controller.SetWriteDeadline(time.Now())
-			close(operationDeadlineDone)
-		})
-		defer func() {
-			if !stopOperationDeadline() {
-				<-operationDeadlineDone
-			}
-		}()
 		stream, err := h.backend.Logs(ctx, p.Host, p.Container, 100, follow)
 		h.backend.Audit(ctx, "logs", err == nil)
 		if err != nil {

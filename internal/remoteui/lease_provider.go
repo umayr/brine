@@ -39,6 +39,9 @@ func (p *RegistryLeaseProvider) Acquire(ctx context.Context, id string) (context
 	}
 	record, lease, err := p.registry.AcquireRead(ctx, id)
 	if err != nil {
+		if errors.Is(err, targetregistry.ErrCleanup) {
+			err = errors.Join(ErrReadCleanup, err)
+		}
 		return nil, nil, nil, err
 	}
 	lifetime, cancel := context.WithCancel(ctx)

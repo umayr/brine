@@ -36,6 +36,7 @@ var (
 	ErrConflict    = errors.New("target already exists or changed")
 	ErrUnconfirmed = errors.New("operator confirmation required")
 	ErrMismatch    = errors.New("target identity unavailable or mismatched")
+	ErrCleanup     = errors.New("registry lock cleanup failed")
 	token          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 	hostLabel      = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 )
@@ -199,7 +200,11 @@ type disk struct {
 // must use this API and the same canonical directory.
 type Registry struct {
 	dir           string
-	beforePublish func() // test-only synchronization hook
+	strict        bool
+	lockIdentity  os.FileInfo
+	beforePublish func()               // test-only synchronization hook
+	closeFile     func(*os.File) error // test-only fault injection
+	onLockWait    func()               // test-only lock contention signal
 }
 
 func Open(dir string) (*Registry, error) {
@@ -222,15 +227,35 @@ func Open(dir string) (*Registry, error) {
 // ReadLease holds the shared kernel lock until Close. It must not be copied.
 // Keep it open until all work using the returned record, including streams, ends.
 type ReadLease struct {
-	once sync.Once
-	file *os.File
-	err  error
+	once      sync.Once
+	file      *os.File
+	closeFile func(*os.File) error
+	err       error
 }
 
 // Close releases the lease. Concurrent and repeated calls are safe.
 func (l *ReadLease) Close() error {
-	l.once.Do(func() { l.err = l.file.Close() })
+	l.once.Do(func() {
+		closeFile := l.closeFile
+		if closeFile == nil {
+			closeFile = (*os.File).Close
+		}
+		if closeFile(l.file) != nil {
+			l.err = ErrCleanup
+		}
+	})
 	return l.err
+}
+
+func (r *Registry) closeLock(f *os.File) error {
+	closeFile := r.closeFile
+	if closeFile == nil {
+		closeFile = (*os.File).Close
+	}
+	if closeFile(f) != nil {
+		return ErrCleanup
+	}
+	return nil
 }
 
 func (r *Registry) lock(ctx context.Context, shared bool) (*os.File, error) {
@@ -238,6 +263,9 @@ func (r *Registry) lock(ctx context.Context, shared bool) (*os.File, error) {
 }
 
 func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File, error) {
+	if r.strict {
+		create = false
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -250,12 +278,12 @@ func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File,
 		return nil, err
 	}
 	f := os.NewFile(uintptr(fd), "lock")
-	fail := func(err error) (*os.File, error) { f.Close(); return nil, err }
+	fail := func(err error) (*os.File, error) { return nil, errors.Join(err, r.closeLock(f)) }
 	st, err := f.Stat()
 	if err != nil {
 		return fail(err)
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 {
+	if !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || (r.strict && st.Size() != 0) {
 		return fail(errors.New("invalid registry lock file"))
 	}
 	mode := unix.LOCK_EX
@@ -271,6 +299,15 @@ func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File,
 			if err := ctx.Err(); err != nil {
 				return fail(err)
 			}
+			if r.strict {
+				current, err := os.Lstat(filepath.Join(r.dir, ".lock"))
+				if err != nil || !os.SameFile(st, current) || (r.lockIdentity != nil && !os.SameFile(r.lockIdentity, current)) {
+					return fail(errors.New("registry lock missing or replaced"))
+				}
+				if err := r.checkMarker(); err != nil {
+					return fail(err)
+				}
+			}
 			return f, nil
 		}
 		if err == unix.EINTR {
@@ -278,6 +315,9 @@ func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File,
 		}
 		if err != unix.EWOULDBLOCK && err != unix.EAGAIN {
 			return fail(err)
+		}
+		if r.onLockWait != nil {
+			r.onLockWait()
 		}
 		timer := time.NewTimer(10 * time.Millisecond)
 		select {
@@ -290,12 +330,12 @@ func (r *Registry) lockFile(ctx context.Context, shared, create bool) (*os.File,
 		}
 	}
 }
-func (r *Registry) lockedContext(ctx context.Context, fn func() error) error {
+func (r *Registry) lockedContext(ctx context.Context, fn func() error) (err error) {
 	f, err := r.lock(ctx, false)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { err = errors.Join(err, r.closeLock(f)) }()
 	return fn()
 }
 func (r *Registry) locked(fn func() error) error { return r.lockedContext(context.Background(), fn) }
@@ -308,27 +348,25 @@ func (r *Registry) AcquireRead(ctx context.Context, id string) (Record, *ReadLea
 	if err != nil {
 		return Record{}, nil, err
 	}
-	lease := &ReadLease{file: f}
+	lease := &ReadLease{file: f, closeFile: r.closeFile}
 	d, err := r.load()
 	if err == nil {
 		err = ctx.Err()
 	}
 	if err != nil {
-		lease.Close()
-		return Record{}, nil, err
+		return Record{}, nil, errors.Join(err, lease.Close())
 	}
 	for _, t := range d.Targets {
 		if t.ID == id {
 			return t, lease, nil
 		}
 	}
-	lease.Close()
-	return Record{}, nil, ErrNotFound
+	return Record{}, nil, errors.Join(ErrNotFound, lease.Close())
 }
 func (r *Registry) load() (disk, error) {
 	d := disk{Version: 2, Targets: []Record{}}
 	fd, err := unix.Open(filepath.Join(r.dir, "targets.json"), unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
-	if errors.Is(err, os.ErrNotExist) {
+	if errors.Is(err, os.ErrNotExist) && !r.strict {
 		return d, nil
 	}
 	if err != nil {
@@ -473,6 +511,18 @@ func (r *Registry) save(ctx context.Context, d disk) error {
 	if err = ctx.Err(); err != nil {
 		return err
 	}
+	if r.strict {
+		if err := r.checkMarker(); err != nil {
+			return err
+		}
+		if _, err := r.load(); err != nil {
+			return err
+		}
+		st, err := os.Lstat(filepath.Join(r.dir, ".lock"))
+		if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0077 != 0 || st.Size() != 0 || !os.SameFile(r.lockIdentity, st) {
+			return errors.New("registry lock missing, invalid or replaced")
+		}
+	}
 	if err = os.Rename(name, filepath.Join(r.dir, "targets.json")); err != nil {
 		return err
 	}
@@ -498,8 +548,8 @@ func (r *Registry) ListContext(ctx context.Context) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 	d, err := r.load()
+	err = errors.Join(err, r.closeLock(f))
 	if err != nil {
 		return nil, err
 	}

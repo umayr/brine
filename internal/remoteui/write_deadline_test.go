@@ -1,6 +1,7 @@
 package remoteui
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,73 @@ func (w *deadlineWriter) SetWriteDeadline(t time.Time) error {
 	}
 	return nil
 }
+
+type registryDeadlineProvider struct{ r *targetregistry.Registry }
+
+func (p registryDeadlineProvider) Acquire(ctx context.Context, id string) (context.Context, ReadSession, func() error, error) {
+	_, lease, err := p.r.AcquireRead(ctx, id)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return ctx, fixtureReadSession{}, lease.Close, nil
+}
+
+func TestReadDeadlineReleasesBlockedRegistryWriter(t *testing.T) {
+	for _, path := range []string{"/remote/inventory?host=server", "/remote/inspect?host=server&container=" + testID} {
+		t.Run(path, func(t *testing.T) {
+			a, _, _, cookie, _ := setup(t)
+			reg, err := targetregistry.Open(filepath.Join(t.TempDir(), "registry"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			record := enrollmentRecord(t)
+			if err := reg.Add(record, record); err != nil {
+				t.Fatal(err)
+			}
+			backend, _ := NewReadBackend(reg, registryDeadlineProvider{reg})
+			reads, _ := New(backend, a)
+			reads.readDuration = func() time.Duration { return 200 * time.Millisecond }
+			enrollment, _ := NewEnrollmentHandler(a, reg, &enrollmentObserverFixture{})
+			routes, err := ProtectedRoutes(reads, enrollment)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest("GET", path, nil)
+			req.AddCookie(cookie)
+			w := &deadlineWriter{header: make(http.Header), started: make(chan struct{}), deadline: make(chan struct{})}
+			done := make(chan struct{})
+			go func() { routes.ServeHTTP(w, req); close(done) }()
+			select {
+			case <-w.started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("write did not start")
+			}
+			next := record
+			next.ID = "second"
+			writer := make(chan error, 1)
+			go func() { writer <- reg.Add(next, next) }()
+			select {
+			case <-writer:
+				t.Fatal("writer bypassed active lease")
+			case <-time.After(30 * time.Millisecond):
+			}
+			select {
+			case <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("deadline did not unblock write")
+			}
+			select {
+			case err := <-writer:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("writer remained blocked")
+			}
+		})
+	}
+}
+
 func TestLogDeadlineInterruptsBlockedWriteAndReleasesLease(t *testing.T) {
 	a, _, _, cookie, csrf := setup(t)
 	reg, err := targetregistry.Open(filepath.Join(t.TempDir(), "registry"))

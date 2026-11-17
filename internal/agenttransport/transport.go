@@ -104,6 +104,13 @@ func (f *Forward) Close() error {
 func cleanAbs(p string) bool {
 	return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
 }
+
+// ValidateLocalDir checks the existing private forwarding directory without creating it.
+// Trusted ancestors and ACLs remain an operator responsibility.
+func ValidateLocalDir(p string) error {
+	return privateDir(p)
+}
+
 func privateDir(p string) error {
 	if !cleanAbs(p) {
 		return errors.New("invalid local directory")

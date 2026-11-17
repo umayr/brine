@@ -31,6 +31,7 @@ type Handler struct {
 	stagingStore     *projectreview.Store
 	stagingAdmission chan struct{}
 	stagingLifecycle *stagingLifecycle
+	remoteEnabled    bool
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)
@@ -50,6 +51,9 @@ func New(ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runn
 		deployTimeout: deployTimeout,
 	}
 }
+
+// EnableRemoteNavigation is called before serving after successful remote initialization.
+func (h *Handler) EnableRemoteNavigation() { h.remoteEnabled = true }
 
 // templates returns the parsed template set, using the cache unless in dev mode.
 func (h *Handler) templates() (*templateSet, error) {
