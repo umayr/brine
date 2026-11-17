@@ -132,3 +132,32 @@ test('actual review CSP and cancellation prevent delayed values reappearing', as
   await page.evaluate(() => window.settleFetch('/remote/session'));
   expect(await page.evaluate(() => window.secretAfterClear)).toBe(false);
 });
+
+for (const mode of ['javascript-disabled', 'csp-blocked']) {
+  test(`enabled reveal has no native approval fallback when ${mode}`, async ({ browser }) => {
+    const fixture = path.join(os.tmpdir(), `brine-reveal-no-fallback-${process.pid}-${mode}.json`);
+    const context = await browser.newContext({ javaScriptEnabled: mode !== 'javascript-disabled' });
+    try {
+      execFileSync('go', ['test', './internal/remoteui', '-run', '^TestRevealBrowserFixture$', '-count=1'], { env: { ...process.env, BRINE_REVEAL_FIXTURE: fixture } });
+      const data = JSON.parse(fs.readFileSync(fixture, 'utf8'));
+      let approvals = 0;
+      await context.route('http://remote.test/**', route => {
+        if (route.request().url().endsWith('/remote/reveal/approve')) {
+          approvals++;
+          return route.fulfill({ status: 200, body: 'SYNTHETIC_SECRET' });
+        }
+        return route.fulfill({ contentType: 'text/html', headers: { 'content-security-policy': mode === 'csp-blocked' ? "default-src 'none'; script-src 'none'" : data.csp }, body: data.html });
+      });
+      const page = await context.newPage();
+      await page.goto('http://remote.test/remote/reveal/review');
+      await expect(page.locator('form')).toHaveCount(0);
+      await page.locator('#approve').click();
+      await expect(page.locator('#values')).toBeEmpty();
+      expect(approvals).toBe(0);
+      expect(page.url()).toBe('http://remote.test/remote/reveal/review');
+    } finally {
+      await context.close();
+      if (fs.existsSync(fixture)) fs.unlinkSync(fixture);
+    }
+  });
+}
