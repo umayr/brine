@@ -64,9 +64,8 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 			}
 			st := &recipeReadCounter{StackStore: fs}
 			runner := dill.New(binary)
-			// Alpha must retain pinned cleanup even with unavailable source
-			// inputs and no target negotiation/secret workflow available.
-			runner.Profile = "alpha"
+			// Legacy cleanup remains pinned when source inputs are unavailable.
+			runner.Profile = "legacy"
 			runner.Engine = "docker"
 			runner.Socket = "/synthetic/engine.sock"
 			runner.ResolveStack = stackPathResolver(st)

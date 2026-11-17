@@ -1,5 +1,7 @@
 # Paired candidate checks (full Brine Alpha qualification pending)
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 Brine now bundles released Dill v0.7.0; v0.5.0 remains an incompatible negative
 test baseline. The release commit `0554f6d73cb924b06a47f3a495bcad39a9dcb08c`
 has the same tracked tree as the pinned candidate below. See the

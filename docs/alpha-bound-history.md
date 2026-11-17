@@ -1,5 +1,7 @@
 # Inactive v2 attended history seam
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 This package-level store seam is not wired to an API, runner, or source policy and
 **does not activate a profile or qualify a runtime**. It accepts trusted producer
 assertions, not arbitrary HTTP JSON as authority. Independent integration must

@@ -1,4 +1,4 @@
-name: Pinned operation contract
+name: Legacy operation safety
 
 on:
   push:
@@ -9,38 +9,15 @@ permissions:
   contents: read
 
 jobs:
-  operation-contract:
-    name: ${{ matrix.label }} CLI / Brine read-only synthetic compatibility
+  legacy-operation-safety:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - profile: legacy-b3
-            label: b3
-            commit: b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2
-          - profile: preflight-main-2a725
-            label: 2a725
-            commit: 2a725aa76f6cbca3bfacd480137b7d183b326ce0
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: brine
-      - uses: actions/checkout@v4
-        with:
-          repository: umayr/dill
-          ref: ${{ matrix.commit }}
-          path: dill-operation-candidate
       - uses: actions/setup-go@v5
         with:
-          go-version-file: brine/go.mod
-          cache: false
-      - name: Exact clean source, schema, fixtures, SDK read-only compatibility
-        env:
-          BRINE_OPERATION_ISOLATED: "1"
-          BRINE_OPERATION_CANDIDATE_PROFILE: ${{ matrix.profile }}
-          BRINE_OPERATION_CANDIDATE_REPO: ${{ github.workspace }}/dill-operation-candidate
-        run: bash brine/scripts/ci-operation-contract.sh
-      # No real engine command, socket, provisioning or qualified mutation.
-      # Existing paired-secret candidate258 qualification remains independent.
+          go-version-file: go.mod
+          cache: true
+      - name: Verify legacy endpoint routing, cleanup and secret-history downgrade gates
+        run: >-
+          go test ./cmd/brine -count=1
+          -run '^(TestTwoEndpointRoutesAndAlphaBypass|TestCleanupRoutesWithUnavailableOrMismatchedRecipe|TestLegacySecretGateBlocksMutationButNotCleanup|TestSecretRecordDeniesDowngradeAfterConfigurationRemoval|TestUnknownContainerHistoryDeniesLegacyExecution)$'

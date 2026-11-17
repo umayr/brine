@@ -1,10 +1,6 @@
 package dill
 
 import (
-	"bytes"
-	"context"
-	"os"
-	"strings"
 	"testing"
 )
 
@@ -84,26 +80,5 @@ func TestOperationResourceAggregateCoherence(t *testing.T) {
 				t.Fatal("cleanup failure became success")
 			}
 		})
-	}
-}
-
-func TestOperationContradictorySuccessProcessFailsClosed(t *testing.T) {
-	rcp := consumerReceipt("validate")
-	rcp.Resources = []OperationResource{{Kind: "container", IdentityDigest: operationDigest("x"), Action: "remove", Effect: "unknown"}}
-	r, log := consumerScript(t, consumerDiscovery(false), append(consumerJSON(t, rcp), '\n'), 0, "")
-	var out bytes.Buffer
-	terminal, err := r.operation(context.Background(), "/synthetic/config.pkl", "validate", &out)
-	if err == nil || terminal.Status != "unknown" || terminal.Receipt != nil {
-		t.Fatalf("contradictory success trusted: status=%s err=%v", terminal.Status, err)
-	}
-	if strings.Count(out.String(), OperationMarker) != 1 {
-		t.Fatal("missing single conservative terminal")
-	}
-	decoded, e := DecodeOperationInvocation([]byte(strings.TrimSuffix(strings.TrimPrefix(out.String(), OperationMarker), "\n")))
-	if e != nil || decoded.Receipt != nil || decoded.Status != "unknown" {
-		t.Fatal("invalid conservative marker")
-	}
-	if data, e := os.ReadFile(log); e != nil || strings.Count(string(data), "\n") != 2 {
-		t.Fatalf("test did not reach discovery+action: %s %v", data, e)
 	}
 }

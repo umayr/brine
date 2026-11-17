@@ -1,5 +1,7 @@
 # Dormant attended API and synthetic fixture
 
+> **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
+
 This component is **not activated or qualified** by the application. The real source/evaluator factory, native application and runtime gates are separate and remain off. Digest-shaped source references are producer assertions, not verification labels or proof of hermetic output. Independent review and exact-head Linux CI remain required.
 
 ## Configuration boundary and guard pairing

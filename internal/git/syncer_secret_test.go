@@ -14,7 +14,7 @@ import (
 	"github.com/umayr/brine/internal/store"
 )
 
-func TestSyncRejectsOldDillInStrictMode(t *testing.T) {
+func TestSyncRejectsDisabledStrictMode(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -81,10 +81,10 @@ func TestSyncRejectsOldDillInStrictMode(t *testing.T) {
 	if err != nil || updated.Git.LastCommit != "new" {
 		t.Fatalf("changed pull not recorded: %+v %v", updated, err)
 	}
-	if _, err = os.Stat(discovery); err != nil {
-		t.Fatal("capability rejection not exercised:", err)
+	if _, err = os.Stat(discovery); !os.IsNotExist(err) {
+		t.Fatal("disabled strict mode launched capability discovery:", err)
 	}
 	if _, err = os.Stat(up); !os.IsNotExist(err) {
-		t.Fatal("auto-sync used old binary to deploy")
+		t.Fatal("auto-sync used disabled strict mode to deploy")
 	}
 }

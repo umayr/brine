@@ -20,7 +20,8 @@ import (
 	"github.com/umayr/brine/internal/secretbindings"
 )
 
-var ErrSecretUnavailable = errors.New("secret configuration or source unavailable")
+var ErrAlphaDisabled = errors.New("Alpha functionality is disabled")
+var ErrSecretUnavailable = errors.New("strict secret functionality is disabled")
 var ErrSecretApplyFailed = errors.New("checked deployment failed; partial changes may have occurred")
 
 // SecretRunner invokes only the paired Alpha interface. Callers must share the
@@ -32,8 +33,11 @@ type SecretRunner struct {
 	Engine, Socket, Policy, Target, PklBinary string
 }
 
+// SecretFeaturesDisabled is shared by direct runners and HTTP handlers.
+func SecretFeaturesDisabled() bool { return true }
+
 func (s *SecretRunner) valid() bool {
-	return s != nil && s.Runner != nil && s.State != nil && s.Coordinator != nil && (s.Engine == "docker" || s.Engine == "podman") && filepath.IsAbs(s.Socket) && filepath.Clean(s.Socket) == s.Socket && filepath.IsAbs(s.Policy) && filepath.Clean(s.Policy) == s.Policy && (s.PklBinary == "" || filepath.IsAbs(s.PklBinary))
+	return !SecretFeaturesDisabled() && s != nil && s.Runner != nil && s.State != nil && s.Coordinator != nil && (s.Engine == "docker" || s.Engine == "podman") && filepath.IsAbs(s.Socket) && filepath.Clean(s.Socket) == s.Socket && filepath.IsAbs(s.Policy) && filepath.Clean(s.Policy) == s.Policy && (s.PklBinary == "" || filepath.IsAbs(s.PklBinary))
 }
 func (s *SecretRunner) command(ctx context.Context, args ...string) (*exec.Cmd, func(), error) {
 	cmd, cleanup, err := s.Runner.command(ctx, args...)

@@ -81,7 +81,7 @@ func TestTargetDillHelper(t *testing.T) {
 }
 
 func TestTwoEndpointRoutesAndAlphaBypass(t *testing.T) {
-	for _, profile := range []string{"legacy", "alpha"} {
+	for _, profile := range []string{"legacy"} {
 		for _, kind := range []string{"docker", "podman"} {
 			t.Run(profile+"/"+kind, func(t *testing.T) { testTargetRoutes(t, profile, kind) })
 		}

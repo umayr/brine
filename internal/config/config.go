@@ -66,6 +66,15 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	if c.Profile == target.Alpha {
+		return fmt.Errorf("Alpha profile is disabled")
+	}
+	if c.SecretTarget != "" || c.SecretPolicy != "" || c.SecretPkl != "" {
+		return fmt.Errorf("strict secret mode is disabled")
+	}
+	if c.CoordinationStateDir != "" || c.CoordinationLayout != "" || c.CoordinationDaemonID != "" || c.OperationStateDir != "" {
+		return fmt.Errorf("Alpha coordination and operation history are disabled")
+	}
 	if err := target.ValidateProfile(c.Profile, c.Engine, c.EngineSocket); err != nil {
 		return err
 	}

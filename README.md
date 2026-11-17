@@ -1,5 +1,12 @@
 # Brine
 
+> **Disabled features:** Alpha profiles, qualified operations, operation history options,
+> and strict secret workflows are disabled. Existing Alpha documentation below is
+> historical and does not describe currently available functionality. Brine retains
+> existing secret state and its downgrade/unknown-history safety gates; disabling
+> these features does not make previously or possibly secret-enabled stacks safe for
+> legacy operations. Do not delete state to bypass these protections.
+
 See the [roadmap](ROADMAP.md) for Brine's control-plane boundaries, the shared
 Dill contracts, and phased cross-repository implementation tickets. Planned
 capabilities are explicitly separate from the features documented below.

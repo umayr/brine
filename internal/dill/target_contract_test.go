@@ -40,7 +40,7 @@ func TestPinnedCleanupDeadlineFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := New(binary)
-	r.Profile = target.Alpha
+	r.Profile = target.Legacy
 	r.Engine = "docker"
 	r.Socket = "/synthetic/selected.sock"
 	r.ResolveStack = func(string) (string, error) { return "demo", nil }

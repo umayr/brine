@@ -3,9 +3,6 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,7 +20,9 @@ import (
 	"github.com/umayr/brine/internal/store"
 )
 
-func TestSecretBindingAPIReviewAndAuthentication(t *testing.T) {
+// A configured strict controller must not reactivate the disabled API. Auth,
+// CSRF and persistent classification remain effective across attempted calls.
+func TestSecretBindingAPIDisabledPreservesAuthenticationAndState(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
@@ -33,8 +32,7 @@ func TestSecretBindingAPIReviewAndAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	workspace := filepath.Join(dir, "workspace")
-	private := filepath.Join(dir, "private")
+	workspace, private := filepath.Join(dir, "workspace"), filepath.Join(dir, "private")
 	if err = os.Mkdir(private, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -50,25 +48,17 @@ func TestSecretBindingAPIReviewAndAuthentication(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer state.Close()
-	live := filepath.Join(dir, "changed")
-	fail := filepath.Join(dir, "fail")
+	id := secretbindings.DeploymentID("demo")
+	if err = state.MarkSecretEnabled(id); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(dir, "called")
 	bin := filepath.Join(dir, "dill")
-	script := fmt.Sprintf(`#!/bin/sh
-case " $* " in
- *" secret-capabilities "*) echo '{"contract":"dill.alpha-secrets/1","bindings":"dill.secret-bindings/1","policy":"dill.secret-policy/1","engines":["docker-host-file"]}';exit 0;;
- *" secrets check "*) echo '{"contract":"dill.alpha-secrets/1","status":"available"}';exit 0;;
- *" plan "*) while [ "$#" -gt 0 ]; do if [ "$1" = "--proof-file" ]; then shift; p="$1"; fi; shift; done
- if [ -e '%s' ]; then proof=AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI; else proof=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE; fi
- printf '{"contract":"dill.alpha-secrets-preview/1","proof":"%%s"}' "$proof" > "$p";chmod 600 "$p";echo '{"changes":[{"service":"web","kind":"create","diffs":[]}],"summary":{"create":1,"recreate":0,"remove":0,"noop":0}}';exit 1;;
- *" up "*) if [ -e '%s' ];then exit 1;fi;exit 0;;
-esac
-exit 2
-`, live, fail)
-	if err = os.WriteFile(bin, []byte(script), 0700); err != nil {
+	if err = os.WriteFile(bin, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	runner := dill.New(bin)
-	sr := &dill.SecretRunner{Runner: runner, State: state, Coordinator: &runner.Coordinator, Engine: "docker", Socket: "/tmp/synthetic.sock", Policy: "/tmp/synthetic-policy", Target: "lab-a"}
+	sr := &dill.SecretRunner{Runner: runner, State: state, Coordinator: &runner.Coordinator, Engine: "docker", Socket: "/tmp/synthetic.sock", Policy: "/tmp/policy", Target: "lab-a"}
 	runner.StrictActions = &dill.StrictController{Secret: sr}
 	ag := agent.NewLocalAgent(nil, runner)
 	a, err := auth.New(auth.Config{User: "admin", Password: "password", APIToken: "synthetic-token"})
@@ -78,23 +68,13 @@ exit 2
 	r := chi.NewRouter()
 	r.Use(a.Middleware)
 	r.Post("/login", a.HandleLogin)
-	Mount(r, ag, st, nil, nil, "docker", httpx.Timeouts{Default: time.Minute, Lifecycle: time.Minute}, time.Minute)
-	call := func(method, path, body string, authorize bool) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req.Header.Set("Accept", "application/json")
-		if authorize {
-			req.Header.Set("Authorization", "Bearer synthetic-token")
-		}
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, req)
-		if strings.Contains(w.Body.String(), "AQEBAQEBAQEBAQE") || strings.Contains(w.Body.String(), private) || strings.Contains(w.Body.String(), "synthetic-secret-value") {
-			t.Fatal("private value or path leaked")
-		}
-		return w
-	}
+	Mount(r, ag, st, nil, nil, "docker", httpx.Timeouts{}, time.Second)
 	base := "/api/stacks/demo/secret-bindings"
-	if w := call("GET", base, "", false); w.Code != http.StatusUnauthorized {
-		t.Fatalf("unauth: %d", w.Code)
+	req := httptest.NewRequest("GET", base, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated: %d", w.Code)
 	}
 	login := httptest.NewRequest("POST", "/login", strings.NewReader("user=admin&password=password"))
 	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -104,76 +84,26 @@ exit 2
 	if len(cookies) == 0 {
 		t.Fatal("login failed")
 	}
-	csrfReq := httptest.NewRequest("PUT", base, strings.NewReader("{}"))
-	csrfReq.AddCookie(cookies[0])
+	csrf := httptest.NewRequest("PUT", base, strings.NewReader("{}"))
+	csrf.AddCookie(cookies[0])
 	cw := httptest.NewRecorder()
-	r.ServeHTTP(cw, csrfReq)
+	r.ServeHTTP(cw, csrf)
 	if cw.Code != http.StatusForbidden {
 		t.Fatalf("csrf: %d", cw.Code)
 	}
-	doc := `{"version":"dill.secret-bindings/1","target":"lab-a","stack":"demo","bindings":[{"name":"db","source":"db-prod","revision":"r1"}]}`
-	if w := call("PUT", base, doc, true); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	if w := call("PUT", base, strings.Replace(doc, `"revision":"r1"`, `"revision":"r1","value":"synthetic-secret-value"`, 1), true); w.Code == 200 {
-		t.Fatal("value upload accepted")
-	}
-	if w := call("POST", base+"/status", "", true); w.Code != 200 || !strings.Contains(w.Body.String(), "available") {
-		t.Fatalf("status: %s", w.Body.String())
-	}
-	preview := func() string {
-		w := call("POST", base+"/preview", "", true)
-		if w.Code != 200 {
-			t.Fatalf("preview: %s", w.Body.String())
+	for _, tc := range []struct{ method, path string }{{"GET", base}, {"PUT", base}, {"POST", base + "/status"}, {"POST", base + "/preview"}, {"POST", base + "/confirm"}} {
+		req = httptest.NewRequest(tc.method, tc.path, strings.NewReader(`{"value":"synthetic-secret-value"}`))
+		req.Header.Set("Authorization", "Bearer synthetic-token")
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "disabled") || strings.Contains(w.Body.String(), "synthetic-secret-value") {
+			t.Fatalf("%s %s: %d %s", tc.method, tc.path, w.Code, w.Body.String())
 		}
-		var out struct {
-			Token string `json:"preview_token"`
-		}
-		if json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Token) != 43 {
-			t.Fatal("bad public token")
-		}
-		return out.Token
 	}
-	confirm := func(token string) *httptest.ResponseRecorder {
-		b, _ := json.Marshal(map[string]string{"preview_token": token})
-		return call("POST", base+"/confirm", string(b), true)
+	if enabled, err := state.SecretEnabled(id); err != nil || !enabled {
+		t.Fatalf("classification changed: %v %v", enabled, err)
 	}
-	token := preview()
-	if _, err = state.Active(secretbindings.DeploymentID("demo"), "demo", "lab-a"); !os.IsNotExist(err) {
-		t.Fatal("preview activated draft")
-	}
-	if err = os.WriteFile(live, []byte("changed"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if w := confirm(token); w.Code != http.StatusConflict {
-		t.Fatalf("changed proof: %d %s", w.Code, w.Body.String())
-	}
-	os.Remove(live)
-	old := preview()
-	latest := preview()
-	if w := confirm(old); w.Code != http.StatusConflict {
-		t.Fatal("old token accepted")
-	}
-	if w := confirm(latest); w.Code != 200 {
-		t.Fatalf("confirmation: %s", w.Body.String())
-	}
-	newer := strings.Replace(doc, `"revision":"r1"`, `"revision":"r2"`, 1)
-	if w := call("PUT", base, newer, true); w.Code != 200 {
-		t.Fatal(w.Body.String())
-	}
-	active, err := state.Active(secretbindings.DeploymentID("demo"), "demo", "lab-a")
-	if err != nil || !bytes.Contains(active, []byte(`"revision":"r1"`)) {
-		t.Fatal("draft rotated active")
-	}
-	token = preview()
-	if err = os.WriteFile(fail, []byte("x"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if w := confirm(token); w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "partial") {
-		t.Fatalf("apply failure: %s", w.Body.String())
-	}
-	active, err = state.Active(secretbindings.DeploymentID("demo"), "demo", "lab-a")
-	if err != nil || !bytes.Contains(active, []byte(`"revision":"r2"`)) {
-		t.Fatal("approved revision not retained")
+	if _, err = os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("disabled endpoint ran subprocess: %v", err)
 	}
 }

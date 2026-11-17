@@ -67,8 +67,8 @@ func TestStrictManualDeployRejectsOldBinaryWithImport(t *testing.T) {
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
 	w := httptest.NewRecorder()
 	h.up(w, req)
-	if !strings.Contains(w.Body.String(), "install a compatible Dill") {
-		t.Fatalf("missing upgrade error: %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "strict secret functionality is disabled") {
+		t.Fatalf("missing disabled error: %s", w.Body.String())
 	}
 	if _, err = os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatal("old binary deploy executed")
