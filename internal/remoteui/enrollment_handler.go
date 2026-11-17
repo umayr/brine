@@ -29,6 +29,7 @@ type EnrollmentHandler struct {
 	approvals       *enrollmentApprovals
 	beforeCommit    func()                                                                 // test-only synchronization hook
 	approvalContext func(context.Context, time.Time) (context.Context, context.CancelFunc) // test-only cancellation control
+	requestDuration func() time.Duration                                                   // test-only override
 }
 
 // NewEnrollmentHandler constructs an unmounted handler. The registry and
@@ -50,6 +51,23 @@ func (h *EnrollmentHandler) Protected() http.Handler {
 	inner := h.auth.Middleware(http.HandlerFunc(h.serveEnrollment))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
+		duration := 30 * time.Second
+		if h.requestDuration != nil {
+			duration = h.requestDuration()
+		}
+		deadline := time.Now().Add(duration)
+		ctx, cancel := context.WithDeadline(r.Context(), deadline)
+		defer cancel()
+		// Install before authentication (which may parse the form or respond).
+		// Never clear: net/http still has final response framing to send.
+		controller := http.NewResponseController(w)
+		if err := controller.SetWriteDeadline(deadline); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		if err := controller.SetReadDeadline(deadline); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+		r = r.WithContext(ctx)
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
 		}
@@ -116,8 +134,13 @@ func parseEnrollment(r *http.Request) (targetregistry.Record, error) {
 func (h *EnrollmentHandler) serveEnrollment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+	fail := func(message string, status int) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		_ = enrollmentView.Execute(w, enrollmentPage{Error: message})
+	}
 	if !auth.Authenticated(r) || !auth.CookieAuthenticated(r) || strings.HasPrefix(strings.ToLower(r.Header.Get("Authorization")), "bearer ") {
-		http.Error(w, "Interactive admin session required", http.StatusForbidden)
+		fail("Interactive admin session required", http.StatusForbidden)
 		return
 	}
 	page := enrollmentPage{CSRF: h.auth.CSRFFor(r)}
@@ -131,25 +154,32 @@ func (h *EnrollmentHandler) serveEnrollment(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+		fail("Invalid request", http.StatusBadRequest)
 		return
 	}
 	lease, release, ok := h.auth.SubmissionLease(r)
 	if !ok {
-		http.Error(w, "Session expired", http.StatusForbidden)
+		fail("Session expired", http.StatusForbidden)
 		return
 	}
-	defer release()
+	defer func() {
+		defer release()
+		// net/http buffers small responses; retain the authorization lease until
+		// the response has been handed to the transport or delivery has failed.
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+		}
+	}()
 	cookie, err := r.Cookie(auth.SessionCookie)
 	if err != nil {
-		http.Error(w, "Session required", http.StatusForbidden)
+		fail("Session required", http.StatusForbidden)
 		return
 	}
 	switch r.URL.Path {
 	case "/remote/enrollment/review":
 		candidate, e := parseEnrollment(r)
 		if e != nil {
-			http.Error(w, "Invalid candidate", http.StatusBadRequest)
+			fail("Invalid candidate", http.StatusBadRequest)
 			return
 		}
 		snapshot := enrollmentSnapshot{Candidate: candidate}
@@ -186,12 +216,12 @@ func (h *EnrollmentHandler) serveEnrollment(w http.ResponseWriter, r *http.Reque
 		render()
 	case "/remote/enrollment/approve":
 		if err := r.ParseForm(); err != nil || len(r.PostForm) != 3 || len(r.PostForm["_csrf"]) != 1 || len(r.PostForm["token"]) != 1 || len(r.PostForm["confirm"]) != 1 || r.PostForm.Get("confirm") != "yes" {
-			http.Error(w, "Invalid approval", http.StatusBadRequest)
+			fail("Invalid approval", http.StatusBadRequest)
 			return
 		}
 		snapshot, ok := h.approvals.consume(cookie.Value, r.PostForm.Get("token"), time.Now())
 		if !ok {
-			http.Error(w, "Review expired or invalid", http.StatusForbidden)
+			fail("Review expired or invalid", http.StatusForbidden)
 			return
 		}
 		makeApprovalContext := context.WithDeadline
@@ -220,4 +250,4 @@ func (h *EnrollmentHandler) serveEnrollment(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-var enrollmentView = template.Must(template.New("enrollment").Parse(`<!doctype html><html><head><title>Enroll remote host</title></head><body><main><h1>Enroll remote host</h1><p>Independently obtain and verify every pin and identity out of band. Do not approve values learned only from this connection.</p><p>Remote inspection metadata and logs may contain secrets. Access to a container engine can grant host-level privileges; enroll only a trusted, isolated target.</p>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .Notice}}<p>{{.Notice}}</p>{{end}}{{if .Fields}}<form method="post" action="/remote/enrollment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}">{{range .Fields}}<label>{{.Name}} <input name="{{.Name}}" value="{{.Value}}" required></label><br>{{end}}<button>Review candidate</button></form>{{end}}{{if .Candidate}}{{if .Previous}}<h2>Previous record</h2><dl>{{range .Previous}}<dt>{{.Name}}</dt><dd><code style="white-space:pre-wrap;overflow-wrap:anywhere"><bdi>{{.Value}}</bdi></code></dd>{{end}}</dl>{{else}}<h2>New enrollment</h2>{{end}}<h2>Complete candidate</h2><dl>{{range .Candidate}}<dt>{{.Name}}</dt><dd><code style="white-space:pre-wrap;overflow-wrap:anywhere"><bdi>{{.Value}}</bdi></code></dd>{{end}}</dl><form method="post" action="/remote/enrollment/approve"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="token" value="{{.Token}}"><label><input type="checkbox" name="confirm" value="yes" required> I independently verified every field out of band</label><button>Approve exact records</button></form>{{end}}</main></body></html>`))
+var enrollmentView = template.Must(template.New("enrollment").Parse(`<!doctype html><html><head><title>Enroll remote host</title></head><body><main><h1>Enroll remote host</h1><p>Independently obtain and verify every pin and identity out of band. Do not approve values learned only from this connection.</p><p>Remote inspection metadata and logs may contain secrets. Access to a container engine can grant host-level privileges; enroll only a trusted, isolated target.</p>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .Notice}}<p>{{.Notice}}</p>{{end}}{{if .Fields}}<form method="post" action="/remote/enrollment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}">{{range .Fields}}<label>{{.Name}} <input name="{{.Name}}" value="{{.Value}}" required></label><br>{{end}}<button>Review candidate</button></form>{{end}}{{if .Candidate}}{{if .Previous}}<h2>Previous record</h2><dl>{{range .Previous}}<dt>{{.Name}}</dt><dd><code style="white-space:pre-wrap;overflow-wrap:anywhere"><bdi>{{.Value}}</bdi></code></dd>{{end}}</dl>{{else}}<h2>New enrollment</h2>{{end}}<h2>Complete candidate</h2><dl>{{range .Candidate}}<dt>{{.Name}}</dt><dd><code style="white-space:pre-wrap;overflow-wrap:anywhere"><bdi>{{.Value}}</bdi></code></dd>{{end}}</dl><form method="post" action="/remote/enrollment/approve"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="token" value="{{.Token}}"><label><input type="checkbox" name="confirm" value="yes" required> I independently verified every field out of band</label><button>Approve exact records</button></form>{{end}}<nav><a href="/remote">Return to hosts</a> · <a href="/remote/enrollment">Start a new review (re-enter candidate)</a></nav><p>For uncertain outcomes, reconcile the registry before starting another review. A new review never repeats an approval automatically.</p></main></body></html>`))

@@ -27,7 +27,7 @@ func TestRemoteDisabledAndStartupFailClosed(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/remote", nil)
 	req.Header.Set("Accept", "application/json")
-	s.router.ServeHTTP(w, req)
+	s.router.ServeHTTP(&enrollmentDeadlineRecorder{w}, req)
 	if w.Code == 200 {
 		t.Fatal("disabled route")
 	}
@@ -74,7 +74,7 @@ func TestRemoteMountLeavesLocalRoutingAndAuthUnchanged(t *testing.T) {
 		req := httptest.NewRequest("GET", path, nil)
 		req.Header.Set("Accept", "application/json")
 		w := httptest.NewRecorder()
-		s.router.ServeHTTP(w, req)
+		s.router.ServeHTTP(&enrollmentDeadlineRecorder{w}, req)
 		return w.Code
 	}
 	beforeHealth, beforeProtected, beforePrefix := check("/api/health"), check("/api/stacks"), check("/remoteish")
@@ -114,7 +114,7 @@ func TestRemoteBodyLimitPrecedesGlobalAuthentication(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(cookies[0])
 	w := httptest.NewRecorder()
-	s.router.ServeHTTP(w, req)
+	s.router.ServeHTTP(&enrollmentDeadlineRecorder{w}, req)
 	if w.Code < 400 || body.n > (32<<10)+1 {
 		t.Fatalf("status %d bytes read %d", w.Code, body.n)
 	}
@@ -158,3 +158,8 @@ func TestRemoteCookieExpires(t *testing.T) {
 		t.Fatal("expired session accepted")
 	}
 }
+
+type enrollmentDeadlineRecorder struct{ *httptest.ResponseRecorder }
+
+func (*enrollmentDeadlineRecorder) SetWriteDeadline(time.Time) error { return nil }
+func (*enrollmentDeadlineRecorder) SetReadDeadline(time.Time) error  { return nil }

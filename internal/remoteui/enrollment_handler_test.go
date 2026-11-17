@@ -61,7 +61,7 @@ func TestEnrollmentHTTPExactReviewAndFreshObservation(t *testing.T) {
 	get := httptest.NewRequest("GET", "/remote/enrollment", nil)
 	get.AddCookie(cookie)
 	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, get)
+	handler.ServeHTTP(&enrollmentTestWriter{w}, get)
 	csrfMatch := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindStringSubmatch(w.Body.String())
 	if len(csrfMatch) != 2 {
 		t.Fatal(w.Body.String())
@@ -77,7 +77,7 @@ func TestEnrollmentHTTPExactReviewAndFreshObservation(t *testing.T) {
 			r.Header.Set("Authorization", "Bearer token")
 		}
 		out := httptest.NewRecorder()
-		handler.ServeHTTP(out, r)
+		handler.ServeHTTP(&enrollmentTestWriter{out}, r)
 		return out
 	}
 	rec := enrollmentRecord(t)
@@ -251,7 +251,7 @@ func TestEnrollmentHTTPExactReviewAndFreshObservation(t *testing.T) {
 	otherGet := httptest.NewRequest("GET", "/remote/enrollment", nil)
 	otherGet.AddCookie(other)
 	otherPage := httptest.NewRecorder()
-	handler.ServeHTTP(otherPage, otherGet)
+	handler.ServeHTTP(&enrollmentTestWriter{otherPage}, otherGet)
 	otherCSRF := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindStringSubmatch(otherPage.Body.String())
 	if len(otherCSRF) != 2 {
 		t.Fatal("missing second csrf")
@@ -272,3 +272,9 @@ func TestEnrollmentHTTPExactReviewAndFreshObservation(t *testing.T) {
 		t.Fatal("stale update accepted", got, err)
 	}
 }
+
+// enrollmentTestWriter models deadline-capable net/http responses in unit tests.
+type enrollmentTestWriter struct{ *httptest.ResponseRecorder }
+
+func (*enrollmentTestWriter) SetWriteDeadline(time.Time) error { return nil }
+func (*enrollmentTestWriter) SetReadDeadline(time.Time) error  { return nil }
