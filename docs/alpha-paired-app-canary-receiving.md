@@ -25,7 +25,7 @@ qualified source or successful application operation. Post-merge main CI runs
 results; neither PR nor post-merge CI establishes source or application
 qualification.
 
-Component source of record includes `internal/api/attended_context.go`,
+At the reviewed commit, component source included `internal/api/attended_context.go`,
 `internal/api/attended_controller.go`, `internal/api/attended_history.go`,
 `internal/api/operations.go`, `internal/operationhistory/history_v2.go`,
 `internal/operationhistory/lookup.go`, `internal/web/static/attended.js`, and
