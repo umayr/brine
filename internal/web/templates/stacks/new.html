@@ -117,7 +117,7 @@ config {
           <div class="ui-panel sticky top-4">
             <div class="flex items-center justify-between px-4 py-3 border-b border-line">
               <h3 class="text-sm font-semibold">Snippets</h3>
-              <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet">
+              <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet" aria-label="New snippet">
                 <i data-lucide="plus" class="w-3.5 h-3.5"></i>
               </a>
             </div>
@@ -135,9 +135,9 @@ config {
                     </div>
                     <button
                       type="button"
-                      class="ui-button ui-button-ghost ui-button-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      class="ui-button ui-button-ghost ui-button-xs shrink-0"
                       onclick="nfInsertSnippet('{{.Slug}}')"
-                      title="Insert at cursor"
+                      title="Insert at cursor" aria-label="Insert {{.Name}} at cursor"
                     >
                       <i data-lucide="corner-down-left" class="w-3.5 h-3.5"></i>
                     </button>

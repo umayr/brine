@@ -31,7 +31,7 @@
       <!-- Tab strip -->
       <div class="flex items-center bg-canvas/60 border-b border-line px-2 pt-2 gap-1 overflow-x-auto">
         {{range .Files}}
-        <a href="/stacks/{{$.Stack.Name}}/edit?file={{.}}"
+        <a href="/stacks/{{$.Stack.Name}}/edit?file={{.}}" {{if eq . $.ActiveFile}}aria-current="page"{{end}}
           class="px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors
             {{if eq . $.ActiveFile}}
               bg-panel text-foreground font-semibold border border-b-panel border-line
@@ -45,7 +45,7 @@
         <button
           class="ml-0.5 px-2 py-1.5 text-dim hover:text-foreground rounded-t-md transition-colors"
           onclick="document.getElementById('new-file-modal').showModal()"
-          title="Add file"
+          title="Add file" aria-label="Add file"
         ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
       </div>
 
@@ -135,7 +135,7 @@
     <div class="ui-panel sticky top-4">
       <div class="flex items-center justify-between px-4 py-3 border-b border-line">
         <h3 class="text-sm font-semibold">Snippets</h3>
-        <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet">
+        <a href="/recipes/new" class="ui-button ui-button-ghost ui-button-xs" title="New snippet" aria-label="New snippet">
           <i data-lucide="plus" class="w-3.5 h-3.5"></i>
         </a>
       </div>
@@ -153,9 +153,9 @@
                 {{if .Description}}<div class="text-xs text-dim truncate mt-0.5">{{.Description}}</div>{{end}}
               </div>
               <button
-                class="ui-button ui-button-ghost ui-button-xs shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                class="ui-button ui-button-ghost ui-button-xs shrink-0"
                 onclick="insertSnippet('{{.Slug}}')"
-                title="Insert at cursor"
+                title="Insert at cursor" aria-label="Insert {{.Name}} at cursor"
               >
                 <i data-lucide="corner-down-left" class="w-3.5 h-3.5"></i>
               </button>
