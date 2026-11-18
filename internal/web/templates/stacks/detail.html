@@ -270,7 +270,7 @@
   <!-- Git source panel (shown only for git-backed stacks) -->
   {{if .Stack.Git}}
   <div class="ui-panel">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
+    <div class="git-source-header flex items-center justify-between px-5 py-4 border-b border-line">
       <div class="flex items-center gap-2">
         <i data-lucide="git-branch" class="w-4 h-4 text-muted"></i>
         <h2 class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="git-source-panel" data-panel-actions="git-source-actions">Git source <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
@@ -281,12 +281,17 @@
         {{if eq .Target.Profile "alpha"}}<span class="ui-status ui-status-warning ui-status-sm">auto-deploy disabled in Alpha</span>{{else}}<span class="ui-status ui-status-info ui-status-sm">auto-deploy</span>{{end}}
         {{end}}
       </div>
-      <div id="git-source-actions"><div class="flex items-center gap-2">
+      <div id="git-source-actions"><div class="git-source-actions flex items-center gap-2">
         <button class="ui-button ui-button-ghost ui-button-xs gap-1.5"
           hx-post="/web/stacks/{{.Stack.Name}}/git/pull"
           hx-target="#git-result"
           hx-swap="innerHTML"
           hx-indicator="#git-spinner"
+          hx-sync="this:drop"
+          hx-disabled-elt="this"
+          hx-on::before-request="document.getElementById('git-result').textContent = 'Pulling Git source…'"
+          hx-on::send-error="document.getElementById('git-result').textContent = 'Pull outcome could not be confirmed. Inspect the working tree and revision before retrying.'"
+          hx-on::response-error="document.getElementById('git-result').textContent = 'Pull outcome could not be confirmed. Inspect the working tree and revision before retrying.'"
           hx-on::after-request="htmx.trigger(document.body, 'git-refresh')"
         >
           <span id="git-spinner" class="htmx-indicator ui-spinner ui-spinner-xs"></span>
@@ -304,7 +309,7 @@
       </div></div>
     </div>
     <div id="git-source-panel">
-    <div class="px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
+    <div class="git-source-grid px-5 py-4 grid grid-cols-2 gap-x-8 gap-y-4">
       <div>
         <div class="field-label mb-1">URL</div>
         <div class="font-mono text-xs truncate text-muted">{{.Stack.Git.URL}}</div>
@@ -349,7 +354,7 @@
       </div>
     </div>
     {{end}}
-    <div id="git-result" class="px-5 pb-4"></div>
+    <div id="git-result" class="px-5 pb-4" role="status" aria-live="polite"></div>
 
     <!-- Git settings form -->
     <div class="border-t border-line px-5 py-4">
@@ -366,18 +371,18 @@
           class="mt-4 grid grid-cols-2 gap-4"
         >
           <div class="ui-field">
-            <label class="ui-label"><span class="ui-label-text text-xs">Branch</span></label>
-            <input type="text" name="git_branch" class="ui-input ui-input-sm font-mono"
+            <label class="ui-label" for="git-branch"><span class="ui-label-text text-xs">Branch</span></label>
+            <input id="git-branch" type="text" name="git_branch" class="ui-input ui-input-sm font-mono"
               value="{{.Stack.Git.Branch}}" />
           </div>
           <div class="ui-field">
-            <label class="ui-label"><span class="ui-label-text text-xs">Folder</span></label>
-            <input type="text" name="git_folder" class="ui-input ui-input-sm font-mono"
+            <label class="ui-label" for="git-folder"><span class="ui-label-text text-xs">Folder</span></label>
+            <input id="git-folder" type="text" name="git_folder" class="ui-input ui-input-sm font-mono"
               value="{{.Stack.Git.Folder}}" placeholder="optional" />
           </div>
           <div class="ui-field">
-            <label class="ui-label"><span class="ui-label-text text-xs">Poll interval</span></label>
-            <input type="text" name="git_poll_interval" class="ui-input ui-input-sm font-mono"
+            <label class="ui-label" for="git-poll-interval"><span class="ui-label-text text-xs">Poll interval</span></label>
+            <input id="git-poll-interval" type="text" name="git_poll_interval" class="ui-input ui-input-sm font-mono"
               value="{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}"
               placeholder="5m" />
           </div>
