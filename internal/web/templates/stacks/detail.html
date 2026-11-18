@@ -41,7 +41,7 @@
         <i data-lucide="square" class="w-3.5 h-3.5"></i>
         Down
       </button>
-      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Pause containers"
+      <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Stop containers"
         onclick="runAction('stop', '{{.Stack.Name}}')"
       >
         <i data-lucide="pause" class="w-3.5 h-3.5"></i>
@@ -69,6 +69,10 @@
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
         hx-swap="innerHTML"
+        hx-sync="this:replace"
+        hx-on::before-request="document.getElementById('plan-result').textContent = 'Generating plan…'"
+        hx-on::send-error="document.getElementById('plan-result').textContent = 'Plan unavailable. No current plan was returned.'"
+        hx-on::response-error="document.getElementById('plan-result').textContent = 'Plan unavailable. No current plan was returned.'"
         {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
@@ -138,7 +142,7 @@
   </div>
 
   <!-- Plan result (populated on demand) -->
-  <div id="plan-result"></div>
+  <div id="plan-result" role="status" aria-live="polite"></div>
 
   <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
     <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
