@@ -56,6 +56,8 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var calls atomic.Int32
 	var manifest atomic.Value
 	var operationID atomic.Value
+	var fenceCalls, fenceState atomic.Int32
+	journal, stranded := strings.Repeat("d", 32), strings.Repeat("e", 32)
 	enabled := atomic.Bool{}
 	enabled.Store(true)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,11 +118,12 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		case "/v1/snapshots/" + stage:
 			fmt.Fprint(w, manifest.Load().(string))
 		case "/v1/deploy/preview":
+			w.Header().Set("X-Dill-Journal-Id", journal)
 			if enabled.Load() {
 				w.Header().Set("X-Dill-Create-Enabled", "1")
 			}
 			_, _ = w.Write(plan)
-		case "/v1/deploy/apply":
+		case "/v1/deploy/apply", "/v1/deploy/journal-apply":
 			calls.Add(1)
 			var f map[string]string
 			if json.NewDecoder(r.Body).Decode(&f) != nil || f["stageId"] != stage || f["confirm"] != "create" || f["stack"] != "synthetic" {
@@ -133,7 +136,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 					return
 				}
 				s, err := persisted.Get("synthetic")
-				if err != nil || s.RemoteGit == nil || s.RemoteGit.Request != f["requestId"] || s.RemoteGit.Phase != "pending" {
+				if err != nil || s.RemoteGit == nil || s.RemoteGit.Request != f["requestId"] || s.RemoteGit.Phase != "pending" || s.RemoteGit.Journal != journal || r.URL.Path != "/v1/deploy/journal-apply" || r.Header.Get("X-Dill-Journal-Id") != journal {
 					t.Error("Git apply sent before durable intent")
 					return
 				}
@@ -141,7 +144,29 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			operationID.Store(f["requestId"])
 			// Simulate an ambiguous response; the durable status is discoverable separately.
 			w.WriteHeader(502)
+		case "/v1/deploy/fence":
+			fenceCalls.Add(1)
+			var f map[string]string
+			if json.NewDecoder(r.Body).Decode(&f) != nil || f["requestId"] != stranded || f["stack"] != "synthetic" || f["confirm"] != "fence-if-unadmitted" || r.Header.Get("X-Dill-Journal-Id") != journal {
+				t.Error("unbound fence request")
+				w.WriteHeader(409)
+				return
+			}
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			if fenceState.Load() == 1 {
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, stranded)
+				return
+			}
+			if fenceState.Load() == 2 {
+				w.Header().Set("X-Dill-Journal-Id", strings.Repeat("c", 32))
+			}
+			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"not-admitted","effects":"none"}`, stranded)
+		case "/v1/deploy/operations/" + stranded:
+			http.NotFound(w, r)
 		default:
+			if r.Header.Get("X-Dill-Journal-Id") != "" {
+				w.Header().Set("X-Dill-Journal-Id", journal)
+			}
 			id, _ := operationID.Load().(string)
 			if id == "" || r.URL.Path != "/v1/deploy/operations/"+id {
 				t.Error("unexpected route")
@@ -305,6 +330,50 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		got, err = fs2.Get("synthetic")
 		if err != nil || got.RemoteGit.Phase != "succeeded" || got.RemoteGit.Request != "" || got.RemoteGit.Commit != commit || calls.Load() != 2 {
 			t.Fatal("request not recovered or unexpectedly resubmitted", err)
+		}
+		// Model a crash after the local intent sync but before transmission.
+		pending := *got.RemoteGit
+		pending.Request, pending.Journal, pending.Phase, pending.Reason = stranded, journal, "pending", "awaiting-status"
+		if err := fs2.SwapRemoteGit("synthetic", pending.Source, got.RemoteGit, &pending); err != nil {
+			t.Fatal(err)
+		}
+		restarted.pollGit(ctx)
+		readPolicy := func() *store.RemoteGitPolicy {
+			t.Helper()
+			s, err := fs2.Get("synthetic")
+			if err != nil {
+				t.Fatal(err)
+			}
+			return s.RemoteGit
+		}
+		if p := readPolicy(); p.Request != stranded || p.Reason != "status-unavailable" || fenceCalls.Load() != 0 {
+			t.Fatal("404 cleared the pending request")
+		}
+		handler = restarted.Protected()
+		params.Set("mode", "recover")
+		params.Set("request", stranded)
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 409 || fenceCalls.Load() != 0 {
+			t.Fatal("fence occurred without confirmation", w.Code)
+		}
+		params.Set("confirm", "fence-unadmitted")
+		fenceState.Store(1)
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || readPolicy().Request != stranded || !strings.Contains(w.Body.String(), "already admitted") {
+			t.Fatal("unknown admission was cleared", w.Code)
+		}
+		fenceState.Store(2)
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || readPolicy().Request != stranded || !strings.Contains(w.Body.String(), "No fence was verified") {
+			t.Fatal("foreign journal proof was accepted", w.Code)
+		}
+		fenceState.Store(0)
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || !strings.Contains(w.Body.String(), "without admitting it") {
+			t.Fatal("fence was not verified", w.Code)
+		}
+		if p := readPolicy(); p.Enabled || p.Request != "" || p.Journal != "" || p.Reason != "not-admitted" || p.Seen != commit {
+			t.Fatalf("incorrect recovery state: %+v", p)
+		}
+		restarted.pollGit(ctx)
+		if calls.Load() != 2 || fenceCalls.Load() != 3 {
+			t.Fatal("recovery caused an automatic submission")
 		}
 	})
 }

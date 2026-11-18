@@ -17,6 +17,12 @@ Under the same paired host, open **Remote auto-deploy settings** for a root-leve
 
 Once enabled, Brine polls the configured branch about once a minute. It builds a bounded snapshot directly from the fetched commit's objects, not from the editable stack checkout. It rejects symlinks and submodules. The initial tip can create the stack; later unseen commits use the same staged manifest, preview and exact-ownership checks as manual updates. Brine records the attempted commit and request ID before sending a deployment. It does not retry an ambiguous upload or apply, or submit the same recorded commit again for that source and target. A restart looks up the same pending request. A bound of 128 recorded commits fails closed instead of forgetting old attempts. Disabling automation does not erase unresolved requests or remove deployed resources. Disable or reconcile automation before manual operations on that project.
 
+### Recover a pending Git request
+
+In **Remote auto-deploy settings**, note the exact pending request ID and the reported reason. A missing or unverified result will not clear the request. If the original journal is available, explicitly choose **Check and fence request**. Dill returns the existing status for any admitted request and does not cancel it. If Dill instead verifies that the request was never admitted, it durably forbids late admission. Brine then clears the pending request, disables automation, and retains the attempted commit in its deduplication history. Re-enable explicitly to consider future unseen commits. If the fence response is lost, Brine can observe the same durable fence by looking up that request; it does not automatically submit a fence or an apply.
+
+Upgrade the Dill agent before deploying new Git commits: journal-bound submission requires the new agent. Legacy pending requests without a recorded journal ID can still look up a known outcome but cannot be fenced. Do not restore a stale copy of a deployment journal or use a fresh one as proof of non-admission. This change does not increase the history limits.
+
 ## Verification
 
 `DILL_AGENT_HTTPS_BIN=/absolute/dill DILL_AGENT_HTTPS_SUBCOMMAND=1 go test ./internal/agentclient -run '^TestHTTPS'` exercises the combined agent over loopback against a synthetic Docker socket. Brine handler tests cover exact transfer, explicit confirmation, Git intent persistence, and status recovery. These checks do not replace a real-engine deployment test.

@@ -21,7 +21,7 @@ func (h *Deployment) EnableGit(r *git.Runner) {
 	}
 }
 
-func (h *Deployment) gitSettings(w http.ResponseWriter, r *http.Request, p *deploymentPage, record targetregistry.Record) {
+func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *http.Request, p *deploymentPage, record targetregistry.Record) {
 	if h.gitStore == nil {
 		http.NotFound(w, r)
 		return
@@ -43,6 +43,36 @@ func (h *Deployment) gitSettings(w http.ResponseWriter, r *http.Request, p *depl
 	if r.URL.Path == deployPath+"/git-config" {
 		form := r.PostForm
 		switch form.Get("mode") {
+		case "recover":
+			if policy == nil || policy.Host != p.Host || policy.Source != source || policy.Target != target || policy.Request == "" || policy.Journal == "" || form.Get("request") != policy.Request || form.Get("source") != source || form.Get("target") != target || form.Get("confirm") != "fence-unadmitted" {
+				http.Error(w, "Pending request changed or cannot be fenced; review again", 409)
+				return
+			}
+			p.ID = policy.Request
+			ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			defer cancel()
+			c, epoch, err := openDeploymentSession(ctx, record)
+			if err != nil {
+				p.Error = "Target unavailable. The pending request has not been cleared."
+				break
+			}
+			defer c.Close()
+			result, err := c.FenceDeployment(ctx, epoch, policy.Request, p.Stack, policy.Journal)
+			if err != nil {
+				p.Error = "No fence was verified. The pending request has not been cleared."
+				break
+			}
+			p.Status = &result
+			if result.State != "not-admitted" {
+				p.Error = "Dill already admitted this request. It was not fenced or replayed."
+				break
+			}
+			next := gitOutcome(stack, policy, result)
+			if h.gitStore.SwapRemoteGit(p.Stack, source, policy, &next) != nil {
+				p.Error = "Dill fenced the request, but Brine could not save the update. Look up the same request."
+				break
+			}
+			policy = &next
 		case "disable":
 			if policy == nil || policy.Host != p.Host || !policy.Enabled {
 				http.Error(w, "Remote Git policy changed", 409)
@@ -138,21 +168,26 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	}
 	record, lease, err := h.registry.AcquireRead(ctx, p.Host)
 	if err != nil {
+		h.noteGitUnavailable(s, p)
 		return
 	}
 	defer lease.Close()
 	if targetDigest(record) != p.Target {
+		h.noteGitUnavailable(s, p)
 		return
 	}
 	c, epoch, err := openDeploymentSession(ctx, record)
 	if err != nil {
+		h.noteGitUnavailable(s, p)
 		return
 	}
 	defer c.Close()
 	if p.Request != "" {
-		result, err := c.DeploymentStatus(ctx, epoch, p.Request)
-		if err == nil && result.Stack == name {
+		result, err := c.JournalDeploymentStatus(ctx, epoch, p.Request, name, p.Journal)
+		if err == nil {
 			h.finishGit(s, p, result)
+		} else {
+			h.noteGitUnavailable(s, p)
 		}
 		return
 	}
@@ -173,6 +208,7 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	// Remember that staging was attempted, including any ambiguous upload.
 	staged := *p
 	staged.Commit, staged.Phase, staged.Seen = commit, "blocked", strings.Join(append(seen, commit), " ")
+	staged.Reason = "staging-or-preview"
 	if h.gitStore.SwapRemoteGit(name, p.Source, p, &staged) != nil {
 		return
 	}
@@ -182,34 +218,64 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	if err != nil || plan.SelectionDigest == nil || (plan.Mode != "create" && plan.Mode != "update") {
 		return
 	}
+	if plan.JournalID == "" {
+		next := staged
+		next.Reason = "no-journal"
+		_ = h.gitStore.SwapRemoteGit(name, p.Source, &staged, &next)
+		return
+	}
 	var request [16]byte
 	if _, err := rand.Read(request[:]); err != nil {
 		return
 	}
 	pending := staged
-	pending.Request, pending.Phase = hex.EncodeToString(request[:]), "pending"
+	pending.Request, pending.Phase, pending.Journal, pending.Reason = hex.EncodeToString(request[:]), "pending", plan.JournalID, "awaiting-status"
 	if h.gitStore.SwapRemoteGit(name, p.Source, &staged, &pending) != nil {
 		return
 	}
-	result, err := c.ApplyDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode)
+	result, err := c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
 	if err == nil {
 		h.finishGit(s, &pending, result)
 	}
 }
 
-func (h *Deployment) finishGit(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.DeploymentStatus) {
-	if result.RequestID != p.Request || result.Stack != s.Name {
+func (h *Deployment) noteGitUnavailable(s *store.Stack, p *store.RemoteGitPolicy) {
+	if p.Request == "" || p.Reason == "status-unavailable" {
 		return
 	}
 	next := *p
-	switch result.State {
-	case "succeeded":
-		next.Phase = "succeeded"
-	case "failed":
-		next.Phase = "blocked"
-	default:
-		return
-	}
-	next.Request = ""
+	next.Reason = "status-unavailable"
 	_ = h.gitStore.SwapRemoteGit(s.Name, p.Source, p, &next)
+}
+
+func gitOutcome(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.DeploymentStatus) store.RemoteGitPolicy {
+	next := *p
+	if result.RequestID != p.Request || result.Stack != s.Name {
+		return next
+	}
+	switch result.State {
+	case "running", "unknown":
+		next.Reason = result.State
+		return next
+	case "succeeded":
+		next.Phase, next.Reason = "succeeded", ""
+	case "failed":
+		next.Phase, next.Reason = "blocked", "failed"
+	case "not-admitted":
+		if p.Journal == "" {
+			return next
+		} // no original journal binding, no fence proof
+		next.Phase, next.Reason, next.Enabled = "blocked", "not-admitted", false
+	default:
+		return next
+	}
+	next.Request, next.Journal = "", ""
+	return next
+}
+
+func (h *Deployment) finishGit(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.DeploymentStatus) {
+	next := gitOutcome(s, p, result)
+	if next != *p {
+		_ = h.gitStore.SwapRemoteGit(s.Name, p.Source, p, &next)
+	}
 }
