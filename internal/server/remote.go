@@ -72,6 +72,7 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 		if s.remoteDeploy, err = remoteui.NewDeployment(s.authn, registry, s.store); err != nil {
 			return err
 		}
+		s.remoteDeploy.EnableGit(s.git)
 		deploy = s.remoteDeploy.Protected()
 	}
 	local := s.router

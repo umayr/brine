@@ -97,7 +97,12 @@ func (s *Server) Run(ctx context.Context) error {
 		defer s.remoteCancel()
 	}
 	// Do not start background mutations until the configuration is validated.
-	go s.syncer.Run(ctx)
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	go s.syncer.Run(workerCtx)
+	if s.remoteDeploy != nil {
+		go s.remoteDeploy.RunGit(workerCtx)
+	}
 	addr := net.JoinHostPort(s.cfg.Bind, s.cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,

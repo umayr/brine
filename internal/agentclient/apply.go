@@ -22,22 +22,37 @@ type DeploymentStatus struct {
 }
 
 func (c *Client) CreateDeployment(ctx context.Context, epoch, stage, manifest, stack, selection, requestID string) (DeploymentStatus, error) {
-	if !canonicalHex(stage, 16) || !canonicalHex(manifest, 32) || !strings.HasPrefix(selection, "sha256:") || !canonicalHex(strings.TrimPrefix(selection, "sha256:"), 32) || stack == "" || len(stack) > 128 {
+	return c.ApplyDeployment(ctx, epoch, stage, manifest, stack, selection, requestID, "create")
+}
+
+func (c *Client) ApplyDeployment(ctx context.Context, epoch, stage, manifest, stack, selection, requestID, mode string) (DeploymentStatus, error) {
+	if (mode != "create" && mode != "update") || !canonicalHex(stage, 16) || !canonicalHex(manifest, 32) || !strings.HasPrefix(selection, "sha256:") || !canonicalHex(strings.TrimPrefix(selection, "sha256:"), 32) || stack == "" || len(stack) > 128 {
 		return DeploymentStatus{}, ErrProtocol
 	}
-	body, err := json.Marshal(map[string]string{"stageId": stage, "manifestSha256": manifest, "stack": stack, "selectionDigest": selection, "requestId": requestID, "confirm": "create"})
+	body, err := json.Marshal(map[string]string{"stageId": stage, "manifestSha256": manifest, "stack": stack, "selectionDigest": selection, "requestId": requestID, "confirm": mode})
 	if err != nil {
 		return DeploymentStatus{}, ErrProtocol
 	}
-	return c.deploymentStatus(ctx, epoch, requestID, stack, body)
+	return c.deploymentStatus(ctx, epoch, requestID, stack, "/v1/deploy/apply", body)
+}
+
+func (c *Client) RemoveDeployment(ctx context.Context, epoch, stack, selection, requestID, prior string) (DeploymentStatus, error) {
+	if !canonicalHex(prior, 16) || !strings.HasPrefix(selection, "sha256:") || !canonicalHex(strings.TrimPrefix(selection, "sha256:"), 32) || stack == "" || len(stack) > 128 {
+		return DeploymentStatus{}, ErrProtocol
+	}
+	body, err := json.Marshal(map[string]string{"stack": stack, "selectionDigest": selection, "requestId": requestID, "priorRequestId": prior, "confirm": "remove"})
+	if err != nil {
+		return DeploymentStatus{}, ErrProtocol
+	}
+	return c.deploymentStatus(ctx, epoch, requestID, stack, "/v1/deploy/remove", body)
 }
 
 // DeploymentStatus looks up the same request without submitting a write.
 func (c *Client) DeploymentStatus(ctx context.Context, epoch, requestID string) (DeploymentStatus, error) {
-	return c.deploymentStatus(ctx, epoch, requestID, "", nil)
+	return c.deploymentStatus(ctx, epoch, requestID, "", "", nil)
 }
 
-func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack string, body []byte) (DeploymentStatus, error) {
+func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack, postPath string, body []byte) (DeploymentStatus, error) {
 	var empty DeploymentStatus
 	session, err := c.httpsSession(epoch)
 	if ctx == nil || err != nil || !canonicalHex(id, 16) {
@@ -45,7 +60,7 @@ func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack string, 
 	}
 	method, path, limit, failure := http.MethodGet, "/v1/deploy/operations/"+id, 15*time.Second, ErrProtocol
 	if body != nil {
-		method, path, limit, failure = http.MethodPost, "/v1/deploy/apply", 6*time.Minute, ErrDeploymentUnknown
+		method, path, limit, failure = http.MethodPost, postPath, 6*time.Minute, ErrDeploymentUnknown
 	}
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()

@@ -100,6 +100,9 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 			return nil, fmt.Errorf("stack %q metadata: %w", name, err)
 		}
 	}
+	if !stack.RemoteGit.valid() {
+		return nil, ErrRemoteGit
+	}
 	// Recompute the entrypoint path from the current data directory so that a
 	// moved data dir (or a containerised brine) does not keep stale absolute paths.
 	stack.PklPath = filepath.Join(s.filesDir(name, stack.Git), entrypointOrDefault(stack.Entrypoint))
@@ -116,7 +119,7 @@ func (s *FSStore) writeMeta(stack *Stack) error {
 		return err
 	}
 	defer unix.Close(fd)
-	return writeWorkspaceFile(fd, "meta.json", data)
+	return writeWorkspaceMetadata(fd, data)
 }
 
 func (s *FSStore) List() ([]*Stack, error) {
@@ -226,8 +229,12 @@ func (s *FSStore) Delete(name string) error {
 	if err := ValidateStackName(name); err != nil {
 		return err
 	}
-	if _, err := s.readMeta(name); err != nil {
+	stack, err := s.readMeta(name)
+	if err != nil {
 		return fmt.Errorf("stack %q not found", name)
+	}
+	if stack.protectsRemoteGit() {
+		return ErrRemoteGit
 	}
 	return os.RemoveAll(s.stackDir(name))
 }
@@ -398,6 +405,9 @@ func (s *FSStore) SetEntrypoint(name, filename string) error {
 	if stack.Git != nil && stack.Git.ReadOnly {
 		return fmt.Errorf("stack %q is read-only (git-backed)", name)
 	}
+	if stack.protectsRemoteGit() {
+		return ErrRemoteGit
+	}
 	dir := s.filesDir(name, stack.Git)
 	fd, err := s.workspaceFD(name, stack.Git)
 	if err != nil {
@@ -515,6 +525,9 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 	}
 	if stack.Git == nil {
 		return fmt.Errorf("stack %q is not git-backed", name)
+	}
+	if stack.protectsRemoteGit() {
+		return ErrRemoteGit
 	}
 	fd, err := s.workspaceFD(name, src)
 	if err != nil {

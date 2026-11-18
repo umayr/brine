@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/dillserve"
+	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/projectreview"
 	"github.com/umayr/brine/internal/projectsnapshot"
 	"github.com/umayr/brine/internal/store"
@@ -37,10 +39,14 @@ type Deployment struct {
 	slot     chan struct{}
 	mu       sync.Mutex
 	pending  map[string]deploymentReview
+	git      *git.Runner
+	gitStore store.RemoteGitStore
+	gitMu    sync.Mutex
 }
 
 type deploymentReview struct {
 	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest string
+	Mode, PriorRequestID                                             string
 	Expiry                                                           time.Time
 }
 
@@ -49,7 +55,10 @@ type deploymentPage struct {
 	Review                       *projectreview.Preview
 	Plan                         *dill.PreflightResult
 	Status                       *agentclient.DeploymentStatus
-	CanCreate                    bool
+	Mode                         string
+	GitSettings                  bool
+	Branch, Source, Target       string
+	GitPolicy                    *store.RemoteGitPolicy
 }
 
 func NewDeployment(a *auth.Authenticator, registry *targetregistry.Registry, stacks store.StackStore) (*Deployment, error) {
@@ -102,6 +111,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		p.Host, p.Stack, p.ID = form.Get("host"), form.Get("stack"), form.Get("id")
 	}
 	if r.URL.Path == deployPath && r.Method == http.MethodGet && p.ID == "" {
+		p.GitSettings = h.gitStore != nil
 		h.render(w, p)
 		return
 	}
@@ -125,6 +135,15 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.Host, p.Stack = review.Host, review.Stack
+		if !h.gitMu.TryLock() {
+			http.Error(w, "Remote automation busy; review again", 409)
+			return
+		}
+		defer h.gitMu.Unlock()
+		if stack, err := h.stacks.Get(p.Stack); err == nil && stack != nil && stack.RemoteGit != nil && (stack.RemoteGit.Enabled || stack.RemoteGit.Request != "") {
+			http.Error(w, "Disable or reconcile remote Git automation before manual operations", 409)
+			return
+		}
 		ctx, cancel := context.WithTimeout(lease, 6*time.Minute)
 		defer cancel()
 		record, releaseRecord, err := h.registry.AcquireRead(ctx, p.Host)
@@ -143,11 +162,16 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer c.Close()
-		status, err := c.CreateDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID)
+		var status agentclient.DeploymentStatus
+		if review.Mode == "remove" {
+			status, err = c.RemoveDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID)
+		} else {
+			status, err = c.ApplyDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode)
+		}
 		if err == nil {
 			p.Status = &status
 		} else {
-			p.Error = "Creation not confirmed. Look up this exact request before taking further action. No retry was sent."
+			p.Error = "Operation not confirmed. Look up this exact request before taking further action. No retry was sent."
 		}
 		h.render(w, p)
 		return
@@ -181,6 +205,9 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	current := projectreview.Current{Stack: p.Stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: targetDigest(record), Socket: record.HTTPSAddress, Endpoint: p.Host}}
 	switch r.URL.Path {
+	case deployPath + "/git", deployPath + "/git-config":
+		h.gitSettings(w, r, &p, record)
+		return
 	case deployPath + "/review":
 		stack, err := h.stacks.Get(p.Stack)
 		if err != nil || stack == nil || (stack.Git != nil && stack.Git.Folder != "") || stack.PklPath == "" {
@@ -192,6 +219,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			entry = "compose.pkl"
 		}
 		snap, err := projectsnapshot.Build(filepath.Dir(stack.PklPath), entry, captureLimits)
+		if err == nil && stack.Git == nil {
+			// Locally owned projects share their directory with Brine metadata.
+			snap.Files = slices.DeleteFunc(snap.Files, func(f projectsnapshot.File) bool { return f.Path == "meta.json" || strings.HasPrefix(f.Path, ".meta-") })
+		}
 		if err != nil || projectsnapshot.ValidateProvisionalReceiver(ctx, snap) != nil {
 			http.Error(w, "Project capture unavailable or incompatible", 422)
 			return
@@ -230,25 +261,43 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			h.render(w, p)
 			return
 		}
-		p.Plan = plan.PreflightResult
-		p.ID = ""
-		if plan.CreateEnabled && plan.SelectionDigest != nil && len(plan.Resources) > 0 {
-			p.CanCreate = true
-			for _, resource := range plan.Resources {
-				if resource.Presence != "absent" {
-					p.CanCreate = false
-				}
-			}
+		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan)
+	case deployPath + "/remove-preview":
+		c, epoch, err := openDeploymentSession(ctx, record)
+		if err != nil {
+			http.Error(w, "Target unavailable", 409)
+			return
 		}
-		if p.CanCreate {
-			p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, TargetDigest: current.Target.Identity, Expiry: time.Now().Add(5 * time.Minute)})
-			p.CanCreate = p.ID != ""
+		defer c.Close()
+		plan, err := c.PreviewRemoval(ctx, epoch, p.Stack)
+		if err != nil {
+			p.Error = "Managed removal preview unavailable. No operation was sent."
+			break
 		}
+		h.renderPlan(&p, session, current.Target.Identity, "", "", plan)
 	default:
 		http.NotFound(w, r)
 		return
 	}
 	h.render(w, p)
+}
+
+func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview) {
+	p.Plan, p.ID = plan.PreflightResult, ""
+	if plan.Mode == "" || plan.SelectionDigest == nil || len(plan.Resources) == 0 {
+		return
+	}
+	if plan.Mode == "create" {
+		for _, r := range plan.Resources {
+			if r.Presence != "absent" {
+				return
+			}
+		}
+	}
+	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Expiry: time.Now().Add(5 * time.Minute)})
+	if p.ID != "" {
+		p.Mode = plan.Mode
+	}
 }
 
 func targetDigest(record targetregistry.Record) string {
@@ -344,7 +393,7 @@ func (h *Deployment) take(id, session, confirm string) (deploymentReview, bool) 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	r, ok := h.pending[id]
-	if !ok || r.Session != session || confirm != "create" || !time.Now().Before(r.Expiry) {
+	if !ok || r.Session != session || confirm != r.Mode || !time.Now().Before(r.Expiry) {
 		return deploymentReview{}, false
 	}
 	delete(h.pending, id)
@@ -366,6 +415,11 @@ var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype h
 {{if .Review}}<h2>Review captured files</h2><p>Only transfer trusted projects. Staging may contain credentials; the configured target can evaluate Pkl with the agent account’s privileges. This is not a sandbox. Effective Brine variables are not transferred. No files have been sent yet.</p><p>Entrypoint: <code>{{.Review.Entrypoint}}</code></p><ul>{{range .Review.Files}}<li>{{.Path}} · {{.Size}} bytes · <code>{{printf "%x" .SHA256}}</code></li>{{end}}</ul>
 <form method="post" action="/remote/deployment/stage"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="id" value="{{.Review.ID}}"><label><input type="checkbox" name="confirm" value="transfer" required> Send these exact files and request a preview</label><button>Stage and preview</button></form>
 {{else if .Plan}}<h2>Deployment preview for {{.Stack}}</h2><ul>{{range .Plan.Resources}}<li>{{.Kind}} {{.Name}} · {{.Presence}} · {{.Action}}{{if .Retention}} · {{.Retention}}{{end}}</li>{{end}}</ul>
-{{if .CanCreate}}<p>This preview did not permit writes. Save the status link before confirming if you need to recover after a disconnect.</p><form method="post" action="/remote/deployment/create"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="create" required> Create this new managed stack on this target</label><button>Create stack</button></form>{{else}}<p>Creation unavailable: either the host has not enabled it or the preview includes existing resources. Existing resources are not adopted.</p>{{end}}
-{{else if not .ID}}<form method="post" action="/remote/deployment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Brine project name <input name="stack" required value="{{.Stack}}"></label><button>Review project files</button></form>{{end}}
-{{if .ID}}{{if not .Review}}<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">Look up creation request <code>{{.ID}}</code></a></p>{{end}}{{end}}</main></html>`))
+{{if .Mode}}<p>This preview did not permit writes. Save the status link before confirming if you need to recover after a disconnect.</p><form method="post" action="/remote/deployment/create"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="{{.Mode}}" required> Confirm {{.Mode}} for this stack on this target</label><button>{{if eq .Mode "create"}}Create stack{{else if eq .Mode "update"}}Update stack{{else}}Remove containers; keep data{{end}}</button></form>{{else}}<p>Mutation unavailable. Existing resources are not adopted.</p>{{end}}
+{{else if .GitPolicy}}<h2>Remote Git automation for {{.Stack}}</h2><p>Selected target: {{.Host}} · Branch: <code>{{.Branch}}</code> · State: {{.GitPolicy.Phase}} · Commit: <code>{{.GitPolicy.Commit}}</code></p>
+{{if .GitPolicy.Request}}<p><a href="/remote/deployment?host={{.GitPolicy.Host|urlquery}}&amp;id={{.GitPolicy.Request|urlquery}}">Look up pending request <code>{{.GitPolicy.Request}}</code></a>. A missing result is not evidence of no effects.</p>{{end}}
+<form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}">{{if .GitPolicy.Enabled}}<button name="mode" value="disable">Disable remote auto-deploy</button>{{else if not .GitPolicy.Request}}<label><input type="checkbox" name="confirm" value="trusted" required> Authorize this Git branch to send exact commits and create or update this stack without individual review. The target evaluates trusted Pkl with agent privileges.</label><button name="mode" value="enable">Enable remote auto-deploy</button>{{end}}</form>
+{{else if not .ID}}<form method="post" action="/remote/deployment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Brine project name <input name="stack" required value="{{.Stack}}"></label><button>Review project files</button></form>
+<form method="post" action="/remote/deployment/remove-preview"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Managed stack name <input name="stack" required value="{{.Stack}}"></label><button>Preview removal</button></form>
+{{if .GitSettings}}<form method="post" action="/remote/deployment/git"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Git-backed Brine project <input name="stack" required></label><button>Remote auto-deploy settings</button></form>{{end}}{{end}}
+{{if .ID}}{{if not .Review}}<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">Look up operation request <code>{{.ID}}</code></a></p>{{end}}{{end}}</main></html>`))

@@ -23,12 +23,13 @@ type GitSource struct {
 
 // Stack represents a dill stack managed by brine.
 type Stack struct {
-	Name       string     `json:"name"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
-	PklPath    string     `json:"pkl_path"`      // absolute path to entrypoint file
-	Entrypoint string     `json:"entrypoint"`    // filename within files dir, default "compose.pkl"
-	Git        *GitSource `json:"git,omitempty"` // nil for locally-managed stacks
+	Name       string           `json:"name"`
+	CreatedAt  time.Time        `json:"created_at"`
+	UpdatedAt  time.Time        `json:"updated_at"`
+	PklPath    string           `json:"pkl_path"`      // absolute path to entrypoint file
+	Entrypoint string           `json:"entrypoint"`    // filename within files dir, default "compose.pkl"
+	Git        *GitSource       `json:"git,omitempty"` // nil for locally-managed stacks
+	RemoteGit  *RemoteGitPolicy `json:"remote_git,omitempty"`
 }
 
 // StackStore manages stack metadata and .pkl file storage.

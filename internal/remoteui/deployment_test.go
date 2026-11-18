@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -21,12 +22,14 @@ import (
 
 	"github.com/umayr/brine/internal/agentclient"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 )
 
 func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
-	fs, err := store.NewFSStore(t.TempDir())
+	data := t.TempDir()
+	fs, err := store.NewFSStore(data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +126,18 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			if json.NewDecoder(r.Body).Decode(&f) != nil || f["stageId"] != stage || f["confirm"] != "create" || f["stack"] != "synthetic" {
 				t.Error("invalid create request")
 			}
+			if calls.Load() == 2 {
+				persisted, err := store.NewFSStore(data)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				s, err := persisted.Get("synthetic")
+				if err != nil || s.RemoteGit == nil || s.RemoteGit.Request != f["requestId"] || s.RemoteGit.Phase != "pending" {
+					t.Error("Git apply sent before durable intent")
+					return
+				}
+			}
 			operationID.Store(f["requestId"])
 			// Simulate an ambiguous response; the durable status is discoverable separately.
 			w.WriteHeader(502)
@@ -212,4 +227,84 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	if w := invoke("GET", deployPath+"?host=demo&id="+id, nil); !strings.Contains(w.Body.String(), "State succeeded") || calls.Load() != 1 {
 		t.Fatal("status did not reconcile request", w.Code)
 	}
+	t.Run("git persists and reconciles the same request after restart", func(t *testing.T) {
+		if _, err := exec.LookPath("git"); err != nil {
+			t.Skip("git unavailable")
+		}
+		ctx := context.Background()
+		if err := fs.Delete("synthetic"); err != nil {
+			t.Fatal(err)
+		}
+		upstream := t.TempDir()
+		run := func(args ...string) string {
+			t.Helper()
+			cmd := exec.Command("git", args...)
+			cmd.Dir = upstream
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("git %s: %v: %s", args[0], err, out)
+			}
+			return strings.TrimSpace(string(out))
+		}
+		run("init", "-b", "deploy")
+		run("config", "user.name", "Test")
+		run("config", "user.email", "test@example.invalid")
+		if err := os.WriteFile(filepath.Join(upstream, "compose.pkl"), []byte("original-reviewed-project"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		run("add", "compose.pkl")
+		run("commit", "-m", "approved source")
+		commit := run("rev-parse", "HEAD")
+		work, err := fs.RepoDir("synthetic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(work), 0700); err != nil {
+			t.Fatal(err)
+		}
+		g := git.New()
+		if err := g.Clone(ctx, upstream, "deploy", work); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fs.CreateFromGit("synthetic", &store.GitSource{URL: upstream, Branch: "deploy"}, "compose.pkl"); err != nil {
+			t.Fatal(err)
+		}
+		h.EnableGit(g)
+		params := url.Values{"_csrf": {csrf}, "stack": {"synthetic"}, "host": {"demo"}}
+		w := invoke("POST", deployPath+"/git", params)
+		params.Set("source", field(w, "source"))
+		params.Set("target", field(w, "target"))
+		params.Set("mode", "enable")
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 409 {
+			t.Fatal("Git enabled without trust confirmation", w.Code)
+		}
+		params.Set("confirm", "trusted")
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 {
+			t.Fatal("Git enabling failed", w.Code)
+		}
+		if err := os.WriteFile(filepath.Join(work, "compose.pkl"), []byte("mutable checkout must not ship"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		h.pollGit(ctx)
+		got, err := fs.Get("synthetic")
+		if err != nil || got.RemoteGit == nil || got.RemoteGit.Commit != commit || got.RemoteGit.Request == "" || calls.Load() != 2 {
+			t.Fatal("lost response was not retained", err)
+		}
+		fs2, err := store.NewFSStore(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		restarted, err := NewDeployment(a, reg, fs2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer restarted.Close()
+		restarted.EnableGit(g)
+		restarted.pollGit(ctx)
+		restarted.pollGit(ctx)
+		got, err = fs2.Get("synthetic")
+		if err != nil || got.RemoteGit.Phase != "succeeded" || got.RemoteGit.Request != "" || got.RemoteGit.Commit != commit || calls.Load() != 2 {
+			t.Fatal("request not recovered or unexpectedly resubmitted", err)
+		}
+	})
 }

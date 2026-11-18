@@ -16,30 +16,38 @@ import (
 
 type DeploymentPreview struct {
 	*dill.PreflightResult
-	CreateEnabled bool
+	CreateEnabled        bool
+	Mode, PriorRequestID string
 }
 
 // PreviewDeployment asks the authenticated agent to run Dill's qualified
 // preflight on the exact catalogued snapshot. It does not submit engine writes
 // or grant permission to apply the returned selection.
 func (c *Client) PreviewDeployment(ctx context.Context, epoch, stageID, manifestDigest, stack string) (*DeploymentPreview, error) {
+	if !canonicalHex(stageID, 16) || !canonicalHex(manifestDigest, 32) {
+		return nil, ErrProtocol
+	}
+	return c.previewDeployment(ctx, epoch, stack, "/v1/deploy/preview", "up", map[string]string{"stageId": stageID, "manifestSha256": manifestDigest, "stack": stack})
+}
+
+func (c *Client) PreviewRemoval(ctx context.Context, epoch, stack string) (*DeploymentPreview, error) {
+	return c.previewDeployment(ctx, epoch, stack, "/v1/deploy/remove-preview", "down", map[string]string{"stack": stack})
+}
+
+func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, action string, fields map[string]string) (*DeploymentPreview, error) {
 	session, err := c.httpsSession(epoch)
-	if ctx == nil || err != nil || !canonicalHex(stageID, 16) || !canonicalHex(manifestDigest, 32) || len(stack) == 0 || len(stack) > dill.PreflightMaxNameBytes {
+	if ctx == nil || err != nil || len(stack) == 0 || len(stack) > dill.PreflightMaxNameBytes {
 		return nil, ErrProtocol
 	}
 	ctx, cancel := context.WithTimeout(ctx, 32*time.Second)
 	defer cancel()
 	stop := context.AfterFunc(session, cancel)
 	defer stop()
-	body, err := json.Marshal(struct {
-		StageID  string `json:"stageId"`
-		Manifest string `json:"manifestSha256"`
-		Stack    string `json:"stack"`
-	}{stageID, manifestDigest, stack})
+	body, err := json.Marshal(fields)
 	if err != nil {
 		return nil, ErrProtocol
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/deploy/preview", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, ErrProtocol
 	}
@@ -58,11 +66,24 @@ func (c *Client) PreviewDeployment(ctx context.Context, epoch, stageID, manifest
 		return nil, ErrProtocol
 	}
 	result, err := dill.DecodePreflightResult(raw)
-	if err != nil || result.Outcome != "succeeded" || result.Operation != "up" || result.Stack != stack || result.Target == nil || result.Target.Engine != c.binding.EngineKind ||
+	if err != nil || result.Outcome != "succeeded" || result.Operation != action || result.Stack != stack || result.Target == nil || result.Target.Engine != c.binding.EngineKind ||
 		result.Target.EndpointDigest != fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(c.binding.EngineSocket))) || session.Err() != nil || ctx.Err() != nil {
 		return nil, ErrProtocol
 	}
-	return &DeploymentPreview{PreflightResult: result, CreateEnabled: resp.Header.Get("X-Dill-Create-Enabled") == "1"}, nil
+	mode, prior := resp.Header.Get("X-Dill-Deployment-Mode"), resp.Header.Get("X-Dill-Prior-Request")
+	if action == "down" {
+		if mode != "remove" || !canonicalHex(prior, 16) {
+			return nil, ErrProtocol
+		}
+	} else {
+		if prior != "" || (mode != "" && mode != "create" && mode != "update") {
+			return nil, ErrProtocol
+		}
+		if mode == "" && resp.Header.Get("X-Dill-Create-Enabled") == "1" {
+			mode = "create"
+		}
+	}
+	return &DeploymentPreview{PreflightResult: result, CreateEnabled: mode == "create", Mode: mode, PriorRequestID: prior}, nil
 }
 
 func canonicalHex(s string, size int) bool {
