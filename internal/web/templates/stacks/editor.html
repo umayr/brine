@@ -182,20 +182,22 @@
   <div class="ui-dialog-panel">
     <h3 id="new-file-modal-title" class="font-bold text-lg mb-4">Add file</h3>
     <form
+      id="new-file-form"
       hx-post="/web/stacks/{{.Stack.Name}}/files"
-      hx-target="#edit-result"
+      hx-target="#new-file-result"
       hx-swap="innerHTML"
       class="space-y-4"
     >
       <div class="ui-field">
         <label class="ui-label" for="new-file-name"><span class="ui-label-text">Filename</span></label>
         <input id="new-file-name" type="text" name="filename" class="ui-input font-mono"
-          placeholder="shared.pkl" pattern="[a-zA-Z0-9_-]+\.pkl" required />
+          placeholder="shared.pkl" pattern="[a-zA-Z0-9_\-]+\.pkl" required />
         <label class="ui-label"><span class="ui-label-hint text-dim">Must end in .pkl</span></label>
       </div>
+      <div id="new-file-result" role="status" aria-live="polite"></div>
       <div class="ui-dialog-actions">
         <button type="button" class="ui-button ui-button-ghost" onclick="document.getElementById('new-file-modal').close()">Cancel</button>
-        <button type="submit" class="ui-button ui-button-primary" onclick="document.getElementById('new-file-modal').close()">Create</button>
+        <button type="submit" class="ui-button ui-button-primary">Create</button>
       </div>
     </form>
   </div>
@@ -217,6 +219,21 @@ window._pklView = view;
 const snippetCache = {};
 const editorForm = document.getElementById('editor-form');
 const editorTextarea = document.getElementById('pkl-editor');
+const newFileForm = document.getElementById('new-file-form');
+const newFileResult = document.getElementById('new-file-result');
+if (newFileForm && newFileResult) {
+  newFileForm.addEventListener('htmx:beforeRequest', () => {
+    newFileResult.textContent = '';
+  });
+  newFileForm.addEventListener('htmx:afterRequest', event => {
+    if (!event.detail.successful) {
+      const status = event.detail.xhr.status;
+      newFileResult.textContent = status
+        ? 'File creation request failed (HTTP ' + status + '). Please try again.'
+        : 'File creation request failed. Check your connection and try again.';
+    }
+  });
+}
 let savedContent = editorTextarea.value;
 let submittedContent = savedContent;
 function updateDirtyState() {
