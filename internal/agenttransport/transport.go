@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -171,6 +172,11 @@ func pinned(s string) (ssh.PublicKey, error) {
 	if strings.TrimSuffix(string(ssh.MarshalAuthorizedKey(k)), "\n") != s {
 		return nil, errors.New("noncanonical host key")
 	}
+	// Explicit negotiation must not re-enable legacy algorithms excluded by
+	// the SSH library's secure defaults. RSA pins use SHA-2 signatures below.
+	if k.Type() != ssh.KeyAlgoRSA && !slices.Contains(ssh.SupportedAlgorithms().HostKeys, k.Type()) {
+		return nil, errors.New("unsupported pinned host key algorithm")
+	}
 	return k, nil
 }
 
@@ -229,7 +235,16 @@ func open(ctx context.Context, cfg Config, d setupDeps) (*Forward, error) {
 	stop := context.AfterFunc(setup, func() { _ = conn.Close() })
 	defer stop()
 	_ = conn.SetDeadline(time.Now().Add(cfg.Timeout))
-	cc, chans, reqs, err := ssh.NewClientConn(conn, cfg.Address, &ssh.ClientConfig{User: cfg.User, Auth: []ssh.AuthMethod{ssh.PublicKeys(auth)}, HostKeyCallback: func(_ string, _ net.Addr, k ssh.PublicKey) error {
+	// Negotiate the enrolled key type, rather than a different host key the
+	// same server offers earlier in SSH's default algorithm preference. Exact
+	// key bytes are still checked before any client authentication is sent.
+	hostKeyAlgorithms := []string{key.Type()}
+	if key.Type() == ssh.KeyAlgoRSA {
+		// The RSA public-key encoding is ssh-rsa even when signatures use SHA-2.
+		// Do not force the obsolete SHA-1 ssh-rsa signature algorithm.
+		hostKeyAlgorithms = []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256}
+	}
+	cc, chans, reqs, err := ssh.NewClientConn(conn, cfg.Address, &ssh.ClientConfig{User: cfg.User, Auth: []ssh.AuthMethod{ssh.PublicKeys(auth)}, HostKeyAlgorithms: hostKeyAlgorithms, HostKeyCallback: func(_ string, _ net.Addr, k ssh.PublicKey) error {
 		if !bytes.Equal(k.Marshal(), key.Marshal()) {
 			return errors.New("pinned host key mismatch")
 		}

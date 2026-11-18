@@ -2,7 +2,9 @@ package agenttransport
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
@@ -79,6 +81,17 @@ func TestPinnedForward(t *testing.T) {
 		return nil, nil
 	}}
 	cfg.AddHostKey(host)
+	// Real OpenSSH hosts commonly offer ECDSA as well as the enrolled Ed25519
+	// key. The client's default algorithm preference must not override the pin.
+	ecdsaKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ecdsaSigner, err := ssh.NewSignerFromKey(ecdsaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.AddHostKey(ecdsaSigner)
 	go func() {
 		for {
 			c, e := ln.Accept()
