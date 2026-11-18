@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/umayr/brine/internal/target"
 )
 
 func TestDefaultStackPklUsesDill050(t *testing.T) {
@@ -28,6 +30,26 @@ func TestDefaultStackPklUsesDill050(t *testing.T) {
 				t.Fatal("starter must retain the stack-name placeholder")
 			}
 		})
+	}
+}
+
+func TestNewStackAutoDeployReflectsTargetProfile(t *testing.T) {
+	ts, err := parseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ profile, want, notWanted string }{
+		{"alpha", `name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" disabled`, "Poll the branch and run"},
+		{"legacy", "Poll the branch and run", `name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" disabled`},
+	} {
+		var body bytes.Buffer
+		data := &stackNewData{pageData: pageData{Target: target.Identity{Profile: tc.profile}}}
+		if err := ts.pages["stacks/new.html"].Execute(&body, data); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(body.String(), tc.want) || strings.Contains(body.String(), tc.notWanted) {
+			t.Fatalf("profile %q: unexpected auto-deploy presentation", tc.profile)
+		}
 	}
 }
 

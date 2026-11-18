@@ -6,15 +6,15 @@
 {{define "content"}}
 
   <!-- Source type selector -->
-  <div class="ui-panel p-4 mb-4">
-    <div class="flex gap-2">
+  <div id="source-selector" class="ui-panel p-4 mb-4">
+    <div class="flex gap-2" role="group" aria-label="Stack source">
       <button type="button" onclick="setSource('local')"
-        id="tab-local" class="source-tab ui-button ui-button-sm ui-button-primary gap-1.5" data-source="local">
+        id="tab-local" aria-pressed="true" class="source-tab ui-button ui-button-sm ui-button-primary gap-1.5" data-source="local">
         <i data-lucide="file-code" class="w-3.5 h-3.5"></i>
         Local
       </button>
       <button type="button" onclick="setSource('git')"
-        id="tab-git" class="source-tab ui-button ui-button-sm ui-button-ghost gap-1.5" data-source="git">
+        id="tab-git" aria-pressed="false" class="source-tab ui-button ui-button-sm ui-button-ghost gap-1.5" data-source="git">
         <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
         Git
       </button>
@@ -23,7 +23,10 @@
 
   <!-- ── Local form (editor-style layout) ─────────────────────────── -->
   <div id="form-local">
-    <form hx-post="/web/stacks" hx-target="#local-result" hx-swap="innerHTML">
+    <form hx-post="/web/stacks" hx-target="#local-result" hx-swap="innerHTML" hx-sync="#source-selector:drop" hx-disabled-elt="[data-create-submit]"
+      hx-on::before-request="document.getElementById('local-result').textContent = 'Creating stack…'"
+      hx-on::send-error="document.getElementById('local-result').textContent = 'Creation could not be confirmed. Inspect stack inventory and any partial files before retrying.'"
+      hx-on::response-error="document.getElementById('local-result').textContent = 'Creation could not be confirmed. Inspect stack inventory and any partial files before retrying.'">
 
       <!-- Name + runtime bar -->
       <div class="ui-panel p-4 mb-4">
@@ -65,7 +68,7 @@
               <button type="button"
                 class="ml-0.5 px-2 py-1.5 text-dim hover:text-foreground rounded-t-md transition-colors"
                 onclick="showNewFileInput()"
-                title="Add file"
+                title="Add file" aria-label="Add file"
               ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
             </div>
 
@@ -100,13 +103,13 @@ config {
             </div>
 
             <!-- Toolbar -->
-            <div class="px-4 pb-4 flex items-center gap-2">
-              <button type="submit" class="ui-button ui-button-primary ui-button-sm gap-1.5">
+            <div class="px-4 pb-4 flex flex-wrap items-center gap-2">
+              <button type="submit" data-create-submit class="ui-button ui-button-primary ui-button-sm gap-1.5">
                 <i data-lucide="layers" class="w-3.5 h-3.5"></i>
                 Create stack
               </button>
               <a href="/stacks" class="ui-button ui-button-ghost ui-button-sm">Cancel</a>
-              <div id="local-result" class="ml-2 flex-1"></div>
+              <div id="local-result" class="w-full" role="status" aria-live="polite"></div>
             </div>
 
           </div>
@@ -164,7 +167,10 @@ config {
   <!-- ── Git form ──────────────────────────────────────────────────── -->
   <div id="form-git" class="hidden">
     <div class="ui-panel p-6">
-      <form hx-post="/web/stacks/git" hx-target="#git-result" hx-swap="innerHTML" class="space-y-5">
+      <form hx-post="/web/stacks/git" hx-target="#git-result" hx-swap="innerHTML" hx-sync="#source-selector:drop" hx-disabled-elt="[data-create-submit]" class="space-y-5"
+        hx-on::before-request="document.getElementById('git-result').textContent = 'Cloning and creating stack…'"
+        hx-on::send-error="document.getElementById('git-result').textContent = 'Creation could not be confirmed. Inspect stack inventory and any partial files before retrying.'"
+        hx-on::response-error="document.getElementById('git-result').textContent = 'Creation could not be confirmed. Inspect stack inventory and any partial files before retrying.'">
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div class="ui-field">
@@ -219,11 +225,11 @@ config {
             </div>
           </label>
           <label class="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5"
+            <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" {{if eq .Target.Profile "alpha"}}disabled{{end}}
               onchange="document.getElementById('poll-row').classList.toggle('hidden', !this.checked)" />
             <div>
               <div class="text-sm font-medium">Auto-deploy</div>
-              <div class="text-xs text-muted">Poll the branch and run <code class="font-mono bg-canvas px-1 rounded">dill up</code> automatically when new commits arrive.</div>
+              <div class="text-xs text-muted">{{if eq .Target.Profile "alpha"}}Unavailable in Alpha; manual source review is required.{{else}}Poll the branch and run <code class="font-mono bg-canvas px-1 rounded">dill up</code> automatically when new commits arrive.{{end}}</div>
             </div>
           </label>
           <div id="poll-row" class="pl-9 hidden">
@@ -236,13 +242,13 @@ config {
         </div>
 
         <div class="flex items-center gap-3 pt-2">
-          <button type="submit" class="ui-button ui-button-primary gap-1.5">
+          <button type="submit" data-create-submit class="ui-button ui-button-primary gap-1.5">
             <i data-lucide="git-branch" class="w-3.5 h-3.5"></i>
             Clone &amp; create
           </button>
           <a href="/stacks" class="ui-button ui-button-ghost">Cancel</a>
         </div>
-        <div id="git-result"></div>
+        <div id="git-result" role="status" aria-live="polite"></div>
       </form>
     </div>
   </div>
@@ -275,6 +281,7 @@ function setSource(src) {
   ['local', 'git'].forEach(s => {
     document.getElementById('form-' + s).classList.toggle('hidden', s !== src);
     const tab = document.getElementById('tab-' + s);
+    tab.setAttribute('aria-pressed', String(s === src));
     tab.classList.toggle('ui-button-primary', s === src);
     tab.classList.toggle('ui-button-ghost',   s !== src);
   });
