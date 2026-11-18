@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 
-spec = importlib.util.spec_from_file_location('fixture_home', os.path.join(os.path.dirname(__file__), 'check-alpha-fixture-home.py'))
+spec = importlib.util.spec_from_file_location('fixture_home', os.path.join(os.path.dirname(__file__), 'check-fixture-home.py'))
 check = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(check)
 
