@@ -21,17 +21,17 @@
     </a>
     <a href="/containers" class="overview-metric">
       <span class="overview-metric-label">Containers <i data-lucide="arrow-up-right" class="w-4 h-4"></i></span>
-      <strong>{{if .ContainersUnavailable}}—{{else}}{{.Stats.Running}}<span class="overview-metric-total"> / {{.Stats.Containers}}</span>{{end}}</strong><span class="overview-metric-note">{{if .ContainersUnavailable}}engine unavailable{{else}}running / total{{end}}</span>
+      <strong>{{if .ContainersUnavailable}}—{{else}}{{.Stats.Running}}<span class="overview-metric-total"> / {{.Stats.Containers}}</span>{{end}}</strong><span class="overview-metric-note">{{if .ContainersUnavailable}}inventory unavailable{{else}}running / total{{end}}</span>
     </a>
     <a href="/images" class="overview-metric">
       <span class="overview-metric-label">Images <i data-lucide="arrow-up-right" class="w-4 h-4"></i></span>
-      <strong>{{if .ImagesUnavailable}}—{{else}}{{.Stats.Images}}{{end}}</strong><span class="overview-metric-note">{{if .ImagesUnavailable}}engine unavailable{{else}}available locally{{end}}</span>
+      <strong>{{if .ImagesUnavailable}}—{{else}}{{.Stats.Images}}{{end}}</strong><span class="overview-metric-note">{{if .ImagesUnavailable}}inventory unavailable{{else}}reported by engine{{end}}</span>
     </a>
   </section>
 
   <div class="overview-sections">
     <section class="overview-section">
-      <div class="overview-section-header"><h2>Stacks</h2><a href="/stacks" class="overview-link">View all <span aria-hidden="true">→</span></a></div>
+      <div class="overview-section-header"><h2>Stacks</h2><a href="/stacks" class="overview-link" aria-label="View all stacks">View all <span aria-hidden="true">→</span></a></div>
       {{if .StacksUnavailable}}
       <div class="overview-empty"><div><h3>Stacks unavailable</h3><p>Could not load stack data.</p></div></div>
       {{else if .Stacks}}
@@ -40,7 +40,7 @@
         {{range .Stacks}}<tr>
           <td><a href="/stacks/{{.Name}}" class="underline-offset-2 hover:underline font-mono font-medium">{{.Name}}</a> {{if .Git}}<span class="ui-status ui-status-neutral ui-status-xs">git</span>{{end}}</td>
           <td class="font-mono text-xs text-muted">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
-          <td class="text-right"><a href="/stacks/{{.Name}}" class="overview-link">View <span aria-hidden="true">→</span></a></td>
+          <td class="text-right"><a href="/stacks/{{.Name}}" class="overview-link" aria-label="View stack {{.Name}}">View <span aria-hidden="true">→</span></a></td>
         </tr>{{end}}
         </tbody></table></div>
       {{else}}
@@ -49,9 +49,9 @@
     </section>
 
     <section class="overview-section">
-      <div class="overview-section-header"><h2>Running containers</h2><a href="/containers" class="overview-link">View all <span aria-hidden="true">→</span></a></div>
+      <div class="overview-section-header"><h2>Running containers</h2><a href="/containers" class="overview-link" aria-label="View all containers">View all <span aria-hidden="true">→</span></a></div>
       {{if .ContainersUnavailable}}
-      <div class="overview-empty"><div><h3>Containers unavailable</h3><p>Check your connection to the container engine.</p></div></div>
+      <div class="overview-empty"><div><h3>Containers unavailable</h3><p>Could not load container inventory. Check the configured engine and permissions.</p></div></div>
       {{else if .Stats.Running}}
       <div class="overflow-x-auto"><table class="ui-table ui-table-sm">
         <thead><tr><th>Name</th><th>Image</th><th>Stack</th></tr></thead><tbody>

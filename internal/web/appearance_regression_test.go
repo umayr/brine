@@ -113,7 +113,7 @@ func TestDashboardAvailability(t *testing.T) {
 		{
 			name:      "empty is not unavailable",
 			want:      []string{"No stacks yet.", "No running containers.", ">0</strong>"},
-			notWanted: []string{"Stacks unavailable", "Containers unavailable", "engine unavailable"},
+			notWanted: []string{"Stacks unavailable", "Containers unavailable", "inventory unavailable"},
 		},
 		{
 			name: "stopped containers do not produce an empty running table", populated: true,
@@ -123,16 +123,16 @@ func TestDashboardAvailability(t *testing.T) {
 		{
 			name: "stack failure is independent", stackErr: unavailable,
 			want:      []string{"Stacks unavailable", "No running containers."},
-			notWanted: []string{"No stacks yet.", "Containers unavailable", "engine unavailable"},
+			notWanted: []string{"No stacks yet.", "Containers unavailable", "inventory unavailable"},
 		},
 		{
 			name: "container failure is independent", containerErr: unavailable,
-			want:      []string{"Containers unavailable", "No stacks yet."},
+			want:      []string{"Containers unavailable", "inventory unavailable", "No stacks yet."},
 			notWanted: []string{"No running containers.", "Stacks unavailable"},
 		},
 		{
 			name: "image failure is independent", imageErr: unavailable,
-			want:      []string{"engine unavailable", "No running containers.", "No stacks yet."},
+			want:      []string{"inventory unavailable", "No running containers.", "No stacks yet."},
 			notWanted: []string{"Containers unavailable", "Stacks unavailable"},
 		},
 	} {
@@ -155,7 +155,7 @@ func TestDashboardAvailability(t *testing.T) {
 					t.Errorf("missing %q", want)
 				}
 			}
-			for _, unwanted := range append(tc.notWanted, unavailable.Error()) {
+			for _, unwanted := range append(tc.notWanted, unavailable.Error(), "engine unavailable", "available locally") {
 				if strings.Contains(body, unwanted) {
 					t.Errorf("unexpected %q", unwanted)
 				}
