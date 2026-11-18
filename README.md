@@ -180,7 +180,8 @@ Podman instead, adjust `User`, `Group`, `ExecStart`, and the socket in the unit.
   headers. Behind a reverse proxy, all clients sharing its address share one login
   budget and can lock each other out; restrict access at the proxy and apply
   appropriate per-client rate limits there. Multiple Brine instances do not share
-  limits.
+  limits. If the 10,000-address table is full, new addresses are rejected until
+  entries expire; enforce network-level abuse controls at the proxy.
 - Brine does not terminate TLS. Put it behind a reverse proxy and add
   `--secure-cookies` to the `ExecStart` line.
 
