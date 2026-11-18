@@ -56,15 +56,16 @@ func TestResolveIntegrationPklRejectsNonPkl(t *testing.T) {
 	}
 }
 
-// TestReleasedDill050 exercises Runner against the released CLI, not a stub.
-func TestReleasedDill050(t *testing.T) {
+// TestReleasedDill exercises Runner against the Dill release bundled with Brine.
+func TestReleasedDill(t *testing.T) {
+	const version = "v0.7.0"
 	binary := os.Getenv("BRINE_TEST_DILL")
 	if binary == "" {
 		t.Skip("set BRINE_TEST_DILL and BRINE_TEST_DILL_SCHEMA to opt in")
 	}
 	schema := os.Getenv("BRINE_TEST_DILL_SCHEMA")
 	if schema == "" {
-		t.Fatal("BRINE_TEST_DILL_SCHEMA must point to dill.pkl from the v0.5.0 release")
+		t.Fatalf("BRINE_TEST_DILL_SCHEMA must point to dill.pkl from the %s release", version)
 	}
 	pkl, err := resolveIntegrationPkl()
 	if err != nil {
@@ -75,8 +76,8 @@ func TestReleasedDill050(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, binary, "version").CombinedOutput()
-	if err != nil || strings.TrimSpace(string(out)) != "v0.5.0" {
-		t.Fatalf("expected released Dill v0.5.0: output %q, error %v", out, err)
+	if err != nil || strings.TrimSpace(string(out)) != version {
+		t.Fatalf("expected released Dill %s: output %q, error %v", version, out, err)
 	}
 	data, err := os.ReadFile(schema)
 	if err != nil {
@@ -100,54 +101,55 @@ config {
 	if err := os.WriteFile(path, []byte(valid), 0600); err != nil {
 		t.Fatal(err)
 	}
-	runner := New(binary)
-	runner.PklBinary = pkl
-	// The old raw offline CLI remains a diagnostics oracle, not a production
-	// pinned validation path. Production must reject v0.5.0 endpoint support.
-	validateFile := func(ctx context.Context, path string) error {
-		out, err := runner.capture(ctx, "-f", path, "validate", "--format", "json")
-		if err != nil {
-			return err
-		}
-		return parseValidateJSON(out)
+	newRunner := func(binary string) *Runner {
+		r := New(binary)
+		r.PklBinary = pkl
+		r.Engine = "docker"
+		r.Socket = filepath.Join(dir, "nonexistent-disposable.sock")
+		r.ResolveStack = func(string) (string, error) { return "brine-integration", nil }
+		return r
 	}
-	validateContent := func(ctx context.Context, path, content string) error {
-		cmd, cleanup, err := runner.command(ctx, "-f", path, "validate", "--stdin", "--format", "json")
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-		cmd.Stdin = strings.NewReader(content)
-		out, err := cmd.Output()
-		if err != nil {
-			return err
-		}
-		return parseValidateJSON(string(out))
-	}
-	t.Run("PinnedValidationRejected", func(t *testing.T) {
-		pinned := New(binary)
-		pinned.PklBinary = pkl
-		pinned.Engine = "docker"
-		pinned.Socket = filepath.Join(dir, "nonexistent-disposable.sock")
-		pinned.ResolveStack = func(string) (string, error) { return "brine-integration", nil }
-		if err := pinned.Validate(ctx, path); err == nil {
-			t.Fatal("v0.5.0 unexpectedly supports pinned validation")
-		}
-		if err := pinned.ValidateContent(ctx, path, valid); err == nil {
-			t.Fatal("v0.5.0 unexpectedly supports pinned stdin validation")
+	runner := newRunner(binary)
+	t.Run("MissingEndpoint", func(t *testing.T) {
+		r := newRunner(binary)
+		r.Socket = ""
+		for name, validate := range map[string]func() error{
+			"file":  func() error { return r.Validate(ctx, path) },
+			"stdin": func() error { return r.ValidateContent(ctx, path, valid) },
+		} {
+			if err := validate(); err == nil || !strings.Contains(err.Error(), "explicit local engine endpoint") {
+				t.Errorf("%s validation without configured socket: %v", name, err)
+			}
 		}
 	})
-	assertInvalidJSON := func(t *testing.T, cmd *exec.Cmd) {
+	assertInvalidJSON := func(t *testing.T, path string, stdin bool) {
 		t.Helper()
-		out, err := cmd.Output()
+		args := []string{"validate", "--format", "json"}
+		if stdin {
+			args = append(args, "--stdin")
+		}
+		args, err := runner.lifecycleArgs(path, args...)
 		if err != nil {
-			t.Fatalf("invalid validation must exit zero: %v", err)
+			t.Fatal(err)
+		}
+		cmd, cleanup, err := runner.command(ctx, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cleanup()
+		if stdin {
+			cmd.Stdin = strings.NewReader(invalid)
+		}
+		out, err := cmd.Output()
+		if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+			t.Fatalf("invalid validation must exit 1: %v (stdout: %q)", err, out)
 		}
 		var result struct {
 			Valid *bool  `json:"valid"`
+			Kind  string `json:"kind"`
 			Error string `json:"error"`
 		}
-		if err := json.Unmarshal(out, &result); err != nil || result.Valid == nil || *result.Valid || !strings.Contains(result.Error, "Unexpected end of file") {
+		if err := json.Unmarshal(out, &result); err != nil || result.Valid == nil || *result.Valid || result.Kind != "evaluator_failure" || !strings.Contains(result.Error, "Unexpected end of file") {
 			t.Fatalf("unexpected invalid validation JSON: %q, %v", out, err)
 		}
 	}
@@ -164,11 +166,9 @@ config {
 		if err := os.WriteFile(wrapper, []byte(script), 0700); err != nil {
 			t.Fatal(err)
 		}
-		r := New(wrapper)
-		r.PklBinary = pkl
-		out, err := r.capture(ctx, "-f", path, "validate", "--format", "json")
-		if err != nil || parseValidateJSON(out) != nil {
-			t.Fatalf("raw released validation with isolated HOME: %v %s", err, out)
+		r := newRunner(wrapper)
+		if err := r.Validate(ctx, path); err != nil {
+			t.Fatalf("released validation with isolated HOME: %v", err)
 		}
 		home, err := os.ReadFile(log)
 		if err != nil {
@@ -182,26 +182,24 @@ config {
 		}
 	})
 	t.Run("Validate", func(t *testing.T) {
-		if err := validateFile(ctx, path); err != nil {
+		if err := runner.Validate(ctx, path); err != nil {
 			t.Fatalf("valid file: %v", err)
 		}
 		badPath := filepath.Join(dir, "invalid.pkl")
 		if err := os.WriteFile(badPath, []byte(invalid), 0600); err != nil {
 			t.Fatal(err)
 		}
-		assertInvalidJSON(t, exec.CommandContext(ctx, binary, "-f", badPath, "validate", "--format", "json"))
-		if err := validateFile(ctx, badPath); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
+		assertInvalidJSON(t, badPath, false)
+		if err := runner.Validate(ctx, badPath); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
 			t.Fatalf("invalid file diagnostic: %v", err)
 		}
 	})
 	t.Run("ValidateContent", func(t *testing.T) {
-		if err := validateContent(ctx, path, valid); err != nil {
+		if err := runner.ValidateContent(ctx, path, valid); err != nil {
 			t.Fatalf("valid stdin with relative schema: %v", err)
 		}
-		cmd := exec.CommandContext(ctx, binary, "-f", path, "validate", "--stdin", "--format", "json")
-		cmd.Stdin = strings.NewReader(invalid)
-		assertInvalidJSON(t, cmd)
-		if err := validateContent(ctx, path, invalid); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
+		assertInvalidJSON(t, path, true)
+		if err := runner.ValidateContent(ctx, path, invalid); err == nil || !strings.Contains(err.Error(), "Unexpected end of file") {
 			t.Fatalf("invalid stdin diagnostic: %v", err)
 		}
 		after, err := os.ReadFile(path)
@@ -226,18 +224,18 @@ config {
 		if err := os.WriteFile(importPath, []byte(imported), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := validateFile(ctx, importPath); err != nil {
+		if err := runner.Validate(ctx, importPath); err != nil {
 			t.Fatalf("file relative import: %v", err)
 		}
-		if err := validateContent(ctx, importPath, imported); err != nil {
+		if err := runner.ValidateContent(ctx, importPath, imported); err != nil {
 			t.Fatalf("stdin relative import: %v", err)
 		}
 		if err := os.Remove(settings); err != nil {
 			t.Fatal(err)
 		}
 		for name, validate := range map[string]func() error{
-			"file":  func() error { return validateFile(ctx, importPath) },
-			"stdin": func() error { return validateContent(ctx, importPath, imported) },
+			"file":  func() error { return runner.Validate(ctx, importPath) },
+			"stdin": func() error { return runner.ValidateContent(ctx, importPath, imported) },
 		} {
 			if err := validate(); err == nil || !strings.Contains(err.Error(), "settings.pkl") {
 				t.Errorf("%s missing import diagnostic: %v", name, err)
@@ -246,7 +244,7 @@ config {
 	})
 	t.Run("SchemaTypeError", func(t *testing.T) {
 		bad := strings.Replace(valid, `image = "nginx:alpine"`, `image = 42`, 1)
-		if err := validateContent(ctx, path, bad); err == nil || !strings.Contains(err.Error(), "String") {
+		if err := runner.ValidateContent(ctx, path, bad); err == nil || !strings.Contains(err.Error(), "String") {
 			t.Fatalf("schema type diagnostic: %v", err)
 		}
 	})
