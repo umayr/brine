@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/umayr/brine/internal/agent"
-	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
@@ -17,7 +16,6 @@ import (
 
 // Handler holds shared dependencies for all web handlers.
 type Handler struct {
-	attended         *api.AttendedContext
 	agent            agent.Agent
 	store            store.StackStore
 	recipes          store.RecipeStore

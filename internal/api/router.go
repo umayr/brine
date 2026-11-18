@@ -5,7 +5,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
-	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/operationhistory"
@@ -14,40 +13,15 @@ import (
 
 // Mount registers all /api/* routes on r.
 func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, histories ...*operationhistory.Store) {
-	mount(r, ag, st, rs, gr, runtimeEngine, timeouts, deployTimeout, nil, histories...)
-}
-
-// MountAttended installs the explicitly configured boundary, including when its
-// producer or history is unavailable. The caller must also install the matching
-// web boundary before serving requests. No production wiring is supplied here.
-func MountAttended(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, attended *AttendedContext, history *operationhistory.Store) error {
-	if dill.SecretFeaturesDisabled() {
-		return dill.ErrAlphaDisabled
-	}
-	local, ok := ag.(*agent.LocalAgent)
-	if attended == nil || !ok || local == nil || attended.base != local || local.Dill() != attended.runner {
-		return errAttendedConfiguration
-	}
-	mount(r, ag, st, rs, gr, runtimeEngine, timeouts, deployTimeout, attended, history)
-	return nil
-}
-
-func mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, attended *AttendedContext, histories ...*operationhistory.Store) {
-	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout, attended: attended}
+	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout}
 	if len(histories) > 0 {
 		sh.history = histories[0]
-		if attended != nil && sh.history != nil {
-			sh.attendedHistory = durableAttendedHistory{store: sh.history}
-		}
 	}
 	ch := &containerHandler{agent: ag}
 	ih := &imageHandler{agent: ag}
 	rh := &recipeHandler{store: rs}
 
 	r.Route("/api", func(r chi.Router) {
-		if attended != nil {
-			r.Use(attendedAPIGuard)
-		}
 		r.Get("/health", health)
 
 		// Streaming endpoints must outlive the ordinary request timeout.
@@ -58,7 +32,6 @@ func mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 		// command timeout, not by the HTTP request timeout.
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.Timeout(timeouts.Lifecycle))
-			r.Post("/stacks/{name}/operations/preview", sh.attendedPreview)
 			r.Post("/stacks/{name}/up", sh.up)
 			r.Post("/stacks/{name}/down", sh.down)
 			r.Post("/stacks/{name}/stop", sh.stop)

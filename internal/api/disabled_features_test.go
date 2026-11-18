@@ -20,12 +20,6 @@ func TestDisabledHandlersAndRoutedAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &stackHandler{}
-	if _, err := NewAttendedContext(nil, nil, nil); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("attended constructor: %v", err)
-	}
-	if err := MountAttended(chi.NewRouter(), nil, nil, nil, nil, "docker", httpx.Timeouts{}, time.Second, nil, nil); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("attended mount: %v", err)
-	}
 	r := chi.NewRouter()
 	r.Use(a.Middleware)
 	Mount(r, nil, nil, nil, nil, "docker", httpx.Timeouts{}, time.Second)
@@ -51,13 +45,21 @@ func TestDisabledHandlersAndRoutedAPI(t *testing.T) {
 			}
 		})
 	}
-	for name, fn := range map[string]http.HandlerFunc{"preview": h.attendedPreview, "apply": func(w http.ResponseWriter, r *http.Request) { h.attendedApply(w, r, "up") }} {
-		t.Run(name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			fn(w, httptest.NewRequest("POST", "/", nil))
-			if w.Code != 503 || !strings.Contains(w.Body.String(), "disabled") {
-				t.Fatalf("got %d %s", w.Code, w.Body.String())
-			}
-		})
+}
+
+func TestRetiredLocalPreviewNotRouted(t *testing.T) {
+	a, err := auth.New(auth.Config{User: "admin", Password: "password", APIToken: "synthetic-token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := chi.NewRouter()
+	r.Use(a.Middleware)
+	Mount(r, nil, nil, nil, nil, "docker", httpx.Timeouts{}, time.Second)
+	req := httptest.NewRequest(http.MethodPost, "/api/stacks/demo/operations/preview", strings.NewReader(`{"action":"up"}`))
+	req.Header.Set("Authorization", "Bearer synthetic-token")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("retired preview: got %d %s", w.Code, w.Body.String())
 	}
 }
