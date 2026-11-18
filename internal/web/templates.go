@@ -182,7 +182,6 @@ func (h *Handler) withGlobalTemplateData(r *http.Request, data any) any {
 	}
 	if page, ok := data.(runtimePageData); ok {
 		page.setRuntimeEngine(runtimeEngine)
-		page.setAttended(h.attended != nil)
 		page.setRemoteEnabled(h.remoteEnabled)
 		if h.agent != nil && h.agent.Dill() != nil {
 			page.setTarget(h.agent.Dill().TargetIdentity())
