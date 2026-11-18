@@ -74,6 +74,10 @@ func (h *Handler) renderContainerRow(w http.ResponseWriter, r *http.Request, id 
 		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
+	if r.URL.Query().Get("view") == "state" {
+		h.renderPartial(w, r, "container-state", c)
+		return
+	}
 	// Render a single row as a slice of one
 	h.renderPartial(w, r, "container-rows", []engine.ContainerInfo{*c})
 }

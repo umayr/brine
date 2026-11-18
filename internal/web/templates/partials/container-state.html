@@ -1,0 +1,9 @@
+{{if eq .State "running"}}
+<span class="ui-status ui-status-running ui-status-sm font-mono">running</span>
+{{else if eq .State "exited"}}
+<span class="ui-status ui-status-neutral ui-status-sm font-mono">exited</span>
+{{else if eq .State "paused"}}
+<span class="ui-status ui-status-warning ui-status-sm font-mono">paused</span>
+{{else}}
+<span class="ui-status ui-status-sm {{if or (eq .State "unknown") (eq .State "unreachable")}}ui-status-unknown{{else if or (eq .State "queued") (eq .State "pending")}}ui-status-queued{{else if eq .State "started"}}ui-status-running{{else}}ui-status-neutral{{end}} font-mono">{{.State}}</span>
+{{end}}
