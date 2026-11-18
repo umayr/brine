@@ -6,8 +6,14 @@
 {{define "content"}}
 <div class="index-page">
   <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1>Containers</h1><p class="text-muted text-sm mt-2">Containers available to the configured container engine. Refreshes every 5 seconds.</p></div></div>
-  <div class="index-table overflow-x-auto">
-    <table class="ui-table">
+  <div id="container-action-uncertain" class="ui-notice ui-notice-warning mb-4" role="alert" hidden>
+    <div>A container action could not be confirmed. Inventory may be stale; inspect the container before retrying.
+      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Refresh containers</button>
+    </div>
+  </div>
+  <p class="container-table-hint">Scroll horizontally to see all columns and actions.</p>
+  <div class="index-table overflow-x-auto container-table-scroll" role="region" aria-label="Containers table, scroll horizontally for all columns and actions" tabindex="0">
+    <table class="ui-table container-table">
       <thead>
         <tr>
           <th>Name</th>
@@ -38,4 +44,13 @@
   </div>
   <template id="containers-request-error"><tr><td colspan="7" class="py-8 text-center"><div role="alert" class="text-error">Containers could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Retry</button></td></tr></template>
 </div>
+<script>
+document.body.addEventListener('htmx:beforeRequest', event => {
+  if (!event.detail.elt.matches('[data-container-action]')) return;
+  const xhr = event.detail.xhr;
+  xhr.addEventListener('loadend', () => {
+    if (xhr.status === 0 || xhr.status >= 400) document.getElementById('container-action-uncertain').hidden = false;
+  }, { once: true });
+});
+</script>
 {{end}}

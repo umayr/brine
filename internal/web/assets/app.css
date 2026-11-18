@@ -223,7 +223,10 @@
 .image-table-scroll { overflow-x: auto; }
 .image-table-scroll:focus-visible { outline-offset: -2px; }
 .image-table { min-width: 44rem; }
-.image-action-name { display: none; }
+.image-action-name,.container-action-name { display: none; }
+.container-table-hint { display: none; padding: var(--space-3); color: var(--color-muted); font-size: var(--font-size-xs); }
+.container-table-scroll:focus-visible { outline-offset: -2px; }
+.container-table { min-width: 60rem; }
 .stack-link:hover { color: var(--color-accent); }
 
 .git-source-header,.git-source-actions { flex-wrap: wrap; gap: var(--space-2); }
@@ -310,8 +313,8 @@
   .variables-add-form > .ui-button { justify-self: start; margin-top: 0; }
   .variables-actions { justify-content: flex-start; }
   .variables-panel-header,.variables-row,.variables-empty,.variables-add-form,.variables-panel-footer { padding-inline: var(--space-4); }
-  .stack-table-hint,.image-table-hint { display: block; }
-  .image-action-name { display: block; max-width: 14rem; margin-bottom: var(--space-1); color: var(--color-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
+  .stack-table-hint,.image-table-hint,.container-table-hint { display: block; }
+  .image-action-name,.container-action-name { display: block; max-width: 14rem; margin-bottom: var(--space-1); color: var(--color-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
   .stack-actions-name { display: block; margin-bottom: var(--space-1); color: var(--color-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
   .stack-metadata { flex-wrap: wrap; }
   .stack-metadata > div { flex: 1 1 45%; }

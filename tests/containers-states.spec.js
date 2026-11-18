@@ -59,6 +59,69 @@ test('failed container action does not replace inventory with an inventory error
   await expect(stop).toBeVisible();
   await expect(body.locator('tr')).toHaveCount(rowCount);
   await expect(body).not.toContainText('Inventory is unavailable');
+  await expect(page.locator('#container-action-uncertain')).toContainText('could not be confirmed');
+  await expect(page.locator('#container-action-uncertain')).toBeVisible();
+});
+
+test('lost action response remains unconfirmed across an inventory refresh', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 850 });
+  let requests = 0;
+  await page.route('**/web/containers/*/stop', route => { requests++; return route.abort(); });
+  await page.goto(new URL('/containers', baseURL).href);
+  const body = page.locator('#containers-body');
+  await body.getByRole('button', { name: 'Stop', exact: true }).first().click();
+  const warning = page.locator('#container-action-uncertain');
+  await expect(warning).toBeVisible();
+  await expect(warning).toContainText('Inventory may be stale');
+  const refresh = warning.getByRole('button', { name: 'Refresh containers' });
+  await refresh.focus();
+  await expect(refresh).toBeFocused();
+  await page.screenshot({ path: testInfo.outputPath('container-uncertain.png') });
+  await page.keyboard.press('Enter');
+  await expect(warning).toBeVisible();
+  await expect(body.locator('tr').first().locator('td')).toHaveCount(7);
+  expect(requests).toBe(1);
+});
+
+test('mobile container actions retain their target and support keyboard scrolling', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 850 });
+  await page.goto(new URL('/containers', baseURL).href);
+  const region = page.getByRole('region', { name: 'Containers table, scroll horizontally for all columns and actions' });
+  await expect(page.getByText('Scroll horizontally to see all columns and actions.')).toBeVisible();
+  await expect(region.getByRole('button', { name: 'Stop', exact: true }).first()).toBeVisible();
+  expect(await region.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+  await region.focus();
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
+  const row = region.locator('tbody tr').first();
+  const stop = row.getByRole('button', { name: 'Stop', exact: true });
+  await stop.focus();
+  await expect(stop).toBeFocused();
+  await expect(stop).toHaveAccessibleDescription(/.+/);
+  await expect(row.locator('.container-action-name')).toBeVisible();
+  await expect.poll(async () => {
+    const box = await stop.boundingBox(); const view = await region.boundingBox();
+    return box.x >= view.x && box.x + box.width <= view.x + view.width + 1;
+  }).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('container-actions.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('action failure is reported even if polling replaces its row', async ({ page }) => {
+  let release, started;
+  const held = new Promise(resolve => { release = resolve; });
+  const begun = new Promise(resolve => { started = resolve; });
+  await page.route('**/web/containers/*/stop', async route => {
+    started(); await held; await route.fulfill({ status: 503 });
+  });
+  await page.goto(new URL('/containers', baseURL).href);
+  const body = page.locator('#containers-body');
+  const stop = body.getByRole('button', { name: 'Stop', exact: true }).first();
+  await stop.click(); await begun;
+  const refresh = page.waitForResponse(response => response.url().endsWith('/web/containers'));
+  await page.evaluate(() => htmx.ajax('GET', '/web/containers', { target: '#containers-body', swap: 'innerHTML' }));
+  await refresh;
+  release();
+  await expect(page.locator('#container-action-uncertain')).toBeVisible();
 });
 
 test('retry supersedes an in-flight poll instead of letting an older failure replace inventory', async ({ page }) => {
