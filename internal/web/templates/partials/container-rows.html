@@ -1,7 +1,7 @@
 {{range .}}
 <tr class="hover:bg-raised/50" id="container-{{.ID}}">
   <td>
-    <a href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Name}}</a>
+    <a id="container-name-{{.ID}}" href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Name}}</a>
     <div class="font-mono text-xs text-dim mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
   </td>
   <td class="font-mono text-xs text-muted">{{.Image}}</td>
@@ -24,20 +24,24 @@
     {{range .Ports}}{{.}}<br>{{end}}
   </td>
   <td class="text-right">
+    <span class="container-action-name" aria-hidden="true">{{.Name}}</span>
     <div class="flex gap-1 justify-end">
       {{if eq .State "running"}}
       <button class="ui-button ui-button-ghost ui-button-xs"
+        data-container-action hx-disabled-elt="this" aria-describedby="container-name-{{.ID}}"
         hx-post="/web/containers/{{.ID}}/stop"
         hx-target="#container-{{.ID}}"
         hx-swap="outerHTML"
       >Stop</button>
       <button class="ui-button ui-button-ghost ui-button-xs"
+        data-container-action hx-disabled-elt="this" aria-describedby="container-name-{{.ID}}"
         hx-post="/web/containers/{{.ID}}/restart"
         hx-target="#container-{{.ID}}"
         hx-swap="outerHTML"
       >Restart</button>
       {{else}}
       <button class="ui-button ui-button-ghost ui-button-xs"
+        data-container-action hx-disabled-elt="this" aria-describedby="container-name-{{.ID}}"
         hx-post="/web/containers/{{.ID}}/start"
         hx-target="#container-{{.ID}}"
         hx-swap="outerHTML"

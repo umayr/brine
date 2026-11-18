@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -19,6 +20,36 @@ type containerListEngine struct {
 
 func (e containerListEngine) ListContainers(context.Context) ([]engine.ContainerInfo, error) {
 	return e.containers, e.err
+}
+
+type containerActionEngine struct {
+	engine.Engine
+	actionErr, inspectErr error
+}
+
+func (e containerActionEngine) StartContainer(context.Context, string) error   { return e.actionErr }
+func (e containerActionEngine) StopContainer(context.Context, string) error    { return e.actionErr }
+func (e containerActionEngine) RestartContainer(context.Context, string) error { return e.actionErr }
+func (e containerActionEngine) InspectContainer(context.Context, string) (*engine.ContainerInfo, error) {
+	return nil, e.inspectErr
+}
+
+func TestContainerActionFailuresAreUnconfirmedAndRedacted(t *testing.T) {
+	private := errors.New("private engine detail")
+	for _, inspectFailure := range []bool{false, true} {
+		eng := containerActionEngine{actionErr: private}
+		if inspectFailure {
+			eng = containerActionEngine{inspectErr: private}
+		}
+		h := &Handler{agent: agent.NewLocalAgent(eng, nil)}
+		for _, handler := range []http.HandlerFunc{h.containerStart, h.containerStop, h.containerRestart} {
+			w := httptest.NewRecorder()
+			handler(w, httptest.NewRequest(http.MethodPost, "/", nil))
+			if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "could not be confirmed") || strings.Contains(w.Body.String(), private.Error()) {
+				t.Fatalf("failure %t: status %d, body %q", inspectFailure, w.Code, w.Body.String())
+			}
+		}
+	}
 }
 
 func TestContainerRowsHandlerStates(t *testing.T) {

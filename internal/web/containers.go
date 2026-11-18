@@ -44,7 +44,7 @@ func (h *Handler) containerRows(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerStart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().StartContainer(r.Context(), id); err != nil {
-		h.renderAlert(w, "error", err.Error())
+		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
 	h.renderContainerRow(w, r, id)
@@ -53,7 +53,7 @@ func (h *Handler) containerStart(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerStop(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().StopContainer(r.Context(), id); err != nil {
-		h.renderAlert(w, "error", err.Error())
+		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
 	h.renderContainerRow(w, r, id)
@@ -62,7 +62,7 @@ func (h *Handler) containerStop(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerRestart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().RestartContainer(r.Context(), id); err != nil {
-		h.renderAlert(w, "error", err.Error())
+		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
 	h.renderContainerRow(w, r, id)
@@ -71,7 +71,7 @@ func (h *Handler) containerRestart(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) renderContainerRow(w http.ResponseWriter, r *http.Request, id string) {
 	c, err := h.agent.Engine().InspectContainer(r.Context(), id)
 	if err != nil {
-		h.renderAlert(w, "error", err.Error())
+		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
 	// Render a single row as a slice of one
