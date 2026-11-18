@@ -25,6 +25,12 @@ func TestHTTPSPairProcess(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	agentCommand := func(args ...string) *exec.Cmd {
+		if os.Getenv("DILL_AGENT_HTTPS_SUBCOMMAND") == "1" {
+			args = append([]string{"agent"}, args...)
+		}
+		return exec.CommandContext(ctx, bin, args...)
+	}
 	dir, err := os.MkdirTemp("", "bhttps-")
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +58,7 @@ func TestHTTPSPairProcess(t *testing.T) {
 	})}
 	go docker.Serve(l)
 	defer docker.Close()
-	if err := exec.CommandContext(ctx, bin, "init-https", "--dir", credentials).Run(); err != nil {
+	if err := agentCommand("init-https", "--dir", credentials).Run(); err != nil {
 		t.Fatal("initialize HTTPS", err)
 	}
 	reserve, err := net.Listen("tcp", "127.0.0.1:0")
@@ -69,7 +75,7 @@ func TestHTTPSPairProcess(t *testing.T) {
 		}
 	}
 	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon", "--https-staging-root", stages, "--https-staging-catalog", catalog}
-	raw, err := exec.CommandContext(ctx, bin, append(args, "--print-https-pairing")...).Output()
+	raw, err := agentCommand(append(args, "--print-https-pairing")...).Output()
 	if err != nil {
 		reserve.Close()
 		t.Fatal("pairing export failed", err)
@@ -80,7 +86,7 @@ func TestHTTPSPairProcess(t *testing.T) {
 		t.Fatal("actual Dill pairing bundle was rejected")
 	}
 	reserve.Close()
-	process := exec.CommandContext(ctx, bin, args...)
+	process := agentCommand(args...)
 	if err := process.Start(); err != nil {
 		t.Fatal(err)
 	}
