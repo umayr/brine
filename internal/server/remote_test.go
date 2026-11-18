@@ -157,7 +157,10 @@ func TestRemoteRealServerEnrollmentAndSecurity(t *testing.T) {
 	typ := fields.Type()
 	form := url.Values{"_csrf": {csrf[1]}}
 	for i := 0; i < fields.NumField(); i++ {
-		form.Set(typ.Field(i).Tag.Get("json"), fmt.Sprint(fields.Field(i).Interface()))
+		name := typ.Field(i).Tag.Get("json")
+		if !strings.Contains(name, ",") {
+			form.Set(name, fmt.Sprint(fields.Field(i).Interface()))
+		}
 	}
 	status, body, _ = request("POST", "/remote/enrollment/review", form, cookie, false)
 	if status != 200 {

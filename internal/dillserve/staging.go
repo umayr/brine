@@ -17,19 +17,25 @@ var ErrStageRejected = errors.New("snapshot staging rejected; operator inspectio
 // Stage submits one already validated wire document. It does not establish consent.
 // All malformed or interrupted responses are ambiguous, including cancellation.
 func (c *Client) Stage(ctx context.Context, body []byte) (string, error) {
-	if ctx == nil || len(body) == 0 || len(body) > 24<<20 || ctx.Err() != nil {
+	return StageRequest(ctx, "http://dillserve", body, c.http.Do)
+}
+
+// StageRequest shares the snapshot wire contract with authenticated agent
+// clients. The caller supplies the already verified transport and fixed origin.
+func StageRequest(ctx context.Context, origin string, body []byte, send func(*http.Request) (*http.Response, error)) (string, error) {
+	if ctx == nil || send == nil || len(body) == 0 || len(body) > 24<<20 || ctx.Err() != nil {
 		return "", ErrUnavailable
 	}
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://dillserve/v1/snapshots", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, origin+"/v1/snapshots", bytes.NewReader(body))
 	if err != nil {
 		return "", ErrUnavailable
 	}
 	req.Header.Set("Content-Type", "application/json")
 	// Prevent net/http from replaying a request on connection failure.
 	req.GetBody = nil
-	resp, err := c.http.Do(req)
+	resp, err := send(req)
 	if err != nil {
 		return "", ErrStageUnknown
 	}

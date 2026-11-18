@@ -31,7 +31,9 @@ func (*fake) AcquireRead(ctx context.Context, _ string) (context.Context, func()
 	return ctx, func() error { return nil }, nil
 }
 
-func (*fake) Hosts(context.Context) ([]Host, error) { return []Host{{"h", "Host <one>", "ready"}}, nil }
+func (*fake) Hosts(context.Context) ([]Host, error) {
+	return []Host{{ID: "h", Name: "Host <one>", State: "ready"}}, nil
+}
 func (f *fake) Inventory(context.Context, string) ([]Container, error) {
 	if f.inventory != nil {
 		return f.inventory, nil

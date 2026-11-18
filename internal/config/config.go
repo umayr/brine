@@ -93,8 +93,14 @@ func (c *Config) Validate() error {
 		validPath := func(p string) bool {
 			return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
 		}
-		if c.NoAuth || !validPath(c.RemoteRegistryDir) || !validPath(c.RemoteForwardDir) || c.RemoteRegistryDir == c.RemoteForwardDir || c.RemoteTimeout <= 0 {
-			return fmt.Errorf("remote access requires authentication, distinct absolute private paths and an explicit positive timeout")
+		if c.NoAuth || !validPath(c.RemoteRegistryDir) || c.RemoteTimeout <= 0 {
+			return fmt.Errorf("remote access requires authentication, an absolute private registry and a positive timeout")
+		}
+		if c.RemoteForwardDir != "" && (!validPath(c.RemoteForwardDir) || c.RemoteRegistryDir == c.RemoteForwardDir) {
+			return fmt.Errorf("remote SSH forwarding directory must be absolute and distinct from the registry")
+		}
+		if c.RemoteRevealEnabled && c.RemoteForwardDir == "" {
+			return fmt.Errorf("remote reveal requires SSH forwarding")
 		}
 	}
 	if c.Profile == target.Alpha {

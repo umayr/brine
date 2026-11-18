@@ -2,6 +2,8 @@ package agentclient
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -59,7 +61,14 @@ func TestHTTPSPairProcess(t *testing.T) {
 	}
 	address := reserve.Addr().String()
 	const engineID = "11111111-1111-4111-8111-111111111111"
-	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon"}
+	stages, catalog := filepath.Join(dir, "stages"), filepath.Join(dir, "catalog")
+	for _, root := range []string{stages, catalog} {
+		if err := os.Mkdir(root, 0700); err != nil {
+			reserve.Close()
+			t.Fatal(err)
+		}
+	}
+	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon", "--https-staging-root", stages, "--https-staging-catalog", catalog}
 	raw, err := exec.CommandContext(ctx, bin, append(args, "--print-https-pairing")...).Output()
 	if err != nil {
 		reserve.Close()
@@ -105,6 +114,7 @@ func TestHTTPSPairProcess(t *testing.T) {
 		{"/v1/inventory", "Bearer not-the-token", http.StatusUnauthorized},
 		{"/v1/reveal", "Bearer " + bundle.token, http.StatusNotFound},
 		{"/v1/deploy", "Bearer " + bundle.token, http.StatusNotFound},
+		{"/v1/snapshots", "", http.StatusUnauthorized},
 	} {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+tt.path, nil)
 		if err != nil {
@@ -122,5 +132,29 @@ func TestHTTPSPairProcess(t *testing.T) {
 		if readErr != nil || response.StatusCode != tt.want {
 			t.Fatalf("%s: got %d, want %d", tt.path, response.StatusCode, tt.want)
 		}
+	}
+	body := fmt.Appendf(nil, `{"schema":"dill.snapshot.v1","entrypoint":"demo.pkl","files":[{"path":"demo.pkl","bytes":"eA==","length":1,"sha256":"%x"}]}`, sha256.Sum256([]byte("x")))
+	if _, err := client.Stage(ctx, "wrong-epoch", body); err != ErrProtocol {
+		t.Fatal("staging accepted an unverified session")
+	}
+	stageID, err := client.Stage(ctx, epoch, body)
+	if err != nil || len(stageID) != 32 {
+		t.Fatal("snapshot transfer failed", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, client.baseURL+"/v1/snapshots/"+stageID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var manifest struct {
+		ID  string `json:"stage_id"`
+		SHA string `json:"manifest_sha256"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&manifest) != nil || manifest.ID != stageID || len(manifest.SHA) != 64 {
+		t.Fatal("catalogued snapshot could not be read back")
 	}
 }

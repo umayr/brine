@@ -12,16 +12,21 @@ import (
 	"time"
 )
 
+// ValidHTTPSAddress accepts only explicit private or loopback IP literals with ports.
+func ValidHTTPSAddress(address string) bool {
+	addr, err := netip.ParseAddrPort(address)
+	return err == nil && addr.Port() != 0 && addr.Addr().Zone() == "" && (addr.Addr().Unmap().IsPrivate() || addr.Addr().Unmap().IsLoopback())
+}
+
 // NewHTTPS opens a read client for an already enrolled private address. The
 // out-of-band pin is SHA-256 of the agent leaf certificate's DER, in lowercase
 // hex. The credential is a canonical 32-byte base64url token. Neither value is
 // discovered from the remote listener. Session still checks the engine binding.
 func NewHTTPS(lifetime context.Context, address, pin, token string, b Binding) (*Client, error) {
-	addr, addrErr := netip.ParseAddrPort(address)
+	addr, _ := netip.ParseAddrPort(address)
 	want, pinErr := hex.DecodeString(pin)
 	key, keyErr := base64.RawURLEncoding.Strict().DecodeString(token)
-	if lifetime == nil || lifetime.Err() != nil || !validBinding(b) || addrErr != nil || addr.Port() == 0 || addr.Addr().Zone() != "" ||
-		!(addr.Addr().Unmap().IsPrivate() || addr.Addr().Unmap().IsLoopback()) || pinErr != nil || len(want) != sha256.Size || hex.EncodeToString(want) != pin ||
+	if lifetime == nil || lifetime.Err() != nil || !validBinding(b) || !ValidHTTPSAddress(address) || pinErr != nil || len(want) != sha256.Size || hex.EncodeToString(want) != pin ||
 		keyErr != nil || len(key) != 32 || base64.RawURLEncoding.EncodeToString(key) != token {
 		return nil, ErrProtocol
 	}

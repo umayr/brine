@@ -18,8 +18,10 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if !s.cfg.RemoteEnabled || s.authn == nil || !s.authn.Enabled() {
 		return errors.New("remote requires explicit enablement and authentication")
 	}
-	if err := agenttransport.ValidateLocalDir(s.cfg.RemoteForwardDir); err != nil {
-		return errors.New("remote forwarding directory unavailable or insecure")
+	if s.cfg.RemoteForwardDir != "" {
+		if err := agenttransport.ValidateLocalDir(s.cfg.RemoteForwardDir); err != nil {
+			return errors.New("remote forwarding directory unavailable or insecure")
+		}
 	}
 	registry, err := targetregistry.OpenExisting(s.cfg.RemoteRegistryDir)
 	if err != nil {

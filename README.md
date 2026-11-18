@@ -197,8 +197,8 @@ local processes and non-browser clients can still control it.
 | `--staging-identity` | | unset | Stable operator-asserted local staging target identifier; not receiver attestation |
 | `--remote-enabled` | | `false` | Opt in to authenticated remote read-only UI |
 | `--remote-registry-dir` | | unset | Explicit initialized private remote registry directory |
-| `--remote-forward-dir` | | unset | Explicit existing private local forwarding directory |
-| `--remote-timeout` | | unset | Explicit positive SSH transport timeout |
+| `--remote-forward-dir` | | unset | Existing private forwarding directory, only for SSH and SSH reveal |
+| `--remote-timeout` | | unset | Explicit positive remote connection timeout |
 | `--init-remote-registry` | | `false` | Initialize a new registry and exit; does not start or enable the server |
 | `--coordination-state-dir`, `--coordination-layout`, `--coordination-daemon-id` | | unset | Disabled; explicitly passing any of these flags is rejected, even with an empty value. |
 | `--operation-state-dir` | | unset | Disabled; explicitly passing this flag is rejected, even with an empty value. |
@@ -218,13 +218,14 @@ local processes and non-browser clients can still control it.
 
 **“Read-only” applies to the remote host integration, not the entire Brine process.** The same server retains its local stack and container controls, and its GitOps syncer can deploy existing auto-deploy stacks. Do not use an existing data directory if you require an observation-only process; this release has no enforced whole-server read-only mode.
 
-Remote access is disabled by default and requires all four remote flags, an authenticated administrator and an explicitly initialized registry. For example, after independently provisioning private, service-owned directories and trusted ancestors:
+Remote access is opt-in and requires an authenticated administrator and a private registry. For direct HTTPS, no SSH forwarding directory is needed:
 
 ```sh
 brine --init-remote-registry --remote-registry-dir /private/brine-registry
-brine --remote-enabled --remote-registry-dir /private/brine-registry \
-  --remote-forward-dir /private/brine-forwards --remote-timeout 10s
+brine --remote-enabled --remote-registry-dir /private/brine-registry --remote-timeout 10s
 ```
+
+Open **Remote hosts**, enter the agent's private IP and port, and paste the pairing bundle exported locally by Dill. Brine verifies the TLS pin and the signed engine binding before saving the target. The bundle is a reusable credential: protect the registry and its backups. **Forget** removes the target from Brine only; rotate the token on the agent to invalidate copies. See [direct HTTPS agent](docs/remote-agent-https.md). The SSH enrollment path additionally requires `--remote-forward-dir`.
 
 Initialization is exclusive and does not repair existing or partial state. **On any initialization I/O, sync, rollback or final-lock-close error, stop and quarantine all consumers and reconcile out of band before access or retry.** Quarantine is not automatically enforced across processes after such an error; another opener may see apparently valid state. Never delete or recreate the root or lock during use. Missing, corrupt or insecure registry state fails closed rather than starting an empty registry. See [registry initialization and filesystem assumptions](internal/targetregistry/README.md). The operator must protect and verify ACLs, ancestors and backups; filesystem rollback, whole-root removal/replacement and noncooperating writers are outside the locking guarantee. Restart signs out sessions and invalidates pending enrollment approvals.
 

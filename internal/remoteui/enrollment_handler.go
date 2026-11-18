@@ -86,7 +86,11 @@ func enrollmentFields(r targetregistry.Record) []enrollmentField {
 	typ := v.Type()
 	fields := make([]enrollmentField, 0, v.NumField())
 	for i := 0; i < v.NumField(); i++ {
-		fields = append(fields, enrollmentField{typ.Field(i).Tag.Get("json"), fmt.Sprint(v.Field(i).Interface())})
+		name := typ.Field(i).Tag.Get("json")
+		if strings.Contains(name, ",") { // HTTPS-only fields are not part of the SSH form.
+			continue
+		}
+		fields = append(fields, enrollmentField{name, fmt.Sprint(v.Field(i).Interface())})
 	}
 	return fields
 }
@@ -106,11 +110,14 @@ func parseEnrollment(r *http.Request) (targetregistry.Record, error) {
 	}
 	v := reflect.ValueOf(&out).Elem()
 	typ := v.Type()
-	if len(r.PostForm) != v.NumField()+1 || len(r.PostForm["_csrf"]) != 1 {
+	if len(r.PostForm) != len(enrollmentFields(out))+1 || len(r.PostForm["_csrf"]) != 1 {
 		return out, errors.New("invalid form")
 	}
 	for i := 0; i < v.NumField(); i++ {
 		name := typ.Field(i).Tag.Get("json")
+		if strings.Contains(name, ",") {
+			continue
+		}
 		values := r.PostForm[name]
 		if len(values) != 1 {
 			return out, errors.New("invalid field")

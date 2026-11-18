@@ -41,27 +41,37 @@ var (
 	hostLabel      = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`)
 )
 
-// Record contains public metadata and a private-key path, never private key bytes.
-// HostPublicKey is a canonical OpenSSH authorized-key entry without a comment.
+// PairingSecret redacts ordinary formatting. Its JSON encoding is still a
+// secret, intended only for the private registry file.
+type PairingSecret string
+
+func (PairingSecret) String() string   { return "[HTTPS pairing redacted]" }
+func (PairingSecret) GoString() string { return "[HTTPS pairing redacted]" }
+
+// Record is private registry data. HTTPSPairing contains a bearer credential;
+// never render, log, or expose whole records. SSH records contain key paths and
+// a canonical OpenSSH host public key, not private key bytes.
 type Record struct {
-	ID                   string `json:"id"`
-	Revision             uint64 `json:"revision"`
-	Host                 string `json:"host"`
-	Port                 uint16 `json:"port"`
-	User                 string `json:"user"`
-	KeyPath              string `json:"key_path"`
-	HostPublicKey        string `json:"host_public_key"`
-	HostKeySHA256        string `json:"host_key_sha256"`
-	AgentInstallationID  string `json:"agent_installation_id"`
-	EngineID             string `json:"engine_id"`
-	RemoteSocket         string `json:"remote_socket"`
-	AgentPublicKey       string `json:"agent_public_key"`
-	AgentFingerprint     string `json:"agent_fingerprint"`
-	EngineKind           string `json:"engine_kind"`
-	EngineSocket         string `json:"engine_socket"`
-	DaemonID             string `json:"daemon_id"`
-	Generation           uint64 `json:"generation"`
-	RevealKeyFingerprint string `json:"reveal_key_fingerprint"`
+	HTTPSAddress         string        `json:"https_address,omitempty"`
+	HTTPSPairing         PairingSecret `json:"https_pairing,omitempty"`
+	ID                   string        `json:"id"`
+	Revision             uint64        `json:"revision"`
+	Host                 string        `json:"host"`
+	Port                 uint16        `json:"port"`
+	User                 string        `json:"user"`
+	KeyPath              string        `json:"key_path"`
+	HostPublicKey        string        `json:"host_public_key"`
+	HostKeySHA256        string        `json:"host_key_sha256"`
+	AgentInstallationID  string        `json:"agent_installation_id"`
+	EngineID             string        `json:"engine_id"`
+	RemoteSocket         string        `json:"remote_socket"`
+	AgentPublicKey       string        `json:"agent_public_key"`
+	AgentFingerprint     string        `json:"agent_fingerprint"`
+	EngineKind           string        `json:"engine_kind"`
+	EngineSocket         string        `json:"engine_socket"`
+	DaemonID             string        `json:"daemon_id"`
+	Generation           uint64        `json:"generation"`
+	RevealKeyFingerprint string        `json:"reveal_key_fingerprint"`
 }
 
 // Identity must be obtained from the connected endpoint by a future authenticated
@@ -71,6 +81,9 @@ type Identity = Record
 // Binding returns a fresh agentclient binding; its public-key slice does not
 // share storage with the record or other calls.
 func (r Record) Binding() (agentclient.Binding, error) {
+	if r.HTTPSAddress != "" {
+		return agentclient.Binding{}, ErrMismatch
+	}
 	if err := r.Validate(); err != nil {
 		return agentclient.Binding{}, err
 	}
@@ -170,6 +183,19 @@ func validHost(s string) bool {
 	return true
 }
 func (r Record) Validate() error {
+	if r.HTTPSAddress != "" || r.HTTPSPairing != "" {
+		_, pairErr := agentclient.ParsePairing([]byte(r.HTTPSPairing))
+		if !agentclient.ValidHTTPSAddress(r.HTTPSAddress) || pairErr != nil || r.Revision != 1 || !token.MatchString(r.ID) {
+			return errors.New("invalid target record")
+		}
+		// HTTPS records have no SSH fields or independent identity to confuse.
+		copy := r
+		copy.HTTPSAddress, copy.HTTPSPairing, copy.ID, copy.Revision = "", "", "", 0
+		if copy != (Record{}) {
+			return errors.New("invalid target record")
+		}
+		return nil
+	}
 	for _, s := range []string{r.ID, r.Host, r.User, r.KeyPath, r.HostPublicKey, r.HostKeySHA256, r.AgentInstallationID, r.EngineID, r.RemoteSocket, r.AgentPublicKey, r.AgentFingerprint, r.EngineKind, r.EngineSocket, r.DaemonID, r.RevealKeyFingerprint} {
 		if !safeText(s) {
 			return errors.New("invalid target record text")
@@ -441,7 +467,7 @@ func rejectDuplicateKeys(b []byte) error {
 					return err
 				}
 				s, ok := k.(string)
-				allowed := kind == "envelope" && (s == "version" || s == "targets") || kind == "record" && (s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
+				allowed := kind == "envelope" && (s == "version" || s == "targets") || kind == "record" && (s == "https_address" || s == "https_pairing" || s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
 				if !ok || !allowed || seen[s] {
 					return errors.New("noncanonical, unknown or duplicate JSON key")
 				}
@@ -602,6 +628,27 @@ func (r *Registry) AddContext(ctx context.Context, t Record, reviewed Record) er
 		}
 		d.Targets = append(d.Targets, t)
 		return r.save(ctx, d)
+	})
+}
+
+// ForgetHTTPS removes a paired HTTPS target from Brine after any cooperating
+// readers finish. It does not revoke the token on the host or delete a stack.
+func (r *Registry) ForgetHTTPS(ctx context.Context, id string) error {
+	if !token.MatchString(id) {
+		return ErrNotFound
+	}
+	return r.lockedContext(ctx, func() error {
+		d, err := r.load()
+		if err != nil {
+			return err
+		}
+		for i, target := range d.Targets {
+			if target.ID == id && target.HTTPSAddress != "" {
+				d.Targets = append(d.Targets[:i], d.Targets[i+1:]...)
+				return r.save(ctx, d)
+			}
+		}
+		return ErrNotFound
 	})
 }
 

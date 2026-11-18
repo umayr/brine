@@ -67,6 +67,29 @@ func open(ctx context.Context, r targetregistry.Record, cfg Config, d dependenci
 	if ctx == nil {
 		return nil, errors.New("remoteagent: nil context")
 	}
+	if r.HTTPSAddress != "" {
+		if r.Validate() != nil {
+			return nil, errors.New("remoteagent: invalid target")
+		}
+		p, err := agentclient.ParsePairing([]byte(r.HTTPSPairing))
+		if err != nil {
+			return nil, errors.New("remoteagent: target unavailable")
+		}
+		request := ctx
+		if cfg.Timeout > 0 {
+			var cancel context.CancelFunc
+			request, cancel = context.WithTimeout(ctx, cfg.Timeout)
+			defer cancel()
+		}
+		c, epoch, err := p.Open(ctx, request, r.HTTPSAddress)
+		if err != nil || epoch == "" {
+			if c != nil {
+				_ = c.Close()
+			}
+			return nil, errors.New("remoteagent: target unavailable")
+		}
+		return &Session{client: c, epoch: epoch}, nil
+	}
 	b, err := r.Binding()
 	if err != nil {
 		return nil, err
@@ -129,7 +152,12 @@ type Session struct {
 }
 
 func (s *Session) Close() error {
-	s.once.Do(func() { s.closeErr = errors.Join(s.client.Close(), s.forward.Close()) })
+	s.once.Do(func() {
+		s.closeErr = s.client.Close()
+		if s.forward != nil {
+			s.closeErr = errors.Join(s.closeErr, s.forward.Close())
+		}
+	})
 	return s.closeErr
 }
 func (s *Session) fail(err error) error {
