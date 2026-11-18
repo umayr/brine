@@ -1,6 +1,6 @@
 {{range .}}
 <tr class="hover:bg-raised/50" id="image-{{.ID}}">
-  <td class="font-mono text-xs text-muted">{{.ID}}</td>
+  <td id="image-label-{{.ID}}" class="font-mono text-xs text-muted">{{.ID}}</td>
   <td>
     {{range .Tags}}
     <span class="ui-status ui-status-neutral ui-status-sm font-mono mr-1">{{.}}</span>
@@ -11,7 +11,8 @@
   <td class="font-mono text-xs text-muted">{{formatBytes .Size}}</td>
   <td class="font-mono text-xs text-muted">{{.Created.Format "2006-01-02"}}</td>
   <td class="text-right">
-    <button class="ui-button ui-button-ghost ui-button-xs text-error"
+    <span class="image-action-name" aria-hidden="true">{{if .Tags}}{{index .Tags 0}}{{else}}{{.ID}}{{end}}</span>
+    <button aria-describedby="image-label-{{.ID}}" class="ui-button ui-button-ghost ui-button-xs text-error"
       onclick="confirmAction('Remove image', 'Remove {{if .Tags}}{{index .Tags 0}}{{else}}{{.ID}}{{end}}?', () => removeImage('{{.ID}}'))"
     >Remove</button>
   </td>
@@ -30,8 +31,11 @@ function removeImage(id) {
         htmx.trigger(body, 'refresh-images');
         showToast('Image removed', 'success');
       } else {
-        showToast('Remove failed', 'error');
+        document.getElementById('image-action-uncertain').hidden = false;
       }
+    })
+    .catch(() => {
+      document.getElementById('image-action-uncertain').hidden = false;
     });
 }
 </script>

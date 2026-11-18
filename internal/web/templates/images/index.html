@@ -36,10 +36,17 @@
     <form method="dialog" class="ui-dialog-backdrop"><button aria-label="Close dialog">close</button></form>
   </dialog>
 
+  <div id="image-action-uncertain" class="ui-notice ui-notice-warning" role="alert" hidden>
+    <div>Image removal could not be confirmed. Inventory may be stale; refresh and inspect before retrying.
+      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Refresh images</button>
+    </div>
+  </div>
+
   <!-- Images table -->
   <div class="index-table">
-    <div class="overflow-x-auto">
-      <table class="ui-table">
+    <p class="image-table-hint">Scroll horizontally to see all columns and actions.</p>
+    <div class="image-table-scroll" role="region" aria-label="Images table, scroll horizontally for all columns and actions" tabindex="0">
+      <table class="ui-table image-table">
         <thead>
           <tr>
             <th>ID</th>

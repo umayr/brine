@@ -49,6 +49,63 @@ test('successful last image removal hides stale actions while inventory refreshe
   await expect(page.locator('#images-body')).toContainText('No images found.');
 });
 
+for (const failure of ['network', 'http']) {
+  test(`uncertain image removal remains visible and offers an explicit refresh: ${failure}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 850 });
+    let deletes = 0, inventories = 0;
+    await page.route('**/api/images/**', route => {
+      deletes++;
+      return failure === 'network' ? route.abort() : route.fulfill({ status: 503 });
+    });
+    await page.route('**/web/images', route => { inventories++; return route.continue(); });
+    await page.goto(new URL('/images', baseURL).href);
+    const body = page.locator('#images-body');
+    await expect(body).toContainText('grafana/grafana');
+    await body.getByRole('button', { name: 'Remove', exact: true }).first().click();
+    await page.locator('#modal-confirm-btn').click();
+    const warning = page.locator('#image-action-uncertain');
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText('could not be confirmed');
+    await expect(warning).toContainText('Inventory may be stale');
+    expect(deletes).toBe(1);
+    expect(inventories).toBe(1);
+    const refresh = warning.getByRole('button', { name: 'Refresh images' });
+    await refresh.focus();
+    await expect(refresh).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('uncertain-removal.png') });
+    await page.keyboard.press('Enter');
+    await expect.poll(() => inventories).toBe(2);
+    await expect(warning).toBeVisible();
+    expect(deletes).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
+
+test('mobile image table supports keyboard scrolling and identifies removal target', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 850 });
+  await page.goto(new URL('/images', baseURL).href);
+  const region = page.getByRole('region', { name: 'Images table, scroll horizontally for all columns and actions' });
+  await expect(page.getByText('Scroll horizontally to see all columns and actions.')).toBeVisible();
+  await expect(region).toContainText('grafana/grafana');
+  expect(await region.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
+  await region.focus();
+  for (let i = 0; i < 20; i++) await page.keyboard.press('ArrowRight');
+  await expect.poll(() => region.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+  const row = region.locator('tbody tr').filter({ hasText: 'grafana/grafana' });
+  const button = row.getByRole('button', { name: 'Remove' });
+  await button.focus();
+  await expect(button).toBeFocused();
+  await expect.poll(async () => {
+    const box = await button.boundingBox();
+    const view = await region.boundingBox();
+    return box.x >= view.x && box.x + box.width <= view.x + view.width + 1;
+  }).toBe(true);
+  await expect(button).toHaveAccessibleDescription(/.+/);
+  await expect(row.locator('.image-action-name')).toContainText('grafana/grafana');
+  await page.screenshot({ path: testInfo.outputPath('image-actions.png') });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
 test('HTTP inventory error offers retry', async ({ page }) => {
   let requests = 0;
   await page.route('**/web/images', route => {
