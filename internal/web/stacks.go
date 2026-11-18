@@ -110,7 +110,7 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 		}
 	}
 	h.render(w, r, "stacks/detail.html", &stackDetailData{
-		StagingEnabled:  h.stagingStore != nil && h.attended == nil,
+		StagingEnabled:  h.stagingStore != nil,
 		GitRevision:     revision,
 		GitState:        gitState,
 		pageData:        pageData{Page: "stacks"},
