@@ -301,7 +301,14 @@ func TestAttemptCapacityDoesNotClearLiveLimits(t *testing.T) {
 	now := time.Unix(1000, 0)
 	a.now = func() time.Time { return now }
 	for i := 0; i < maxAttemptIPs; i++ {
-		a.attempts[fmt.Sprint(i)] = &attempt{count: maxAttempts, reset: now.Add(attemptWindow)}
+		if !a.allowAttempt(fmt.Sprint(i)) {
+			t.Fatalf("address %d rejected before capacity", i)
+		}
+	}
+	for i := 1; i < maxAttempts; i++ {
+		if !a.allowAttempt("0") {
+			t.Fatal("existing address rejected before its budget was used")
+		}
 	}
 	if a.allowAttempt("new") || a.allowAttempt("0") {
 		t.Fatal("capacity cleared or bypassed live limits")
@@ -310,8 +317,8 @@ func TestAttemptCapacityDoesNotClearLiveLimits(t *testing.T) {
 	if !a.allowAttempt("new") {
 		t.Fatal("expired entries not reclaimed")
 	}
-	if len(a.attempts) != 1 {
-		t.Fatalf("entries after pruning: %d", len(a.attempts))
+	if len(a.attempts) != maxAttemptIPs || len(a.expirations) != maxAttemptIPs {
+		t.Fatalf("entries after one-slot reclamation: map=%d heap=%d", len(a.attempts), len(a.expirations))
 	}
 }
 

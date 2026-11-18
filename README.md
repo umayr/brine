@@ -180,8 +180,12 @@ Podman instead, adjust `User`, `Group`, `ExecStart`, and the socket in the unit.
   headers. Behind a reverse proxy, all clients sharing its address share one login
   budget and can lock each other out; restrict access at the proxy and apply
   appropriate per-client rate limits there. Multiple Brine instances do not share
-  limits. If the 10,000-address table is full, new addresses are rejected until
-  entries expire; enforce network-level abuse controls at the proxy.
+  limits, so distributed clients and requests spread across instances can multiply
+  the aggregate attempt rate. If the 10,000-address table is full of live entries,
+  new addresses are rejected until an entry expires; live limits are never evicted
+  to admit a newcomer. Expired slots are reclaimed on demand. A distributed
+  flood can therefore deny login to new addresses for as long as the table stays
+  full; enforce network-level abuse controls at the proxy or other network boundary.
 - Brine does not terminate TLS. Put it behind a reverse proxy and add
   `--secure-cookies` to the `ExecStart` line.
 
