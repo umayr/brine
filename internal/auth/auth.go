@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"container/heap"
 	"context"
 	"crypto/pbkdf2"
 	"crypto/rand"
@@ -55,9 +56,12 @@ type Authenticator struct {
 	delay time.Duration // failed-login delay (tests set this to 0)
 	now   func() time.Time
 
-	mu       sync.Mutex
-	sessions map[string]*session
-	attempts map[string]*attempt
+	mu          sync.Mutex
+	sessions    map[string]*session
+	attemptMu   sync.Mutex // independent of session operations
+	attempts    map[string]*attempt
+	expirations attemptHeap
+	derivations chan struct{} // bounds concurrent password checks across all clients
 }
 
 type session struct {
@@ -70,8 +74,34 @@ type session struct {
 }
 
 type attempt struct {
+	ip    string
 	count int
 	reset time.Time
+	index int
+}
+
+// attemptHeap contains exactly one entry per address, ordered by expiry.
+type attemptHeap []*attempt
+
+func (h attemptHeap) Len() int           { return len(h) }
+func (h attemptHeap) Less(i, j int) bool { return h[i].reset.Before(h[j].reset) }
+func (h attemptHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index, h[j].index = i, j
+}
+func (h *attemptHeap) Push(x any) {
+	att := x.(*attempt)
+	att.index = len(*h)
+	*h = append(*h, att)
+}
+func (h *attemptHeap) Pop() any {
+	old := *h
+	n := len(old)
+	att := old[n-1]
+	old[n-1] = nil
+	att.index = -1
+	*h = old[:n-1]
+	return att
 }
 
 type ctxKey struct{}
@@ -86,13 +116,14 @@ type requestInfo struct {
 // CSRF checks are disabled; use it only for local development.
 func New(cfg Config) (*Authenticator, error) {
 	a := &Authenticator{
-		noAuth:   cfg.NoAuth,
-		secure:   cfg.SecureCookies,
-		ttl:      cfg.SessionTTL,
-		delay:    250 * time.Millisecond,
-		now:      time.Now,
-		sessions: make(map[string]*session),
-		attempts: make(map[string]*attempt),
+		noAuth:      cfg.NoAuth,
+		secure:      cfg.SecureCookies,
+		ttl:         cfg.SessionTTL,
+		delay:       250 * time.Millisecond,
+		now:         time.Now,
+		sessions:    make(map[string]*session),
+		attempts:    make(map[string]*attempt),
+		derivations: make(chan struct{}, maxConcurrentDerivations),
 	}
 	if a.ttl <= 0 {
 		a.ttl = 12 * time.Hour
@@ -277,16 +308,28 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "invalid form", http.StatusBadRequest)
 		return
 	}
+	// Reject overload instead of accumulating unbounded waiting requests. Acquire
+	// before admission so a busy server does not consume a client's budget.
+	select {
+	case a.derivations <- struct{}{}:
+	default:
+		http.Error(w, "login temporarily busy, try again later", http.StatusServiceUnavailable)
+		return
+	}
 	ip := clientIP(r)
 	if !a.allowAttempt(ip) {
+		<-a.derivations
 		http.Error(w, "too many login attempts, try again later", http.StatusTooManyRequests)
 		return
 	}
 
 	user := r.PostFormValue("user")
 	password := r.PostFormValue("password")
-	if !a.verifyPassword(user, password) {
-		a.recordFailure(ip)
+	valid := func() bool {
+		defer func() { <-a.derivations }()
+		return a.verifyPassword(user, password)
+	}()
+	if !valid {
 		if a.delay > 0 {
 			time.Sleep(a.delay)
 		}
@@ -294,7 +337,6 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	a.clearAttempts(ip)
 	sessID, sess, err := a.createSession()
 	if err != nil {
 		http.Error(w, "could not create session", http.StatusInternalServerError)
@@ -535,40 +577,44 @@ func (a *Authenticator) checkCSRF(r *http.Request, sess *session) bool {
 	return subtle.ConstantTimeCompare([]byte(token), []byte(sess.csrf)) == 1
 }
 
-const maxAttempts = 10
-const attemptWindow = 5 * time.Minute
+const (
+	maxAttempts              = 20
+	attemptWindow            = 5 * time.Minute
+	maxAttemptIPs            = 10_000
+	maxConcurrentDerivations = 4
+)
 
+// allowAttempt atomically reserves one attempt in a fixed window. Successful
+// logins count too: clearing on success would let overlapping requests or a
+// known password bypass the admission limit.
 func (a *Authenticator) allowAttempt(ip string) bool {
-	a.mu.Lock()
-	defer a.mu.Unlock()
+	a.attemptMu.Lock()
+	defer a.attemptMu.Unlock()
 	now := a.now()
 	att := a.attempts[ip]
-	if att == nil || now.After(att.reset) {
-		return true
-	}
-	return att.count < maxAttempts
-}
-
-func (a *Authenticator) recordFailure(ip string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	now := a.now()
-	att := a.attempts[ip]
-	if att == nil || now.After(att.reset) {
-		att = &attempt{reset: now.Add(attemptWindow)}
+	if att == nil {
+		if len(a.attempts) >= maxAttemptIPs {
+			// Reclaim only the slot needed for this request. In particular, do
+			// not scan the whole table on every rejection during a live flood.
+			if now.Before(a.expirations[0].reset) {
+				return false // do not evict live limits under address churn
+			}
+			expired := heap.Pop(&a.expirations).(*attempt)
+			delete(a.attempts, expired.ip)
+		}
+		att = &attempt{ip: ip, reset: now.Add(attemptWindow)}
 		a.attempts[ip] = att
+		heap.Push(&a.expirations, att)
+	} else if !now.Before(att.reset) {
+		att.count = 0
+		att.reset = now.Add(attemptWindow)
+		heap.Fix(&a.expirations, att.index)
+	}
+	if att.count >= maxAttempts {
+		return false
 	}
 	att.count++
-	// Bound the map on hostile input.
-	if len(a.attempts) > 10_000 {
-		a.attempts = make(map[string]*attempt)
-	}
-}
-
-func (a *Authenticator) clearAttempts(ip string) {
-	a.mu.Lock()
-	delete(a.attempts, ip)
-	a.mu.Unlock()
+	return true
 }
 
 func isPublicPath(path string) bool {

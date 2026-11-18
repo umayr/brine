@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -256,6 +258,105 @@ func TestLoginRateLimit(t *testing.T) {
 	// A correct password is also blocked while the window is open.
 	if res := doLogin(t, a, "admin", "secret", ""); res.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("rate limited correct login = %d, want 429", res.StatusCode)
+	}
+}
+
+func TestConcurrentAttemptAdmissionAndReset(t *testing.T) {
+	a := newTestAuth(t, Config{})
+	now := time.Unix(1000, 0)
+	a.now = func() time.Time { return now }
+	var admitted atomic.Int32
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := 0; i < 200; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if a.allowAttempt("client") {
+				admitted.Add(1)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if got := admitted.Load(); got != maxAttempts {
+		t.Fatalf("admitted %d, want %d", got, maxAttempts)
+	}
+	now = now.Add(attemptWindow - time.Nanosecond)
+	if a.allowAttempt("client") {
+		t.Fatal("admitted before reset")
+	}
+	now = now.Add(time.Nanosecond)
+	if !a.allowAttempt("client") {
+		t.Fatal("rejected at reset boundary")
+	}
+	if a.attempts["client"].count != 1 {
+		t.Fatal("new window did not start at one")
+	}
+}
+
+func TestAttemptCapacityDoesNotClearLiveLimits(t *testing.T) {
+	a := newTestAuth(t, Config{})
+	now := time.Unix(1000, 0)
+	a.now = func() time.Time { return now }
+	for i := 0; i < maxAttemptIPs; i++ {
+		if !a.allowAttempt(fmt.Sprint(i)) {
+			t.Fatalf("address %d rejected before capacity", i)
+		}
+	}
+	for i := 1; i < maxAttempts; i++ {
+		if !a.allowAttempt("0") {
+			t.Fatal("existing address rejected before its budget was used")
+		}
+	}
+	if a.allowAttempt("new") || a.allowAttempt("0") {
+		t.Fatal("capacity cleared or bypassed live limits")
+	}
+	now = now.Add(attemptWindow)
+	if !a.allowAttempt("new") {
+		t.Fatal("expired entries not reclaimed")
+	}
+	if len(a.attempts) != maxAttemptIPs || len(a.expirations) != maxAttemptIPs {
+		t.Fatalf("entries after one-slot reclamation: map=%d heap=%d", len(a.attempts), len(a.expirations))
+	}
+}
+
+func TestLoginSuccessDoesNotResetBudget(t *testing.T) {
+	a := newTestAuth(t, Config{})
+	if got := doLogin(t, a, "admin", "secret", "").StatusCode; got != http.StatusSeeOther {
+		t.Fatalf("success: %d", got)
+	}
+	for i := 1; i < maxAttempts; i++ {
+		if !a.allowAttempt("192.0.2.1") {
+			t.Fatalf("attempt %d rejected", i)
+		}
+	}
+	if got := doLogin(t, a, "admin", "secret", "").StatusCode; got != http.StatusTooManyRequests {
+		t.Fatalf("after success: %d", got)
+	}
+}
+
+func TestLoginBusyAndForwardedHeaders(t *testing.T) {
+	a := newTestAuth(t, Config{})
+	for i := 0; i < maxConcurrentDerivations; i++ {
+		a.derivations <- struct{}{}
+	}
+	if got := doLogin(t, a, "admin", "wrong", "").StatusCode; got != http.StatusServiceUnavailable {
+		t.Fatalf("busy: %d", got)
+	}
+	if len(a.attempts) != 0 {
+		t.Fatal("busy request consumed admission")
+	}
+	for i := 0; i < maxConcurrentDerivations; i++ {
+		<-a.derivations
+	}
+	r := httptest.NewRequest(http.MethodPost, "/login", nil)
+	r.RemoteAddr = "192.0.2.7:1234"
+	r.Header.Set("X-Forwarded-For", "198.51.100.1")
+	r.Header.Set("Forwarded", "for=198.51.100.2")
+	if got := clientIP(r); got != "192.0.2.7" {
+		t.Fatalf("client IP = %q", got)
 	}
 }
 

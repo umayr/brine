@@ -1,4 +1,4 @@
-name: Legacy operation safety
+name: Local operation safety
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  legacy-operation-safety:
+  local-operation-safety:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +17,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Verify legacy endpoint routing, cleanup and secret-history downgrade gates
+      - name: Verify local endpoint routing, cleanup and secret-history downgrade gates
         run: >-
           go test ./cmd/brine -count=1
           -run '^(TestTwoEndpointRoutesAndAlphaBypass|TestCleanupRoutesWithUnavailableOrMismatchedRecipe|TestLegacySecretGateBlocksMutationButNotCleanup|TestSecretRecordDeniesDowngradeAfterConfigurationRemoval|TestUnknownContainerHistoryDeniesLegacyExecution)$'
