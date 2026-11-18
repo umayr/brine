@@ -2,9 +2,6 @@ package agentclient
 
 import (
 	"context"
-	"crypto/ed25519"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -63,28 +60,16 @@ func TestHTTPSPairProcess(t *testing.T) {
 	address := reserve.Addr().String()
 	const engineID = "11111111-1111-4111-8111-111111111111"
 	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon"}
-	var bundle struct {
-		Version           int
-		CertificateSHA256 string
-		Token             string
-		AgentPublicKey    string
-		EngineID          string
-		Generation        uint64
-		EngineKind        string
-		EngineSocket      string
-		DaemonID          string
-	}
 	raw, err := exec.CommandContext(ctx, bin, append(args, "--print-https-pairing")...).Output()
-	if err != nil || json.Unmarshal(raw, &bundle) != nil || bundle.Version != 1 {
+	if err != nil {
 		reserve.Close()
 		t.Fatal("pairing export failed", err)
 	}
-	publicKey, err := hex.DecodeString(bundle.AgentPublicKey)
-	if err != nil || len(publicKey) != ed25519.PublicKeySize {
+	bundle, err := ParsePairing(raw)
+	if err != nil {
 		reserve.Close()
-		t.Fatal("invalid public key in bundle")
+		t.Fatal("actual Dill pairing bundle was rejected")
 	}
-	binding := Binding{publicKey, bundle.EngineID, bundle.Generation, bundle.EngineKind, bundle.EngineSocket, bundle.DaemonID}
 	reserve.Close()
 	process := exec.CommandContext(ctx, bin, args...)
 	if err := process.Start(); err != nil {
@@ -94,15 +79,10 @@ func TestHTTPSPairProcess(t *testing.T) {
 	var client *Client
 	var epoch string
 	for ctx.Err() == nil {
-		client, err = NewHTTPS(ctx, address, bundle.CertificateSHA256, bundle.Token, binding)
-		if err != nil {
-			t.Fatal("actual agent bundle rejected")
-		}
-		epoch, err = client.Session(ctx)
+		client, epoch, err = bundle.Open(ctx, ctx, address)
 		if err == nil {
 			break
 		}
-		client.Close()
 		select {
 		case <-ctx.Done():
 		case <-time.After(20 * time.Millisecond):
@@ -123,8 +103,8 @@ func TestHTTPSPairProcess(t *testing.T) {
 	}{
 		{"/v1/inventory", "", http.StatusUnauthorized},
 		{"/v1/inventory", "Bearer not-the-token", http.StatusUnauthorized},
-		{"/v1/reveal", "Bearer " + bundle.Token, http.StatusNotFound},
-		{"/v1/deploy", "Bearer " + bundle.Token, http.StatusNotFound},
+		{"/v1/reveal", "Bearer " + bundle.token, http.StatusNotFound},
+		{"/v1/deploy", "Bearer " + bundle.token, http.StatusNotFound},
 	} {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, client.baseURL+tt.path, nil)
 		if err != nil {

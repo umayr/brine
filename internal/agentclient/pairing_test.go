@@ -23,7 +23,7 @@ func TestPairingStrictAndRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{fmt.Sprint(p), fmt.Sprintf("%#v", p), fmt.Sprintf("%+v", p)} {
+	for _, s := range []string{fmt.Sprint(p), fmt.Sprintf("%#v", p), fmt.Sprintf("%+v", p), fmt.Sprintf("%#v", *p)} {
 		if strings.Contains(s, token) {
 			t.Fatal("credential formatted")
 		}
@@ -48,7 +48,7 @@ func TestPairingStrictAndRedacted(t *testing.T) {
 			t.Errorf("case %d: %v", i, e)
 		}
 	}
-	if _, e := p.Open(context.Background(), context.Background(), "8.8.8.8:443"); e != ErrProtocol {
+	if _, _, e := p.Open(context.Background(), context.Background(), "8.8.8.8:443"); e != ErrProtocol {
 		t.Fatal("public endpoint accepted")
 	}
 }
@@ -90,17 +90,20 @@ func TestPairingOpenRequiresPinAndSignedBinding(t *testing.T) {
 	}
 	addr := strings.TrimPrefix(s.URL, "https://")
 	bad, _ := ParsePairing([]byte(strings.Replace(bundle, hex.EncodeToString(sum[:]), strings.Repeat("0", 64), 1)))
-	if _, e = bad.Open(context.Background(), context.Background(), addr); e == nil || calls.Load() != 0 {
+	if _, _, e = bad.Open(context.Background(), context.Background(), addr); e == nil || calls.Load() != 0 {
 		t.Fatal("pin failure sent credential")
 	}
 	wrong.Store(true)
-	if _, e = p.Open(context.Background(), context.Background(), addr); e == nil {
+	if _, _, e = p.Open(context.Background(), context.Background(), addr); e == nil {
 		t.Fatal("accepted wrong binding")
 	}
 	wrong.Store(false)
-	c, e := p.Open(context.Background(), context.Background(), addr)
+	c, epoch, e := p.Open(context.Background(), context.Background(), addr)
 	if e != nil {
 		t.Fatal(e)
 	}
-	c.Close()
+	defer c.Close()
+	if epoch != testEpoch {
+		t.Fatal("returned wrong session epoch")
+	}
 }

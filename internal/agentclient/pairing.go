@@ -23,9 +23,9 @@ type Pairing struct {
 
 // String and GoString prevent ordinary formatting of a candidate from revealing
 // the credential. They do not sanitize the caller's original input.
-func (*Pairing) String() string               { return "[HTTPS pairing redacted]" }
-func (*Pairing) GoString() string             { return "[HTTPS pairing redacted]" }
-func (*Pairing) MarshalJSON() ([]byte, error) { return nil, ErrProtocol }
+func (Pairing) String() string               { return "[HTTPS pairing redacted]" }
+func (Pairing) GoString() string             { return "[HTTPS pairing redacted]" }
+func (Pairing) MarshalJSON() ([]byte, error) { return nil, ErrProtocol }
 
 // ParsePairing accepts exactly the v1 host bundle, with no duplicate or extra
 // fields. All failures are deliberately indistinguishable and contain no input.
@@ -93,19 +93,21 @@ func ParsePairing(input []byte) (*Pairing, error) {
 	return p, nil
 }
 
-// Open authenticates a fresh signed session before returning a read client.
-// It makes no persistence or enrollment decision. The caller owns the client.
-func (p *Pairing) Open(lifetime, request context.Context, address string) (*Client, error) {
+// Open authenticates a fresh signed session before returning a read client and
+// its session epoch. It makes no persistence or enrollment decision.
+// The caller owns the client.
+func (p *Pairing) Open(lifetime, request context.Context, address string) (*Client, string, error) {
 	if p == nil || request == nil {
-		return nil, ErrProtocol
+		return nil, "", ErrProtocol
 	}
 	c, err := NewHTTPS(lifetime, address, p.pin, p.token, p.binding)
 	if err != nil {
-		return nil, ErrProtocol
+		return nil, "", ErrProtocol
 	}
-	if _, err = c.Session(request); err != nil {
+	epoch, err := c.Session(request)
+	if err != nil {
 		_ = c.Close()
-		return nil, ErrProtocol
+		return nil, "", ErrProtocol
 	}
-	return c, nil
+	return c, epoch, nil
 }
