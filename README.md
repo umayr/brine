@@ -38,10 +38,8 @@ it talks to the container engine directly for container and image views.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
 
-Opt-in authenticated qualified Alpha can retain [S1 private request/receipt history](docs/alpha-operation-history.md)
-with `--operation-state-dir`: existing mutation streaming plus authenticated GET,
-not a queue or immutable source approval. Native app qualification is **NOT RUN**;
-legacy behavior outside this opt-in is unchanged.
+[S1 private request/receipt history](docs/alpha-operation-history.md) is historical;
+`--operation-state-dir` is disabled, and native app qualification was **NOT RUN**.
 
 ## Configuration variables
 
@@ -78,8 +76,8 @@ directory; cross-process variable writes are not coordinated.
 - A `dill` binary (v0.7.0) on `PATH`, or pass `--dill /path/to/dill`.
   Older binaries that cannot accept explicit stack/engine/socket flags are
   rejected for lifecycle and validation; Brine does not retry against defaults.
-- Alpha file-secret mode also requires the matching v0.7.0 schema. See the
-  [qualification status](docs/alpha-secrets-status.md) for platform and testing limits.
+- Alpha file-secret mode is disabled. Its historical
+  [qualification status](docs/alpha-secrets-status.md) records platform and testing limits.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -192,7 +190,7 @@ local processes and non-browser clients can still control it.
 | `--bind` | | `127.0.0.1` | Literal listen IP; no-auth requires loopback |
 | `--data-dir` | | `~/.brine` | Stack files, recipes, credentials |
 | `--engine` | | `docker` | `docker` or `podman` |
-| `--profile` | | `legacy` | `alpha` requires auth and an explicit local socket; unqualified engine writes are blocked, except pinned stack stop/down cleanup. See [target boundary](docs/alpha-target-contract.md). |
+| `--profile` | | `legacy` | Only `legacy` is supported; `alpha` is rejected. See the historical [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
 | `--dill` | | `dill` | Operator-selected Dill binary; bundled v0.7.0 is incompatible with qualified operations |
 | `--staging-socket` | | unset | Opt-in absolute local dill-serve Unix socket; requires `--staging-identity` and authentication |
@@ -202,9 +200,9 @@ local processes and non-browser clients can still control it.
 | `--remote-forward-dir` | | unset | Explicit existing private local forwarding directory |
 | `--remote-timeout` | | unset | Explicit positive SSH transport timeout |
 | `--init-remote-registry` | | `false` | Initialize a new registry and exit; does not start or enable the server |
-| `--coordination-state-dir` | | unset | Preexisting canonical shared operator-owned 0700 state outside Brine data; no auto-provisioning |
-| `--coordination-layout` | | unset | Explicit native Linux Docker assertion: `native-local-docker-v1` only |
-| `--coordination-daemon-id` | | unset | Independently provisioned expected daemon ID, never learned from the selected socket |
+| `--coordination-state-dir`, `--coordination-layout`, `--coordination-daemon-id` | | unset | Disabled; explicitly passing any of these flags is rejected, even with an empty value. |
+| `--operation-state-dir` | | unset | Disabled; explicitly passing this flag is rejected, even with an empty value. |
+| `--secret-target`, `--secret-policy`, `--secret-pkl` | | unset | Disabled; explicitly passing any of these flags is rejected, even with an empty value. |
 | `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
 | `--auth-password` | `BRINE_AUTH_PASSWORD` | generated | Admin password |
 | `--api-token` | `BRINE_API_TOKEN` | generated | Bearer token for API clients |
@@ -262,9 +260,13 @@ cancellation cannot recall an already-started POST and its outcome may be unknow
 If transfer outcome is unknown, do not retry: inspect the receiver before
 preparing another review.
 
-## Isolated Alpha operation
+## Isolated Alpha operation (historical)
 
-The opt-in [qualified operation consumer](docs/alpha-operation-consumer.md) targets
+**Not available:** the normal server rejects the Alpha profile and all qualified
+operation, history and strict-secret options. The following describes the former
+contract and safety precautions, not instructions for starting the current server.
+
+The former opt-in [qualified operation consumer](docs/alpha-operation-consumer.md) targets
 exact Dill candidate `b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2`, selected explicitly
 with `--dill`. Set all three coordination flags together only after independent
 native Linux Docker host/state provisioning. Authenticated manual stack
