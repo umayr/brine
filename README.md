@@ -43,7 +43,7 @@ it talks to the container engine directly for container and image views.
 
 ## Configuration variables
 
-In the legacy profile, use **Variables** in the sidebar for values common to
+For local stacks, use **Variables** in the sidebar for values common to
 stacks. Each stack page shows inherited values and lets you add stack-specific
 values. Stack values win over shared values with the same name. These are **non-secret configuration**:
 values are stored on disk and can appear in Pkl output, plans, diagnostics, and
@@ -63,7 +63,7 @@ added to Brine's own environment. Qualified Alpha and strict secret operations
 do not receive them and the variable editor is disabled in those modes. Saving
 or deleting a variable does not redeploy: the next operation uses the current
 values. A change between plan and deploy can change the outcome; re-plan after
-any variable change. Background Git auto-deploy, when enabled in legacy mode,
+any variable change. Background Git auto-deploy, when enabled for local stacks,
 uses current values. Global variables are visible to every legacy stack; they are
 not an isolation or authorization mechanism. Back up the private Brine data
 directory if these settings must be retained. One Brine process must own a data
@@ -379,7 +379,7 @@ Validate the migrated project and review its plan before deploying. These Pkl
 schema changes do not rename Brine's own REST API fields or Git settings.
 
 Git-backed stacks support branch, subfolder, entrypoint, read-only, and auto-deploy
-with a poll interval. In legacy mode, auto-deploy runs `dill up` only when the pull changed `HEAD`; Alpha background polling/pull/auto-deploy is explicitly disabled even with qualified manual operations configured;
+with a poll interval. For local stacks, auto-deploy runs `dill up` only when the pull changed `HEAD`; Alpha background polling/pull/auto-deploy is explicitly disabled even with qualified manual operations configured;
 uncommitted local edits are skipped rather than clobbered.
 
 ## API
@@ -412,7 +412,7 @@ All routes are under `/api` and require authentication (except `/api/health`).
 | `GET/POST` | `/api/recipes` | List or create snippets |
 | `GET/PUT/PATCH/DELETE` | `/api/recipes/{slug}` | Manage a snippet |
 
-In legacy mode, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
+For local stacks, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
 
 ## Development
 
