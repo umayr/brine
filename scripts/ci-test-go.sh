@@ -7,9 +7,9 @@ GOPATH=$(go env GOPATH)
 GOCACHE=$(go env GOCACHE)
 test -n "$GOPATH" && test -n "$GOCACHE"
 export GOPATH GOCACHE
-python3 scripts/test-check-alpha-fixture-home.py
+python3 scripts/test-check-fixture-home.py
 printf '%s\n' 'Original HOME ancestry (metadata only; historical /home ACL is not assumed):'
-python3 scripts/check-alpha-fixture-home.py report "$HOME"
+python3 scripts/check-fixture-home.py report "$HOME"
 
 # /tmp is intentionally rejected, and /home may carry inherited/default ACLs.
 # Only a fresh unique directory directly under / is provisioned with sudo.
@@ -17,7 +17,7 @@ python3 scripts/check-alpha-fixture-home.py report "$HOME"
 fixture_home=$(sudo mktemp -d /brine-go-test-home.XXXXXXXX)
 sudo chown "$(id -u):$(id -g)" "$fixture_home"
 printf '%s\n' 'Synthetic HOME ancestry (required safe; no credential contents):'
-python3 scripts/check-alpha-fixture-home.py require "$fixture_home"
+python3 scripts/check-fixture-home.py require "$fixture_home"
 export HOME="$fixture_home"
 
 # Retain this synthetic directory until the disposable runner is destroyed.

@@ -50,7 +50,7 @@ def inspect(path, require):
 
 def main():
     if len(sys.argv) != 3 or sys.argv[1] not in ('report', 'require'):
-        raise SystemExit('usage: check-alpha-fixture-home.py report|require PATH')
+        raise SystemExit('usage: check-fixture-home.py report|require PATH')
     try:
         safe = inspect(sys.argv[2], sys.argv[1] == 'require')
     except (OSError, ValueError):
