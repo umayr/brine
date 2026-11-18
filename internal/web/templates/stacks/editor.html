@@ -221,17 +221,19 @@ const editorForm = document.getElementById('editor-form');
 const editorTextarea = document.getElementById('pkl-editor');
 const newFileForm = document.getElementById('new-file-form');
 const newFileResult = document.getElementById('new-file-result');
-newFileForm.addEventListener('htmx:beforeRequest', () => {
-  newFileResult.textContent = '';
-});
-newFileForm.addEventListener('htmx:afterRequest', event => {
-  if (!event.detail.successful) {
-    const status = event.detail.xhr.status;
-    newFileResult.textContent = status
-      ? 'File creation request failed (HTTP ' + status + '). Please try again.'
-      : 'File creation request failed. Check your connection and try again.';
-  }
-});
+if (newFileForm && newFileResult) {
+  newFileForm.addEventListener('htmx:beforeRequest', () => {
+    newFileResult.textContent = '';
+  });
+  newFileForm.addEventListener('htmx:afterRequest', event => {
+    if (!event.detail.successful) {
+      const status = event.detail.xhr.status;
+      newFileResult.textContent = status
+        ? 'File creation request failed (HTTP ' + status + '). Please try again.'
+        : 'File creation request failed. Check your connection and try again.';
+    }
+  });
+}
 let savedContent = editorTextarea.value;
 let submittedContent = savedContent;
 function updateDirtyState() {
