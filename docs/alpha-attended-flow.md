@@ -1,4 +1,4 @@
-# Dormant attended API and synthetic fixture
+# Historical attended API design
 
 > **Historical specification:** Alpha and strict-secret functionality is disabled in Brine. This document is retained for design and recovery context, not as operating instructions. Existing secret state and downgrade protections must not be removed or bypassed.
 >
@@ -24,29 +24,6 @@ Authentication is required before preview, confirmation, or operation lookup. Ex
 
 The browser displays the whole returned bounded review as text, including resources, coverage, diagnostics and context; no names are intentionally truncated or interpreted as HTML. Present resource IDs and planned names have different meanings: planned names are not future IDs or promises. Recreating/removing containers loses writable-layer contents. Named-volume retention is neither backup nor proof of contents or incarnation. Runtime facts may vary; an up no-op may still ensure/start/network. No native qualification or volume-consumer proof is implied.
 
-## Synthetic attended browser fixture (not qualification)
+## Historical test evidence
 
-`brine-fixture --synthetic-attended` is an explicitly selected **Linux-only, disposable test fixture**, not a Brine application configuration or production activation. Its producer is fixed synthetic data: it never runs Dill or Pkl, opens an engine/socket, captures source, or proves native/runtime/source qualification. It uses the real Linux operation history store in a private temporary directory under the test account's home. The fixture allows only authenticated synthetic `observability/up` preview and confirmation; normal fixture mode is unchanged. The fixture returns `X-Brine-Fixture: synthetic-attended-no-qualification`.
-
-Run the following only on an isolated non-root Linux GHA worker with the repository's pinned Playwright dependencies and browser installed. This test is not a replacement for native qualification. Choose an unused private loopback port; do not target another fixture or production server:
-
-```sh
-go build -o "$RUNNER_TEMP/brine-attended-fixture" ./cmd/brine-fixture
-"$RUNNER_TEMP/brine-attended-fixture" --synthetic-attended --port 18179 >"$RUNNER_TEMP/brine-attended-fixture.log" 2>&1 &
-fixture_pid=$!
-trap 'kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true' EXIT
-for i in $(seq 1 100); do
-  if curl -fsS http://127.0.0.1:18179/login >/dev/null; then break; fi
-  sleep .1
-done
-BRINE_ATTENDED_FIXTURE_URL=http://127.0.0.1:18179 \
-BRINE_FIXTURE_BASE_URL=http://127.0.0.1:18179 \
-BRINE_VISUAL_BASE_URL=http://127.0.0.1:18179 BRINE_VISUAL_PASSWORD=unused \
-npx playwright test tests/attended-real-fixture.spec.js --workers=1
-```
-
-The browser logs in with the fixture-only credential, requests preview, explicitly confirms once, and manually looks up the linked V2 apply record. It asserts no automatic apply or polling. A synthetic `unknown` outcome is deliberately not a success or qualification claim. The fixture must never be connected to a real engine or provided source. Exact-head GHA and independent security review remain required; source factory, application startup wiring, and qualification gates remain separate and off.
-
-## Verification status at this checkpoint
-
-The macOS Go API/web/history race suites and the full local UI suite passed with synthetic fakes and intercepted browser responses. Local UI execution skipped the Linux real-store attended browser test. The Linux real-store API fault/reopen/disconnect tests and this fixture/browser flow were cross-compiled or authored but **not run locally**. The history dependency's independently reported passing CI does not prove this newer controller/fixture head. Run both the real-store Go tests and the browser command above on exact-head Linux GHA; inspect their results rather than treating documentation, HTTP 200 or fake tests as proof.
+The [paired canary notes](alpha-paired-app-canary-receiving.md#reviewed-component-and-evidence-boundary) record the earlier Linux synthetic browser run. That fixture has been removed; its fixed producer and deliberately unknown apply result did not qualify native execution. The normal UI and snapshot-staging fixtures are separate.
