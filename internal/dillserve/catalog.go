@@ -37,6 +37,17 @@ func (c *Client) Snapshot(ctx context.Context, stageID string) (Manifest, error)
 	if err != nil {
 		return zero, ErrUnavailable
 	}
+	return ParseCatalog(ctx, stageID, body)
+}
+
+// ParseCatalog validates the fixed catalog envelope and its canonical manifest.
+// It performs no transport authentication; callers must use a verified session.
+func ParseCatalog(ctx context.Context, stageID string, body []byte) (Manifest, error) {
+	var zero Manifest
+	id, err := hex.DecodeString(stageID)
+	if ctx == nil || ctx.Err() != nil || err != nil || len(id) != 16 || hex.EncodeToString(id) != stageID || len(body) > 4<<20 {
+		return zero, ErrUnavailable
+	}
 	m, err := object(body, "stage_id", "manifest", "manifest_sha256")
 	if err != nil || len(m) != 3 {
 		return zero, ErrUnavailable

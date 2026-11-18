@@ -36,6 +36,7 @@ type Server struct {
 	web               *web.Handler
 	authn             *auth.Authenticator
 	remoteCancel      context.CancelFunc
+	remoteDeploy      *remoteui.Deployment
 	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
@@ -79,6 +80,11 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 // Run starts the HTTP server and the GitOps syncer, blocking until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	defer s.web.CloseStaging()
+	defer func() {
+		if s.remoteDeploy != nil {
+			s.remoteDeploy.Close()
+		}
+	}()
 	if err := s.cfg.Validate(); err != nil {
 		return err
 	}
@@ -91,7 +97,12 @@ func (s *Server) Run(ctx context.Context) error {
 		defer s.remoteCancel()
 	}
 	// Do not start background mutations until the configuration is validated.
-	go s.syncer.Run(ctx)
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	go s.syncer.Run(workerCtx)
+	if s.remoteDeploy != nil {
+		go s.remoteDeploy.RunGit(workerCtx)
+	}
 	addr := net.JoinHostPort(s.cfg.Bind, s.cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,

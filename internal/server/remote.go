@@ -18,8 +18,10 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if !s.cfg.RemoteEnabled || s.authn == nil || !s.authn.Enabled() {
 		return errors.New("remote requires explicit enablement and authentication")
 	}
-	if err := agenttransport.ValidateLocalDir(s.cfg.RemoteForwardDir); err != nil {
-		return errors.New("remote forwarding directory unavailable or insecure")
+	if s.cfg.RemoteForwardDir != "" {
+		if err := agenttransport.ValidateLocalDir(s.cfg.RemoteForwardDir); err != nil {
+			return errors.New("remote forwarding directory unavailable or insecure")
+		}
 	}
 	registry, err := targetregistry.OpenExisting(s.cfg.RemoteRegistryDir)
 	if err != nil {
@@ -65,6 +67,14 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if err != nil {
 		return err
 	}
+	var deploy http.Handler
+	if s.store != nil {
+		if s.remoteDeploy, err = remoteui.NewDeployment(s.authn, registry, s.store); err != nil {
+			return err
+		}
+		s.remoteDeploy.EnableGit(s.git)
+		deploy = s.remoteDeploy.Protected()
+	}
 	local := s.router
 	lifetime, cancel := context.WithCancel(context.Background())
 	s.remoteCancel = cancel
@@ -77,6 +87,10 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 			ctx, cancelRequest := context.WithCancel(r.Context())
 			stop := context.AfterFunc(lifetime, cancelRequest)
 			defer func() { stop(); cancelRequest() }()
+			if deploy != nil && remoteui.IsDeploymentPath(r.URL.Path) {
+				deploy.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			remote.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}

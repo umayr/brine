@@ -26,8 +26,8 @@ type RegistryLeaseProvider struct {
 }
 
 func NewRegistryLeaseProvider(r *targetregistry.Registry, c remoteagent.Config) (*RegistryLeaseProvider, error) {
-	if r == nil || c.LocalDir == "" || c.Timeout <= 0 {
-		return nil, errors.New("registry, private forwarding directory and positive timeout required")
+	if r == nil || c.Timeout <= 0 {
+		return nil, errors.New("registry and positive timeout required")
 	}
 	return &RegistryLeaseProvider{r, c, func(ctx context.Context, record targetregistry.Record, cfg remoteagent.Config) (ownedReadSession, error) {
 		return remoteagent.Open(ctx, record, cfg)

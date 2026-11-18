@@ -84,7 +84,7 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 	defer s.dill.LockStack(name)()
 
 	stack, err := s.store.Get(name)
-	if err != nil {
+	if err != nil || stack == nil || (stack.RemoteGit != nil && (stack.RemoteGit.Enabled || stack.RemoteGit.Request != "")) {
 		return
 	}
 	repoDir, err := s.store.RepoDir(name)

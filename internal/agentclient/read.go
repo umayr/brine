@@ -77,7 +77,7 @@ func (c *Client) requestWithID(ctx context.Context, activeCtx context.Context, p
 	if activeCtx != nil {
 		stopActive = context.AfterFunc(activeCtx, cancel)
 	}
-	req, e := http.NewRequestWithContext(requestCtx, "POST", "http://unix"+path, bytes.NewReader(raw))
+	req, e := http.NewRequestWithContext(requestCtx, "POST", c.baseURL+path, bytes.NewReader(raw))
 	if e != nil {
 		stop()
 		stopActive()
@@ -90,7 +90,7 @@ func (c *Client) requestWithID(ctx context.Context, activeCtx context.Context, p
 	req.Header.Set("X-Brine-Binding", fmt.Sprint(c.binding.Generation))
 	req.Header.Set("X-Request-Id", rid)
 	req.Header.Set("X-Agent-Epoch", epoch)
-	res, e := c.http.Do(req)
+	res, e := c.do(req)
 	if e != nil {
 		stop()
 		stopActive()

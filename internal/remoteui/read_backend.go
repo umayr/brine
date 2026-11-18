@@ -5,8 +5,10 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/umayr/brine/internal/agentclient"
+	"github.com/umayr/brine/internal/remoteagent"
 	"github.com/umayr/brine/internal/targetregistry"
 )
 
@@ -80,6 +82,32 @@ func sessionFor(ctx context.Context, id string) (ReadSession, error) {
 	}
 	return v.session, nil
 }
+
+// PairHTTPS verifies the supplied pins and signed session before persisting.
+func (b *ReadBackend) PairHTTPS(ctx context.Context, id, address, bundle string) error {
+	r := targetregistry.Record{ID: id, Revision: 1, HTTPSAddress: address, HTTPSPairing: targetregistry.PairingSecret(bundle)}
+	if r.Validate() != nil {
+		return errors.New("pairing unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	s, err := remoteagent.Open(ctx, r, remoteagent.Config{})
+	if err != nil {
+		return errors.New("pairing unavailable")
+	}
+	if s.Close() != nil || ctx.Err() != nil {
+		return errors.New("pairing unavailable")
+	}
+	if b.registry.AddContext(ctx, r, r) != nil {
+		return errors.New("pairing unavailable")
+	}
+	return nil
+}
+
+func (b *ReadBackend) ForgetHTTPS(ctx context.Context, id string) error {
+	return b.registry.ForgetHTTPS(ctx, id)
+}
+
 func (b *ReadBackend) Hosts(ctx context.Context) ([]Host, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -90,7 +118,7 @@ func (b *ReadBackend) Hosts(ctx context.Context) ([]Host, error) {
 	}
 	out := make([]Host, 0, len(records))
 	for _, r := range records {
-		out = append(out, Host{ID: r.ID, Name: r.ID, State: "enrolled"})
+		out = append(out, Host{ID: r.ID, Name: r.ID, State: "enrolled", HTTPS: r.HTTPSAddress != ""})
 	}
 	return out, ctx.Err()
 }

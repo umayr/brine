@@ -3,6 +3,8 @@
 package store
 
 import (
+	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -76,6 +78,37 @@ func readWorkspaceFile(dir int, name string) ([]byte, error) {
 	defer f.Close()
 	return io.ReadAll(f)
 }
+
+// writeWorkspaceMetadata durably replaces metadata, including deployed Git
+// intents. Source selection must never roll back through a partial write.
+func writeWorkspaceMetadata(dir int, data []byte) error {
+	if old, err := openWorkspaceFile(dir, "meta.json", unix.O_RDONLY); err == nil {
+		if err := old.Close(); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return err
+	}
+	name := fmt.Sprintf(".meta-%x", id)
+	f, err := openWorkspaceFile(dir, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL)
+	if err != nil {
+		return err
+	}
+	defer unix.Unlinkat(dir, name, 0)
+	_, writeErr := f.Write(data)
+	if err := errors.Join(writeErr, f.Sync(), f.Close()); err != nil {
+		return err
+	}
+	if err := unix.Renameat(dir, name, dir, "meta.json"); err != nil {
+		return err
+	}
+	return unix.Fsync(dir)
+}
+
 func writeWorkspaceFile(dir int, name string, data []byte) error {
 	f, err := openWorkspaceFile(dir, name, unix.O_WRONLY|unix.O_CREAT)
 	if err != nil {

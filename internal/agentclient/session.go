@@ -161,12 +161,14 @@ func VerifyProof(b Binding, p Proof, nonce string) error {
 	return nil
 }
 
-// Client owns exactly one HTTP/1 connection for its lifetime. The caller must
-// cancel the forward lifetime context immediately if its pinned SSH tunnel fails.
-// The client never performs enrollment, SSH authentication, or user authorization.
+// Client owns exactly one HTTP/1 connection for its lifetime. For SSH, the caller
+// must cancel the context immediately if the pinned tunnel fails. The client
+// does not enroll a target or authorize a Brine user.
 type Client struct {
 	binding      Binding
 	http         *http.Client
+	baseURL      string
+	bearer       string
 	mu           sync.Mutex
 	sessionMu    sync.Mutex
 	epoch        string
@@ -187,10 +189,14 @@ func New(forward context.Context, socket string, b Binding) (*Client, error) {
 	if forward == nil || forward.Err() != nil || !validSocket("unix://"+socket) || !validBinding(b) {
 		return nil, ErrProtocol
 	}
+	return newClient(forward, b, "http://unix", "", "unix", socket, &http.Transport{}), nil
+}
+
+func newClient(forward context.Context, b Binding, baseURL, bearer, network, address string, t *http.Transport) *Client {
 	b.AgentPublicKey = append(ed25519.PublicKey(nil), b.AgentPublicKey...)
 	forward, closeForward := context.WithCancel(forward)
-	c := &Client{binding: b, forward: forward, closeForward: closeForward, streams: make(chan struct{}, 2), used: make(map[string]uint64)}
-	t := &http.Transport{Proxy: nil, MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1, ForceAttemptHTTP2: false}
+	c := &Client{binding: b, baseURL: baseURL, bearer: bearer, forward: forward, closeForward: closeForward, streams: make(chan struct{}, 2), used: make(map[string]uint64)}
+	t.MaxConnsPerHost, t.MaxIdleConnsPerHost = 1, 1
 	t.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
 		c.mu.Lock()
 		if c.dead || c.dialed || forward.Err() != nil {
@@ -199,7 +205,7 @@ func New(forward context.Context, socket string, b Binding) (*Client, error) {
 		}
 		c.dialed = true
 		c.mu.Unlock()
-		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		conn, err := (&net.Dialer{}).DialContext(ctx, network, address)
 		if err != nil {
 			c.fail()
 			return nil, ErrProtocol
@@ -208,7 +214,14 @@ func New(forward context.Context, socket string, b Binding) (*Client, error) {
 	}
 	c.http = &http.Client{Transport: t, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	context.AfterFunc(forward, func() { c.fail(); t.CloseIdleConnections() })
-	return c, nil
+	return c
+}
+
+func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
+	return c.http.Do(req)
 }
 
 type ownedConn struct {
@@ -277,7 +290,7 @@ func (c *Client) Session(ctx context.Context) (string, error) {
 	body, _ := json.Marshal(struct {
 		Nonce string `json:"nonce"`
 	}{ns})
-	req, e := http.NewRequestWithContext(ctx, "POST", "http://unix/v1/session", bytes.NewReader(body))
+	req, e := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/v1/session", bytes.NewReader(body))
 	if e != nil {
 		return "", ErrProtocol
 	}
@@ -285,7 +298,7 @@ func (c *Client) Session(ctx context.Context) (string, error) {
 	req.Header.Set("Cache-Control", "no-store")
 	req.Header.Set("X-Brine-Binding", fmt.Sprint(c.binding.Generation))
 	req.Header.Set("X-Request-Id", rid)
-	resp, e := c.http.Do(req)
+	resp, e := c.do(req)
 	if e != nil {
 		c.fail()
 		return "", ErrProtocol

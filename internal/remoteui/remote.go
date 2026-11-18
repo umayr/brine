@@ -46,7 +46,10 @@ type ReadLeaseBackend interface {
 	AcquireRead(context.Context, string) (context.Context, func() error, error)
 }
 
-type Host struct{ ID, Name, State string }
+type Host struct {
+	ID, Name, State string
+	HTTPS           bool
+}
 
 type Container struct{ ID, Name, Stack, Service, State, Image string }
 
@@ -301,6 +304,54 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 			p.Hosts = hosts
 		}
 		h.render(w, p)
+		return
+	case "/remote/pair":
+		if r.Method != http.MethodPost {
+			break
+		}
+		pairer, ok := h.backend.(interface {
+			PairHTTPS(context.Context, string, string, string) error
+		})
+		if !ok {
+			http.Error(w, "Pairing unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		lease, release, ok := h.auth.SubmissionLease(r)
+		if !ok {
+			http.Error(w, "Session expired", http.StatusForbidden)
+			return
+		}
+		defer release()
+		if pairer.PairHTTPS(lease, r.PostForm.Get("id"), r.PostForm.Get("address"), r.PostForm.Get("bundle")) != nil {
+			http.Error(w, "Pairing unavailable", http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/remote", http.StatusSeeOther)
+		return
+	case "/remote/forget":
+		if r.Method != http.MethodPost || r.PostForm.Get("confirm") != "yes" {
+			break
+		}
+		forget, ok := h.backend.(interface {
+			ForgetHTTPS(context.Context, string) error
+		})
+		if !ok {
+			http.Error(w, "Pairing unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		lease, release, ok := h.auth.SubmissionLease(r)
+		if !ok {
+			http.Error(w, "Session expired", http.StatusForbidden)
+			return
+		}
+		defer release()
+		forgetCtx, cancel := context.WithTimeout(lease, 15*time.Second)
+		defer cancel()
+		if forget.ForgetHTTPS(forgetCtx, r.PostForm.Get("id")) != nil {
+			http.Error(w, "Could not confirm that Brine forgot this target; reload the host list", http.StatusConflict)
+			return
+		}
+		http.Redirect(w, r, "/remote", http.StatusSeeOther)
 		return
 	case "/remote/inventory":
 		if r.Method != http.MethodGet || p.Host == "" {
