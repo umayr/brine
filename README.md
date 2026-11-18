@@ -173,6 +173,14 @@ Podman instead, adjust `User`, `Group`, `ExecStart`, and the socket in the unit.
 
 - There is no RBAC: one admin account, intended for a single operator.
 - Sessions live in memory; restarting Brine signs everyone out.
+- Login admits 20 attempts per client IP in a fixed five-minute window, including
+  successful attempts; success does not reset the window. Limits are per process
+  and reset on restart. Password checks are globally bounded; overload can return
+  HTTP 503. Brine uses the direct peer address and does not trust forwarded IP
+  headers. Behind a reverse proxy, all clients sharing its address share one login
+  budget and can lock each other out; restrict access at the proxy and apply
+  appropriate per-client rate limits there. Multiple Brine instances do not share
+  limits.
 - Brine does not terminate TLS. Put it behind a reverse proxy and add
   `--secure-cookies` to the `ExecStart` line.
 
