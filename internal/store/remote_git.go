@@ -20,6 +20,8 @@ type RemoteGitPolicy struct {
 	Seen    string `json:"seen,omitempty"`
 	Request string `json:"request,omitempty"`
 	Phase   string `json:"phase"`
+	Journal string `json:"journal,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type RemoteGitStore interface {
@@ -79,11 +81,16 @@ func (p *RemoteGitPolicy) valid() bool {
 	if p.Request != "" && (!remoteGitHex(p.Request, 16) || p.Commit == "") {
 		return false
 	}
+	if p.Journal != "" && (p.Request == "" || !remoteGitHex(p.Journal, 16)) {
+		return false
+	}
 	switch p.Phase {
-	case "ready", "succeeded", "blocked":
-		return p.Request == ""
+	case "ready", "succeeded":
+		return p.Request == "" && p.Reason == ""
+	case "blocked":
+		return p.Request == "" && (p.Reason == "" || p.Reason == "staging-or-preview" || p.Reason == "no-journal" || p.Reason == "not-admitted" || p.Reason == "failed")
 	case "pending":
-		return p.Request != ""
+		return p.Request != "" && (p.Reason == "" || p.Reason == "awaiting-status" || p.Reason == "running" || p.Reason == "unknown" || p.Reason == "status-unavailable")
 	default:
 		return false
 	}

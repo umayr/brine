@@ -16,8 +16,8 @@ import (
 
 type DeploymentPreview struct {
 	*dill.PreflightResult
-	CreateEnabled        bool
-	Mode, PriorRequestID string
+	CreateEnabled                   bool
+	Mode, PriorRequestID, JournalID string
 }
 
 // PreviewDeployment asks the authenticated agent to run Dill's qualified
@@ -83,7 +83,11 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 			mode = "create"
 		}
 	}
-	return &DeploymentPreview{PreflightResult: result, CreateEnabled: mode == "create", Mode: mode, PriorRequestID: prior}, nil
+	j := resp.Header.Values(journalHeader)
+	if len(j) > 1 || (len(j) == 1 && !canonicalHex(j[0], 16)) {
+		return nil, ErrProtocol
+	}
+	return &DeploymentPreview{PreflightResult: result, CreateEnabled: mode == "create", Mode: mode, PriorRequestID: prior, JournalID: resp.Header.Get(journalHeader)}, nil
 }
 
 func canonicalHex(s string, size int) bool {
