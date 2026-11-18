@@ -219,6 +219,11 @@
 .stack-table-scroll:focus-visible { outline-offset: -2px; }
 .stack-actions-name { display: none; }
 .stack-updated { white-space: nowrap; }
+.image-table-hint { display: none; padding: var(--space-3); color: var(--color-muted); font-size: var(--font-size-xs); }
+.image-table-scroll { overflow-x: auto; }
+.image-table-scroll:focus-visible { outline-offset: -2px; }
+.image-table { min-width: 44rem; }
+.image-action-name { display: none; }
 .stack-link:hover { color: var(--color-accent); }
 
 /* Titled stack panels remain expanded unless the operator collapses them. */
@@ -302,7 +307,8 @@
   .variables-add-form > .ui-button { justify-self: start; margin-top: 0; }
   .variables-actions { justify-content: flex-start; }
   .variables-panel-header,.variables-row,.variables-empty,.variables-add-form,.variables-panel-footer { padding-inline: var(--space-4); }
-  .stack-table-hint { display: block; }
+  .stack-table-hint,.image-table-hint { display: block; }
+  .image-action-name { display: block; max-width: 14rem; margin-bottom: var(--space-1); color: var(--color-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
   .stack-actions-name { display: block; margin-bottom: var(--space-1); color: var(--color-muted); font-size: var(--font-size-xs); overflow-wrap: anywhere; }
   .stack-metadata { flex-wrap: wrap; }
   .stack-metadata > div { flex: 1 1 45%; }
