@@ -226,6 +226,9 @@
 .image-action-name { display: none; }
 .stack-link:hover { color: var(--color-accent); }
 
+.git-source-header,.git-source-actions { flex-wrap: wrap; gap: var(--space-2); }
+.git-source-grid > div,.git-source-grid > #git-state-values > div { min-width: 0; overflow-wrap: anywhere; }
+
 /* Titled stack panels remain expanded unless the operator collapses them. */
 .stack-panel-toggle { display: inline-flex; align-items: center; gap: var(--space-2); color: inherit; text-align: left; }
 .stack-panel-toggle:hover { color: var(--color-accent); }
