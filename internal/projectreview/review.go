@@ -37,6 +37,7 @@ type TargetKind string
 const (
 	Local TargetKind = "local"
 	SSH   TargetKind = "ssh"
+	HTTPS TargetKind = "https"
 )
 
 // Target is asserted by the trusted caller, not an attestation. SSHKnownHost is
@@ -191,6 +192,8 @@ func validCurrent(c Current) bool {
 	switch t.Kind {
 	case Local:
 		return t.Endpoint == "" && t.SSHKnownHost == "" && t.SSHUser == "" && t.SSHHost == "" && t.SSHIdentityFile == "" && t.SSHPublicKey == "" && t.SSHPort == 0
+	case HTTPS:
+		return t.Endpoint != "" && t.SSHKnownHost == "" && t.SSHUser == "" && t.SSHHost == "" && t.SSHIdentityFile == "" && t.SSHPublicKey == "" && t.SSHPort == 0
 	case SSH:
 		if t.Endpoint == "" || !strings.HasPrefix(t.SSHKnownHost, "SHA256:") {
 			return false

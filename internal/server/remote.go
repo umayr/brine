@@ -67,6 +67,13 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if err != nil {
 		return err
 	}
+	var deploy http.Handler
+	if s.store != nil {
+		if s.remoteDeploy, err = remoteui.NewDeployment(s.authn, registry, s.store); err != nil {
+			return err
+		}
+		deploy = s.remoteDeploy.Protected()
+	}
 	local := s.router
 	lifetime, cancel := context.WithCancel(context.Background())
 	s.remoteCancel = cancel
@@ -79,6 +86,10 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 			ctx, cancelRequest := context.WithCancel(r.Context())
 			stop := context.AfterFunc(lifetime, cancelRequest)
 			defer func() { stop(); cancelRequest() }()
+			if deploy != nil && remoteui.IsDeploymentPath(r.URL.Path) {
+				deploy.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			remote.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
