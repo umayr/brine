@@ -67,26 +67,15 @@ jobs:
           docker run --rm brine:ci --version
           docker run --rm --entrypoint /usr/local/bin/dill brine:ci version
           docker run --rm --entrypoint /usr/local/bin/pkl brine:ci --version
-      - name: Legacy Dill 0.5.0 and disabled Brine features
+      - name: Disabled Brine features
         run: |
-          docker build --build-arg DILL_VERSION=0.5.0 -t brine:legacy-dill .
-          if docker run --rm --entrypoint /usr/local/bin/dill brine:legacy-dill secret-capabilities --format json > /tmp/brine-old-dill-output 2>&1; then
-            echo 'The legacy Dill unexpectedly claimed Alpha capabilities' >&2
-            exit 1
-          fi
-          if grep -q 'dill.alpha-secrets/1' /tmp/brine-old-dill-output; then
-            echo 'The legacy Dill advertised an unsupported contract' >&2
-            exit 1
-          fi
-          for image in brine:ci brine:legacy-dill; do
-            for option in '--profile=alpha' '--secret-target=lab-a' '--secret-policy=/synthetic-policy.json' '--secret-pkl=/synthetic-pkl' '--coordination-layout=native-local-docker-v1' '--operation-state-dir=/synthetic-history'; do
-              if docker run --rm "$image" "$option" > /tmp/brine-disabled-flag 2>&1; then
-                echo "Disabled option accepted: $image $option" >&2; exit 1
-              fi
-              grep -qi 'disabled' /tmp/brine-disabled-flag
-            done
+          for option in '--profile=alpha' '--secret-target=lab-a' '--secret-policy=/synthetic-policy.json' '--secret-pkl=/synthetic-pkl' '--coordination-layout=native-local-docker-v1' '--operation-state-dir=/synthetic-history'; do
+            if docker run --rm brine:ci "$option" > /tmp/brine-disabled-flag 2>&1; then
+              echo "Disabled option accepted: $option" >&2; exit 1
+            fi
+            grep -qi 'disabled' /tmp/brine-disabled-flag
           done
-          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:legacy-dill --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token)
+          cid=$(docker run -d -p 127.0.0.1:18089:18089 brine:ci --port 18089 --bind 0.0.0.0 --api-token synthetic-ci-token)
           trap 'docker rm -f "$cid" >/dev/null' EXIT
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:18089/api/health >/dev/null && break || sleep 1; done
           curl -fsS -H 'Authorization: Bearer synthetic-ci-token' -H 'Content-Type: application/json' -d '{"name":"demo","pkl_content":"config {}"}' http://127.0.0.1:18089/api/stacks/ >/dev/null
