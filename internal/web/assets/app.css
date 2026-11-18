@@ -149,8 +149,11 @@
 .nav-item svg { width: var(--icon-size); height: var(--icon-size); stroke-width: var(--icon-stroke); flex: none; }
 .app-header { position: sticky; top: 0; z-index: var(--layer-header); min-height: var(--header-height); background: var(--color-panel); border-color: var(--color-line); gap: var(--space-3); }
 .app-main { min-width: 0; padding: var(--space-8) var(--content-padding); }
-.runtime-pill { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--status-info); font-size: var(--font-size-xs); white-space: nowrap; }
-.runtime-pill svg { width: var(--status-icon-size); height: var(--status-icon-size); }
+.app-header > div:last-child { flex-wrap: wrap; min-width: 0; }
+.runtime-details { max-width: 100%; min-width: 0; color: var(--status-info); font-size: var(--font-size-xs); }
+.runtime-summary { cursor: pointer; overflow-wrap: anywhere; }
+.runtime-summary > span + span { margin-left: var(--space-1); }
+.runtime-details-body { margin-top: var(--space-2); overflow-wrap: anywhere; color: var(--color-muted); }
 .runtime-label { color: var(--color-dim); }
 .field-label { font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: var(--tracking-label); color: var(--color-dim); font-weight: var(--font-weight-medium); }
 

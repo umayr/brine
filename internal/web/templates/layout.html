@@ -67,13 +67,18 @@
     <header class="app-header bg-panel border-b border-line px-6 py-3.5 flex items-center justify-between shrink-0">
       <div class="text-sm text-muted">{{block "header" .}}Brine{{end}}</div>
       <div class="flex items-center gap-2">
-        <div class="runtime-pill" title="{{.Target.Status}}">
-          <i data-lucide="info" class="w-3.5 h-3.5 text-info" aria-hidden="true"></i>
-          <span class="runtime-label">ENGINE</span>
-          <span class="font-mono font-semibold text-foreground">{{.RuntimeEngine}}</span>
-          <span class="font-mono text-xs">{{.Target.Socket}}</span>
-          <span class="text-xs">{{.Target.Profile}} · configured only</span>
-        </div>
+        <details class="runtime-details">
+          <summary class="runtime-summary">
+            <span class="runtime-label">ENGINE</span>
+            <span class="font-mono font-semibold text-foreground">{{.RuntimeEngine}}</span>
+            <span>· configured only</span>
+          </summary>
+          <div class="runtime-details-body">
+            <div>Socket: <span class="font-mono">{{.Target.Socket}}</span></div>
+            <div>Profile: {{.Target.Profile}}</div>
+            {{if .Target.Status}}<div>{{.Target.Status}}</div>{{end}}
+          </div>
+        </details>
         {{block "header-actions" .}}{{end}}
         {{if .AuthEnabled}}
         <form method="post" action="/logout" class="inline-flex">
