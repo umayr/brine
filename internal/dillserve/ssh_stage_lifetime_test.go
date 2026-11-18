@@ -67,6 +67,14 @@ func TestSSHStageTunnelLoss(t *testing.T) {
 			case <-time.After(time.Second):
 				t.Fatal("stage blocked")
 			}
+			// The interrupted request can return before the background waiter
+			// observes an externally exited process. Wait for that state before
+			// asserting that a new request is refused without submission.
+			select {
+			case <-tunnel.done:
+			case <-time.After(time.Second):
+				t.Fatal("tunnel exit not observed")
+			}
 			if _, e = tunnel.Stage(context.Background(), []byte("body")); !errors.Is(e, ErrUnavailable) {
 				t.Fatalf("closed tunnel: %v", e)
 			}
