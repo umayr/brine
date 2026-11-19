@@ -58,7 +58,11 @@ func (h *imageHandler) pull(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-	fmt.Fprintf(w, "event: done\ndata: pull complete\n\n")
+	if scanner.Err() != nil {
+		fmt.Fprint(w, "event: stream-error\ndata: Image pull progress stream failed; check the local container engine for the pull outcome.\n\n")
+	} else {
+		fmt.Fprint(w, "event: done\ndata: pull complete\n\n")
+	}
 	if canFlush {
 		flusher.Flush()
 	}
