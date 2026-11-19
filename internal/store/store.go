@@ -8,6 +8,9 @@ import (
 // ErrReadOnly indicates that a Git-backed stack cannot be edited.
 var ErrReadOnly = errors.New("stack is read-only")
 
+// ErrStackNotFound indicates no registration was found for the requested stack.
+var ErrStackNotFound = errors.New("not found")
+
 // GitSource describes a remote Git repository that backs a stack.
 type GitSource struct {
 	URL          string     `json:"url"`                    // remote clone URL
@@ -43,7 +46,7 @@ type StackStore interface {
 	// List returns all registered stacks.
 	List() ([]*Stack, error)
 
-	// Get returns a single stack by name.
+	// Get returns a single stack by name. An absent stack returns ErrStackNotFound or wraps it.
 	Get(name string) (*Stack, error)
 
 	// Create registers a new stack and writes its .pkl content to disk.
