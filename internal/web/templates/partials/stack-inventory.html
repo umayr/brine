@@ -1,9 +1,9 @@
-<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1>Stacks</h1></div><span class="index-count">{{len .}} TOTAL</span></div>
+<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1{{if .}} id="stack-inventory-heading"{{end}}>Stacks</h1></div><span class="index-count">{{len .}} TOTAL</span></div>
 <div class="index-table">
   {{if .}}
   <p class="stack-table-hint">Scroll horizontally to see all columns and actions.</p>
   <div id="stack-inventory-table" class="stack-table-scroll" role="region" aria-label="Stacks table, scroll horizontally for all columns and actions" tabindex="0">
-    <table class="ui-table">
+    <table class="ui-table" aria-labelledby="stack-inventory-heading">
       <thead>
         <tr class="text-muted">
           <th>Name</th>

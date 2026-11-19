@@ -1,6 +1,14 @@
 const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('the native stack inventory table is named independently of its scroll region', async ({ page }) => {
+  await page.goto(new URL('/stacks', baseURL).href);
+  const region = page.getByRole('region', { name: 'Stacks table, scroll horizontally for all columns and actions' });
+  const table = region.getByRole('table');
+  await expect(table.getByRole('link', { name: 'homepage', exact: true })).toBeVisible();
+  await expect(table).toHaveAccessibleName('Stacks');
+});
+
 test('mobile stack table reveals its actions with keyboard scrolling', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(new URL('/stacks', baseURL).href);
