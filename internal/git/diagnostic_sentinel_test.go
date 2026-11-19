@@ -46,6 +46,7 @@ func TestDiagnosticSentinelGitFailurePersistedAndLogged(t *testing.T) {
 	calls := filepath.Join(dir, "calls")
 	script := fmt.Sprintf(`#!/bin/sh
 while [ "$1" = '-c' ]; do shift 2; done
+if [ "$1" = --git-dir=.git ]; then shift; fi
 printf '%%s\n' "$1" >> %q
 case "$1" in
  status) exit 0;;

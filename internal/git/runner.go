@@ -91,9 +91,10 @@ func (r *Runner) HeadRef(ctx context.Context, repoDir string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-// ShortRef returns the short SHA of the current HEAD commit.
+// ShortRef returns the abbreviated HEAD commit of the workspace repository.
 func (r *Runner) ShortRef(ctx context.Context, repoDir string) (string, error) {
-	out, err := r.output(ctx, repoDir, "rev-parse", "--short", "HEAD")
+	// Do not let Git discover an enclosing repository if workspace metadata is missing.
+	out, err := r.output(ctx, repoDir, "--git-dir=.git", "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return "", err
 	}
