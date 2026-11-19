@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,13 +50,27 @@ type stackResponse struct {
 	PklContent string `json:"pkl_content,omitempty"`
 }
 
+// stackReadMetadata reports the effective entrypoint without changing stored metadata.
+func stackReadMetadata(stack *store.Stack) *store.Stack {
+	if stack == nil || stack.Entrypoint != "" {
+		return stack
+	}
+	metadata := *stack
+	metadata.Entrypoint = stack.EffectiveEntrypoint()
+	return &metadata
+}
+
 func (h *stackHandler) list(w http.ResponseWriter, r *http.Request) {
 	stacks, err := h.store.List()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, stacks)
+	metadata := slices.Clone(stacks)
+	for i, stack := range stacks {
+		metadata[i] = stackReadMetadata(stack)
+	}
+	writeJSON(w, http.StatusOK, metadata)
 }
 
 func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +86,7 @@ func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "unable to read stack configuration")
 		return
 	}
-	writeJSON(w, http.StatusOK, stackResponse{Stack: stack, PklContent: pkl})
+	writeJSON(w, http.StatusOK, stackResponse{Stack: stackReadMetadata(stack), PklContent: pkl})
 }
 
 type createRequest struct {
