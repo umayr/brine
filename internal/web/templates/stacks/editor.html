@@ -261,6 +261,12 @@ window.addEventListener('beforeunload', (event) => {
 editorForm.addEventListener('htmx:beforeRequest', (event) => {
   if (event.target === editorForm) submittedContent = editorTextarea.value;
 });
+editorForm.addEventListener('htmx:sendError', (event) => {
+  if (event.target !== editorForm) return;
+  const result = document.getElementById('edit-result');
+  delete result.dataset.diagnostic;
+  result.textContent = 'Save outcome not confirmed. Your draft is still in the editor.';
+});
 editorForm.addEventListener('htmx:beforeOnLoad', (event) => {
   if (event.target === editorForm && event.detail.xhr.status >= 200 && event.detail.xhr.status < 300 && event.detail.xhr.getResponseHeader('HX-Redirect')) {
     savedContent = submittedContent;

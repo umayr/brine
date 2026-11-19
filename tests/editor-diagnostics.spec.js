@@ -83,3 +83,34 @@ test('save preserves newer edits and serializes editor operations', async ({ pag
   await expect.poll(() => saves).toBe(2);
   await expect(page).toHaveURL(/\/stacks\/observability$/);
 });
+
+test('a disconnected save announces an unconfirmed outcome and keeps the focused draft', async ({ page }) => {
+  const url = new URL('/stacks/observability/edit', process.env.BRINE_FIXTURE_BASE_URL);
+  const file = 'modules/settings & local.pkl';
+  url.searchParams.set('file', file);
+  await page.goto(url.href);
+  const editor = page.locator('.cm-content');
+  await editor.focus();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' + 1');
+  const draft = await page.locator('#pkl-editor').inputValue();
+  await expect(page.locator('#editor-dirty')).toBeVisible();
+
+  const saves = [];
+  await page.route('**/web/stacks/observability', route => {
+    const request = route.request();
+    if (request.method() !== 'PUT') return route.continue();
+    saves.push(new URLSearchParams(request.postData()));
+    return route.abort('failed');
+  });
+  await page.keyboard.press('Control+s');
+  await expect.poll(() => saves.length).toBe(1);
+  await expect(page.locator('#edit-result[role="status"]')).toHaveText('Save outcome not confirmed. Your draft is still in the editor.');
+  expect(saves[0].get('active_file')).toBe(file);
+  expect(saves[0].get('pkl_content')).toBe(draft);
+  expect(saves).toHaveLength(1);
+  await expect(page).toHaveURL(url.href);
+  await expect(editor).toBeFocused();
+  await expect(page.locator('#pkl-editor')).toHaveValue(draft);
+  await expect(page.locator('#editor-dirty')).toBeVisible();
+});
