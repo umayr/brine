@@ -15,7 +15,7 @@ type recipeHandler struct {
 func (h *recipeHandler) list(w http.ResponseWriter, r *http.Request) {
 	recipes, err := h.store.List()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Recipe list unavailable; check local recipe storage")
 		return
 	}
 	writeJSON(w, http.StatusOK, recipes)
