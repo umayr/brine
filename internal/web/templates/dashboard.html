@@ -31,11 +31,11 @@
 
   <div class="overview-sections">
     <section class="overview-section">
-      <div class="overview-section-header"><h2>Stacks</h2><a href="/stacks" class="overview-link" aria-label="View all stacks">View all <span aria-hidden="true">→</span></a></div>
+      <div class="overview-section-header"><h2 id="dashboard-stacks-heading">Stacks</h2><a href="/stacks" class="overview-link" aria-label="View all stacks">View all <span aria-hidden="true">→</span></a></div>
       {{if .StacksUnavailable}}
       <div class="overview-empty"><div><h3>Stacks unavailable</h3><p>Could not load stack data.</p></div></div>
       {{else if .Stacks}}
-      <div class="overflow-x-auto"><table class="ui-table ui-table-sm">
+      <div class="overflow-x-auto"><table class="ui-table ui-table-sm" aria-labelledby="dashboard-stacks-heading">
         <thead><tr><th>Name</th><th>Updated</th><th></th></tr></thead><tbody>
         {{range .Stacks}}<tr>
           <td><a href="/stacks/{{.Name}}" class="underline-offset-2 hover:underline font-mono font-medium">{{.Name}}</a> {{if .Git}}<span class="ui-status ui-status-neutral ui-status-xs">git</span>{{end}}</td>
