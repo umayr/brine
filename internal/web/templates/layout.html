@@ -135,6 +135,17 @@
   document.addEventListener('DOMContentLoaded', () => lucide.createIcons());
   document.addEventListener('htmx:afterSettle',  () => lucide.createIcons());
 
+  document.addEventListener('DOMContentLoaded', () => {
+    // Reveal the active link in the narrow navigation strip without moving focus.
+    const nav = document.querySelector('.app-sidebar nav');
+    const current = nav.querySelector('[aria-current="page"]');
+    if (!current || nav.scrollWidth <= nav.clientWidth) return;
+    const bar = nav.getBoundingClientRect();
+    const link = current.getBoundingClientRect();
+    if (link.left < bar.left) nav.scrollLeft += link.left - bar.left;
+    else if (link.right > bar.right) nav.scrollLeft += link.right - bar.right;
+  });
+
   // Attach the CSRF token to every HTMX request and expose a helper for fetch().
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
