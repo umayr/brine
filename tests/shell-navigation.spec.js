@@ -5,11 +5,17 @@ test.skip(!base, 'Read-only fixture required');
 test('mobile Settings is discoverable through a named navigation landmark', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(base + '/settings');
-  const settings = page.getByRole('link', { name: 'Settings', exact: true });
+  const landmark = page.getByRole('navigation', { name: 'Settings', exact: true });
+  const settings = landmark.getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toBeVisible();
   await expect(settings).toHaveAttribute('aria-current', 'page');
-  const landmark = page.getByRole('navigation', { name: 'Settings', exact: true });
-  await expect(landmark.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute('href', '/settings');
+  await expect(settings).toHaveAttribute('href', '/settings');
+  const nav = page.getByRole('navigation', { name: 'Main navigation', exact: true });
+  await nav.getByRole('link', { name: 'Snippets', exact: true }).focus();
+  await page.keyboard.press('Tab');
+  await expect(settings).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.locator('header .runtime-summary')).toBeFocused();
 });
 
 test('mobile navigation shows the current section on arrival without moving focus', async ({ page }) => {
