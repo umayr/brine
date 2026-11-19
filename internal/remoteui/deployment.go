@@ -50,6 +50,8 @@ type deploymentReview struct {
 	Expiry                                                           time.Time
 }
 
+const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect."
+
 type deploymentPage struct {
 	CSRF, Host, Stack, ID, Error string
 	Review                       *projectreview.Preview
@@ -187,7 +189,12 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		if releaseRecord != nil {
 			_ = releaseRecord.Close()
 		}
-		http.Error(w, "Paired HTTPS target unavailable", 409)
+		if r.Method == http.MethodGet {
+			p.Error = deploymentStatusUnavailable
+			h.renderStatus(w, p, http.StatusConflict)
+		} else {
+			http.Error(w, "Paired HTTPS target unavailable", http.StatusConflict)
+		}
 		return
 	}
 	defer releaseRecord.Close()
@@ -202,7 +209,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if err != nil {
-			p.Error = "No outcome verified for this request. Unavailable is not proof that no change occurred."
+			p.Error = deploymentStatusUnavailable
 		}
 		h.render(w, p)
 		return
@@ -406,7 +413,12 @@ func (h *Deployment) take(id, session, confirm string) (deploymentReview, bool) 
 }
 
 func (h *Deployment) render(w http.ResponseWriter, p deploymentPage) {
+	h.renderStatus(w, p, http.StatusOK)
+}
+
+func (h *Deployment) renderStatus(w http.ResponseWriter, p deploymentPage, status int) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	_ = deploymentView.Execute(w, p)
 }
 
@@ -414,9 +426,12 @@ func IsDeploymentPath(path string) bool {
 	return path == deployPath || strings.HasPrefix(path, deployPath+"/")
 }
 
-var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Remote deployment</title><main><h1>Remote deployment</h1><p><a href="/remote">Remote hosts</a></p>
+var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Remote deployment</title><main><h1>Remote deployment</h1><p><a href="/remote">Remote hosts</a></p>
 {{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .JournalCapacityLow}}<p role="alert">Dill's journal is nearing its size limit. Preserve the journal; do not delete it to make room.</p>{{end}}<p>Target: <bdi>{{.Host}}</bdi></p>
-{{if .Status}}<p>Stack {{.Status.Stack}} · State {{.Status.State}} · Effects {{.Status.Effects}}{{if .Status.OperationID}} · Dill operation <code>{{.Status.OperationID}}</code>{{end}}</p>{{end}}
+{{if and .ID (not .Review)}}<p><label for="deployment-request-id">Request ID</label><br><input type="text" id="deployment-request-id" value="{{.ID}}" readonly size="34" style="max-width:100%;box-sizing:border-box" aria-describedby="deployment-request-help"></p>
+<p id="deployment-request-help">Select and copy the full request ID, or save the status link to return after a disconnect.</p>
+<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">{{if .Plan}}Open status link{{else}}Refresh status{{end}}</a> · Checks this request without resubmitting it.</p>{{end}}
+{{if .Status}}<p>Stack {{.Status.Stack}} · State {{.Status.State}} · Effects {{.Status.Effects}}{{if .Status.OperationID}} · Dill operation <code>{{.Status.OperationID}}</code>{{end}}</p>{{if eq .Status.State "unknown"}}<p role="alert">Outcome unknown. Dill recorded this request but could not determine its outcome. Inspect the target before taking further action; do not retry based on this result.</p>{{end}}{{end}}
 {{if .Review}}<h2>Review captured files</h2><p>Only transfer trusted projects. Staging may contain credentials; the configured target can evaluate Pkl with the agent account’s privileges. This is not a sandbox. Effective Brine variables are not transferred. No files have been sent yet.</p><p>Entrypoint: <code>{{.Review.Entrypoint}}</code></p><ul>{{range .Review.Files}}<li>{{.Path}} · {{.Size}} bytes · <code>{{printf "%x" .SHA256}}</code></li>{{end}}</ul>
 <form method="post" action="/remote/deployment/stage"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="id" value="{{.Review.ID}}"><label><input type="checkbox" name="confirm" value="transfer" required> Send these exact files and request a preview</label><button>Stage and preview</button></form>
 {{else if .Plan}}<h2>Deployment preview for {{.Stack}}</h2><ul>{{range .Plan.Resources}}<li>{{.Kind}} {{.Name}} · {{.Presence}} · {{.Action}}{{if .Retention}} · {{.Retention}}{{end}}</li>{{end}}</ul>
@@ -430,4 +445,4 @@ var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype h
 {{else if not .ID}}<form method="post" action="/remote/deployment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Brine project name <input name="stack" required value="{{.Stack}}"></label><button>Review project files</button></form>
 <form method="post" action="/remote/deployment/remove-preview"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Managed stack name <input name="stack" required value="{{.Stack}}"></label><button>Preview removal</button></form>
 {{if .GitSettings}}<form method="post" action="/remote/deployment/git"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Git-backed Brine project <input name="stack" required></label><button>Remote auto-deploy settings</button></form>{{end}}{{end}}
-{{if .ID}}{{if not .Review}}<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">Look up operation request <code>{{.ID}}</code></a></p>{{end}}{{end}}</main></html>`))
+</main></html>`))
