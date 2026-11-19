@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/errdefs"
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
@@ -220,7 +221,7 @@ func (*fixtureEngine) InspectContainer(_ context.Context, id string) (*engine.Co
 			return &c, nil
 		}
 	}
-	return nil, fmt.Errorf("fixture container not found")
+	return nil, errdefs.NotFound(fmt.Errorf("fixture container not found"))
 }
 func (*fixtureEngine) ListImages(context.Context) ([]engine.ImageInfo, error) {
 	created := time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)
