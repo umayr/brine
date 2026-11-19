@@ -2,6 +2,16 @@ const { test, expect } = require('@playwright/test');
 const base = process.env.BRINE_FIXTURE_BASE_URL;
 test.skip(!base, 'Read-only fixture required');
 
+test('mobile Settings is discoverable through a named navigation landmark', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 850 });
+  await page.goto(base + '/settings');
+  const settings = page.getByRole('link', { name: 'Settings', exact: true });
+  await expect(settings).toBeVisible();
+  await expect(settings).toHaveAttribute('aria-current', 'page');
+  const landmark = page.getByRole('navigation', { name: 'Settings', exact: true });
+  await expect(landmark.getByRole('link', { name: 'Settings', exact: true })).toHaveAttribute('href', '/settings');
+});
+
 test('mobile navigation shows the current section on arrival without moving focus', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(base + '/recipes');

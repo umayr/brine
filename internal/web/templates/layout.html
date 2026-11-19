@@ -54,7 +54,7 @@
       {{if .RemoteEnabled}}<a href="/remote" class="nav-item">Remote hosts</a>{{end}}
     </nav>
 
-    <div class="sidebar-settings px-3 py-3 border-t border-line">
+    <div class="sidebar-settings px-3 py-3 border-t border-line" role="navigation" aria-label="Settings">
       <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" aria-label="Settings" title="Settings" {{if eq .Page "settings"}}aria-current="page"{{end}}>
         <i data-lucide="settings" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
         <span class="nav-label">Settings</span>
