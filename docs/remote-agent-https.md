@@ -1,6 +1,6 @@
 # Direct remote deployment over HTTPS
 
-A paired target is read-only by default. Run one Dill agent per target and follow [the Dill HTTPS agent guide](https://github.com/umayr/dill/blob/main/docs/host-agent-https.md) for credentials and host-local enablement. Brine does not need SSH to pair or deploy. Use a literal private IP and port. Brine pins the leaf certificate and checks its validity period before sending the bearer token. Verify the pairing bundle out of band; it is a reusable secret. Forgetting a target does not revoke its token.
+A paired target is read-only by default. Install [Dill v0.8.0](https://github.com/umayr/dill/releases/tag/v0.8.0) on each target and run one `dill agent` service per target. Updating Brine's bundled binary does not upgrade the remote agents. Follow [the Dill HTTPS agent guide](https://github.com/umayr/dill/blob/v0.8.0/docs/host-agent-https.md) for credentials and host-local enablement. Brine does not need SSH to pair or deploy. Use a literal private IP and port. Brine pins the leaf certificate and checks its validity period before sending the bearer token. Verify the pairing bundle out of band; it is a reusable secret. Forgetting a target does not revoke its token.
 
 ## Manual deployment and removal
 

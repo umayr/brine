@@ -4,8 +4,8 @@
 >
 > **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
-Brine now bundles released Dill v0.7.0, which advertises the Alpha file-secret
-contract. Dill v0.5.0 remains an incompatible legacy baseline. The reference
+During the historical qualification, Brine bundled released Dill v0.7.0, which
+advertised the Alpha file-secret contract. Dill v0.5.0 remains an incompatible legacy baseline. The reference
 editor, review and confirmation paths have bounded paired Docker/rootless-Podman
 evidence; full Brine HTTP/browser canary and restart/recovery qualification remain
 pending. Capability discovery checks interface compatibility, not target readiness.

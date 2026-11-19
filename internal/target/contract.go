@@ -13,7 +13,7 @@ const (
 	Alpha  = "alpha"
 )
 
-var ErrNegotiationUnavailable = errors.New("Alpha mutations unavailable: released Dill v0.7.0 has no target/ownership execution contract; pinned stack stop/down cleanup remains available")
+var ErrNegotiationUnavailable = errors.New("Alpha mutations unavailable: local target and ownership were not qualified")
 
 // ValidateProfile deliberately preserves ambient/default compatibility only in legacy.
 func ValidateProfile(profile, engine, socket string) error {

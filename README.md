@@ -73,7 +73,7 @@ directory; cross-process variable writes are not coordinated.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.7.0) on `PATH`, or pass `--dill /path/to/dill`.
+- A `dill` binary (v0.8.0) on `PATH`, or pass `--dill /path/to/dill`.
   Older binaries that cannot accept explicit stack/engine/socket flags are
   rejected for lifecycle and validation; Brine does not retry against defaults.
 - Alpha file-secret mode is disabled. Its historical
@@ -104,7 +104,7 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
-The image bundles Brine, Dill (v0.7.0), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.8.0), and Pkl (0.31.1):
 
 ```sh
 docker build -t brine .
@@ -130,7 +130,7 @@ docker run -d --name brine \
   brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.7.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.8.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
@@ -205,7 +205,7 @@ local processes and non-browser clients can still control it.
 | `--engine` | | `docker` | `docker` or `podman` |
 | `--profile` | | `legacy` | Only `legacy` is supported; `alpha` is rejected. See the historical [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
-| `--dill` | | `dill` | Operator-selected Dill binary; bundled v0.7.0 is incompatible with qualified operations |
+| `--dill` | | `dill` | Operator-selected Dill binary for local execution |
 | `--staging-socket` | | unset | Opt-in absolute local dill-serve Unix socket; requires `--staging-identity` and authentication |
 | `--staging-identity` | | unset | Stable operator-asserted local staging target identifier; not receiver attestation |
 | `--remote-enabled` | | `false` | Opt in to authenticated remote UI; deployment requires explicit host opt-in |
@@ -285,8 +285,8 @@ exact Dill candidate `b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2`, selected explic
 with `--dill`. Set all three coordination flags together only after independent
 native Linux Docker host/state provisioning. Authenticated manual stack
 up/start/restart/stop/down use the negotiated CLI contract without fallback; plan
-and saved-source validation are read-only. The bundled Dill v0.7.0 is unchanged
-and incompatible. Teardown, rm, secrets, stdin, direct SDK writes, qualified stack
+and saved-source validation are read-only. Updating the bundled Dill does not
+enable or qualify local Alpha. Teardown, rm, secrets, stdin, direct SDK writes, qualified stack
 deletion and **all Alpha background Git pull/auto-deploy remain disabled**.
 Current-action receipts preserve process failure separately from outcome/effects;
 there is no durable history or auto-acknowledgement. **Actual native app/browser

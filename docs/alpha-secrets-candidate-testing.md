@@ -4,8 +4,8 @@
 >
 > **Current CLI:** Normal server startup rejects `--profile alpha` and explicitly supplied `--coordination-*`, `--operation-state-dir`, and `--secret-*` options, including empty values. Examples and operational claims below describe the historical contract, not currently available behavior.
 
-Brine now bundles released Dill v0.7.0; v0.5.0 remains an incompatible negative
-test baseline. The release commit `0554f6d73cb924b06a47f3a495bcad39a9dcb08c`
+During the historical qualification, Brine bundled released Dill v0.7.0;
+v0.5.0 was the incompatible negative test baseline. The release commit `0554f6d73cb924b06a47f3a495bcad39a9dcb08c`
 has the same tracked tree as the pinned candidate below. See the
 [updated qualification status](alpha-secrets-status.md) for passing paired run
 43361791813, tested commit/tree identities, platform limits and remaining gaps.
