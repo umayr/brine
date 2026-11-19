@@ -34,6 +34,16 @@ test('the populated stack Containers table is named from its heading', async ({ 
   await expect(table).toHaveAccessibleName('Containers');
 });
 
+for (const [action, target] of [['Stop', 'fixture-web'], ['Start', 'fixture-worker']]) {
+  test(`the stack Containers ${action} button describes its target`, async ({ page }) => {
+    await page.goto(new URL('/stacks/homepage', baseURL).href);
+    const table = page.locator('#stack-containers').getByRole('table', { name: 'Containers', exact: true });
+    const button = table.getByRole('button', { name: action, exact: true });
+    await expect(button).toBeVisible();
+    await expect(button).toHaveAccessibleDescription(target);
+  });
+}
+
 test('unavailable stack inventory has bounded keyboard retry and can recover to confirmed empty', async ({ page }) => {
   let requests = 0;
   let release;

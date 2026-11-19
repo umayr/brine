@@ -81,7 +81,7 @@ func main() {
 	stub := filepath.Join(dir, "fixture-dill")
 	if err := os.WriteFile(stub, []byte(`#!/bin/sh
 [ "$4" = homepage ] && [ "${9}" = ps ] || exit 1
-printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"}]'
+printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id":"fixture-worker","name":"fixture-worker","state":"exited"}]'
 `), 0700); err != nil {
 		log.Fatal(err)
 	}
