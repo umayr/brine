@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +12,25 @@ import (
 
 	"github.com/umayr/brine/internal/config"
 )
+
+func TestOperationStateDirOptionRemainsDisabled(t *testing.T) {
+	for _, tc := range []struct{ name, value string }{
+		{"explicit empty", ""},
+		{"nonempty", filepath.Join(t.TempDir(), "history")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldFlags, oldArgs := flag.CommandLine, os.Args
+			t.Cleanup(func() { flag.CommandLine, os.Args = oldFlags, oldArgs })
+			flag.CommandLine = flag.NewFlagSet("brine", flag.ContinueOnError)
+			// An invalid bind prevents engine initialization even if the guard disappears.
+			os.Args = []string{"brine", "--bind=invalid", "--operation-state-dir=" + tc.value}
+			const want = "Alpha and strict secret options are disabled"
+			if err := run(); err == nil || err.Error() != want {
+				t.Fatalf("run() = %v, want %q", err, want)
+			}
+		})
+	}
+}
 
 func TestGeneratedCredentialsNotLogged(t *testing.T) {
 	var output bytes.Buffer

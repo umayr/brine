@@ -18,7 +18,6 @@ import (
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/git"
-	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/server"
 	"github.com/umayr/brine/internal/store"
@@ -131,16 +130,6 @@ func run() error {
 	}
 	log.Printf("warning: container engine socket access can grant host-level privileges; use an isolated target")
 
-	var history *operationhistory.Store
-	if cfg.OperationStateDir != "" {
-		var err error
-		history, err = operationhistory.Open(cfg.OperationStateDir, cfg.DataDir, cfg.CoordinationStateDir)
-		if err != nil {
-			return fmt.Errorf("operation history unavailable; inspect private state")
-		}
-		defer history.Close()
-	}
-
 	authn, err := buildAuth(cfg)
 	if err != nil {
 		return err
@@ -186,7 +175,6 @@ func run() error {
 		return fmt.Errorf("init configuration variables: %w", err)
 	}
 	runner.Variables = variableStore
-	runner.RequireOperationObserver = history != nil
 	if cfg.QualifiedOperations() {
 		runner.QualifiedOperation = &dill.QualifiedOperationConfig{StateDir: cfg.CoordinationStateDir, Layout: cfg.CoordinationLayout, DaemonID: cfg.CoordinationDaemonID}
 	}
@@ -220,7 +208,7 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := server.New(cfg, ag, st, rs, gr, authn, history)
+	srv := server.New(cfg, ag, st, rs, gr, authn)
 	return srv.Run(ctx)
 }
 
