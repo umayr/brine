@@ -80,7 +80,7 @@ func (h *containerHandler) logs(w http.ResponseWriter, r *http.Request) {
 
 	rc, err := h.agent.Engine().ContainerLogs(r.Context(), id, follow, tail)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Container logs unavailable; check the container and local engine, then retry")
 		return
 	}
 	defer rc.Close()
