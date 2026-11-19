@@ -1,6 +1,15 @@
 const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('the populated Containers inventory table is named from its heading', async ({ page }) => {
+  await page.goto(new URL('/containers', baseURL).href);
+  await expect(page.getByRole('heading', { name: 'Containers', exact: true })).toBeVisible();
+  const region = page.getByRole('region', { name: 'Containers table, scroll horizontally for all columns and actions' });
+  const table = region.getByRole('table');
+  await expect(table.getByRole('link', { name: 'grafana', exact: true })).toBeVisible();
+  await expect(table).toHaveAccessibleName('Containers');
+});
+
 test('local container Logs links identify their targets by accessible name', async ({ page }) => {
   await page.goto(new URL('/containers', baseURL).href);
   const list = page.locator('#containers-body');

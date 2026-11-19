@@ -5,7 +5,7 @@
 
 {{define "content"}}
 <div class="index-page">
-  <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1>Containers</h1><p class="text-muted text-sm mt-2">Containers available to the configured container engine. Refreshes every 5 seconds.</p></div></div>
+  <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1 id="containers-heading">Containers</h1><p class="text-muted text-sm mt-2">Containers available to the configured container engine. Refreshes every 5 seconds.</p></div></div>
   <div id="container-action-uncertain" class="ui-notice ui-notice-warning mb-4" role="alert" hidden>
     <div>A container action could not be confirmed. Inventory may be stale; inspect the container before retrying.
       <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Refresh containers</button>
@@ -13,7 +13,7 @@
   </div>
   <p class="container-table-hint">Scroll horizontally to see all columns and actions.</p>
   <div class="index-table overflow-x-auto container-table-scroll" role="region" aria-label="Containers table, scroll horizontally for all columns and actions" tabindex="0">
-    <table class="ui-table container-table">
+    <table class="ui-table container-table" aria-labelledby="containers-heading">
       <thead>
         <tr>
           <th>Name</th>
