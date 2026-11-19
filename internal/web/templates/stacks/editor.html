@@ -31,7 +31,7 @@
       <!-- Tab strip -->
       <div class="flex items-center bg-canvas/60 border-b border-line px-2 pt-2 gap-1 overflow-x-auto">
         {{range .Files}}
-        <a href="/stacks/{{$.Stack.Name}}/edit?file={{.}}" {{if eq . $.ActiveFile}}aria-current="page"{{end}}
+        <a href="/stacks/{{$.Stack.Name}}/edit?file={{. | urlquery}}" {{if eq . $.ActiveFile}}aria-current="page"{{end}}
           class="px-3 py-1.5 text-xs font-mono rounded-t-md whitespace-nowrap transition-colors
             {{if eq . $.ActiveFile}}
               bg-panel text-foreground font-semibold border border-b-panel border-line
@@ -49,6 +49,8 @@
         ><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
       </div>
 
+      {{if .NestedListWarning}}<p class="ui-notice ui-notice-warning text-sm">Nested module list unavailable; root files remain available.</p>{{end}}
+      {{if .NestedFile}}<p class="ui-notice ui-notice-warning text-sm">Save this module, then validate the saved entrypoint on the stack detail page. Draft validation and formatting are unavailable for nested modules.</p>{{end}}
       <!-- Editor form -->
       <form
         id="editor-form"
@@ -80,17 +82,19 @@
             hx-target="#edit-result"
             hx-swap="innerHTML"
             hx-include="[name=pkl_content],[name=active_file]"
-            {{if .QualifiedOperations}}disabled title="stdin validation unsupported; save and validate the saved entrypoint"{{end}}
+            {{if or .QualifiedOperations .NestedFile}}disabled title="save and validate the saved entrypoint"{{end}}
           >Validate</button>
           <button type="button" id="fmt-btn" class="ui-button ui-button-ghost ui-button-sm"
             hx-post="/web/stacks/{{.Stack.Name}}/fmt"
             hx-swap="none"
             hx-include="[name=pkl_content],[name=active_file]"
-            {{if .QualifiedOperations}}disabled title="stdin formatting unsupported; no legacy fallback"{{end}}
+            {{if or .QualifiedOperations .NestedFile}}disabled title="stdin formatting unsupported"{{end}}
           >Format</button>
 
           <div class="ml-auto flex items-center gap-2">
-            {{if ne .ActiveFile .Stack.Entrypoint}}
+            {{if .NestedFile}}
+            <span class="text-xs text-dim">Nested module</span>
+            {{else if ne .ActiveFile .Stack.Entrypoint}}
             <button type="button" class="ui-button ui-button-ghost ui-button-xs text-error gap-1"
               hx-delete="/web/stacks/{{.Stack.Name}}/files/{{.ActiveFile}}"
               hx-target="#edit-result"
@@ -110,7 +114,7 @@
           </div>
         </div>
 
-        {{if ne .ActiveFile .Stack.Entrypoint}}
+        {{if and (not .NestedFile) (ne .ActiveFile .Stack.Entrypoint)}}
         <div class="flex items-center gap-2 pt-1 border-t border-line">
           <button type="button" class="ui-button ui-button-ghost ui-button-xs gap-1 text-muted"
             hx-post="/web/stacks/{{.Stack.Name}}/entrypoint"
