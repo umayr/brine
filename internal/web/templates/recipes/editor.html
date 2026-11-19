@@ -17,7 +17,8 @@ import { createBrinePklEditor } from '/static/vendor/editor.js';
 document.addEventListener('DOMContentLoaded', () => {
   const ta = document.getElementById('recipe-body');
   if (!ta) return;
-  createBrinePklEditor(ta, { minHeight: 'var(--editor-snippet-min-height)' });
+  const view = createBrinePklEditor(ta, { minHeight: 'var(--editor-snippet-min-height)' });
+  view.contentDOM.setAttribute('aria-describedby', ta.getAttribute('aria-describedby'));
 });
 </script>
 <div class="max-w-3xl mx-auto space-y-5">
@@ -55,12 +56,14 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
 
       <div class="ui-field">
-        <label class="ui-label">
-          <span class="ui-label-text">Pkl body</span>
-          <span class="ui-label-hint text-muted">Fragment to insert into a stack</span>
-        </label>
+        <div class="ui-label">
+          <label for="recipe-body" class="ui-label-text">Pkl body</label>
+          <span id="recipe-body-hint" class="ui-label-hint text-muted">Fragment to insert into a stack</span>
+        </div>
         <textarea
           id="recipe-body"
+          aria-label="Pkl body"
+          aria-describedby="recipe-body-hint"
           name="body"
           class="ui-textarea font-mono text-sm h-72 resize-y"
           placeholder='["web"] {
