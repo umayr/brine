@@ -18,7 +18,7 @@ type containerHandler struct {
 func (h *containerHandler) list(w http.ResponseWriter, r *http.Request) {
 	containers, err := h.agent.Engine().ListContainers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Container inventory unavailable; check the local container engine and retry")
 		return
 	}
 	writeJSON(w, http.StatusOK, containers)
