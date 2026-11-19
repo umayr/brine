@@ -102,7 +102,11 @@ func (h *containerHandler) logs(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-	fmt.Fprintf(w, "event: done\ndata: stream ended\n\n")
+	terminal := "stream ended"
+	if scanner.Err() != nil {
+		terminal = "Log stream incomplete; check the local container engine and retry"
+	}
+	fmt.Fprintf(w, "event: done\ndata: %s\n\n", terminal)
 	if canFlush {
 		flusher.Flush()
 	}
