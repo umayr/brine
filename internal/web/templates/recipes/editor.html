@@ -40,16 +40,16 @@ document.addEventListener('DOMContentLoaded', () => {
             placeholder="Simple Web Service" required />
         </div>
         <div class="ui-field">
-          <label class="ui-label"><span class="ui-label-text">Category</span></label>
-          <input type="text" name="category" class="ui-input "
+          <label class="ui-label" for="recipe-category"><span class="ui-label-text">Category</span></label>
+          <input id="recipe-category" type="text" name="category" class="ui-input "
             value="{{if .Recipe}}{{.Recipe.Category}}{{end}}"
             placeholder="Web, Database, Patterns..." />
         </div>
       </div>
 
       <div class="ui-field">
-        <label class="ui-label"><span class="ui-label-text">Description</span></label>
-        <input type="text" name="description" class="ui-input "
+        <label class="ui-label" for="recipe-description"><span class="ui-label-text">Description</span></label>
+        <input id="recipe-description" type="text" name="description" class="ui-input "
           value="{{if .Recipe}}{{.Recipe.Description}}{{end}}"
           placeholder="Short description of what this snippet does" />
       </div>

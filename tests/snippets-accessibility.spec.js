@@ -12,6 +12,23 @@ for (const [path, value] of [['/recipes/new', ''], ['/recipes/simple-web-service
   });
 }
 
+for (const { label, saved } of [
+  { label: 'Category', saved: 'Web' },
+  { label: 'Description', saved: 'Single HTTP service with port mapping' },
+]) {
+  for (const [path, value] of [['/recipes/new', ''], ['/recipes/simple-web-service/edit', saved]]) {
+    test(`the visible ${label} label names and focuses the textbox on ${path}`, async ({ page }) => {
+      await page.goto(new URL(path, process.env.BRINE_FIXTURE_BASE_URL).href);
+      const visibleLabel = page.locator('label').filter({ hasText: new RegExp(`^${label}$`) });
+      await expect(visibleLabel).toBeVisible();
+      const field = page.getByRole('textbox', { name: label, exact: true });
+      await expect(field).toHaveValue(value);
+      await visibleLabel.click();
+      await expect(field).toBeFocused();
+    });
+  }
+}
+
 test('snippet Edit links identify their targets without row context', async ({ page }) => {
   await page.goto(new URL('/recipes', process.env.BRINE_FIXTURE_BASE_URL).href);
   const table = page.getByRole('table');
