@@ -32,6 +32,12 @@ type Stack struct {
 	RemoteGit  *RemoteGitPolicy `json:"remote_git,omitempty"`
 }
 
+// EffectiveEntrypoint reports the filename used to read the workspace configuration.
+// It does not change the stored entrypoint.
+func (s *Stack) EffectiveEntrypoint() string {
+	return entrypointOrDefault(s.Entrypoint)
+}
+
 // StackStore manages stack metadata and .pkl file storage.
 type StackStore interface {
 	// List returns all registered stacks.
