@@ -89,6 +89,8 @@ type stackDetailData struct {
 }
 
 type stackEditorData struct {
+	NestedFile        bool
+	NestedListWarning bool
 	pageData
 	Stack              *store.Stack
 	ActiveFile         string

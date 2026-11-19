@@ -26,6 +26,17 @@ func TestEditorDraftValidationAndFormat(t *testing.T) {
 	if err = st.WriteFile("test", "other.pkl", "other"); err != nil {
 		t.Fatal(err)
 	}
+	stack, err := st.Get("test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moduleDir := filepath.Join(filepath.Dir(stack.PklPath), "modules")
+	if err := os.Mkdir(moduleDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "nested.pkl"), []byte("saved"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	log := filepath.Join(dir, "args")
 	binary := filepath.Join(dir, "dill")
@@ -60,6 +71,22 @@ func TestEditorDraftValidationAndFormat(t *testing.T) {
 	input, _ := os.ReadFile(log + ".stdin")
 	if !strings.Contains(string(args), "other.pkl\n-p\ntest\n--engine\ndocker\n--engine-socket\n/synthetic/engine.sock\nvalidate\n--stdin") || len(input) != 0 {
 		t.Fatalf("args %q input %q", args, input)
+	}
+	w = request(url.Values{"pkl_content": {"draft"}, "active_file": {"modules/nested.pkl"}}, false)
+	if !strings.Contains(w.Body.String(), "Nested module drafts cannot be validated") {
+		t.Fatalf("nested validation: %s", w.Body.String())
+	}
+	argsAfter, _ := os.ReadFile(log)
+	if string(argsAfter) != string(args) {
+		t.Fatal("nested validation invoked Dill")
+	}
+	w = request(url.Values{"pkl_content": {"draft"}, "active_file": {"modules/nested.pkl"}}, true)
+	if w.Code != 422 {
+		t.Fatalf("nested format status %d", w.Code)
+	}
+	argsAfter, _ = os.ReadFile(log)
+	if string(argsAfter) != string(args) {
+		t.Fatal("nested format invoked Dill")
 	}
 	w = request(url.Values{"pkl_content": {"x"}, "active_file": {"../evil.pkl"}}, true)
 	if w.Code != 422 {

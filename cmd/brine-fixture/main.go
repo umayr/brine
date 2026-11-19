@@ -57,11 +57,19 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	// Existing local nested module for editor browsing checks.
+	moduleDir := filepath.Join(dir, "stacks", "observability", "modules")
+	if err := os.Mkdir(moduleDir, 0700); err != nil {
+		log.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(moduleDir, "settings & local.pkl"), []byte("value = 1\n"), 0600); err != nil {
+		log.Fatal(err)
+	}
 	// Exercise receiver-incompatible filenames through the real preview handler.
 	if err := os.WriteFile(filepath.Join(dir, "stacks", "media", "<unsafe>.txt"), []byte("fixture"), 0600); err != nil {
 		log.Fatal(err)
 	}
-	fixtureStacks := &fixtureStore{StackStore: st}
+	fixtureStacks := &fixtureStore{StackStore: st, LocalEditorWorkspace: st}
 	eng := &fixtureEngine{}
 	runner := dill.New("/nonexistent-brine-fixture-dill")
 	variables, err := configvars.New(dir, fixtureStacks)
@@ -165,7 +173,10 @@ func main() {
 	}
 }
 
-type fixtureStore struct{ store.StackStore }
+type fixtureStore struct {
+	store.StackStore
+	store.LocalEditorWorkspace
+}
 
 func (*fixtureStore) timestamp(stack *store.Stack) *store.Stack {
 	stack.CreatedAt = time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC)

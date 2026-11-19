@@ -142,7 +142,7 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	content, err := h.store.ReadFile(name, activeFile)
+	content, err := h.editorReadFile(name, activeFile)
 	if err != nil {
 		http.Error(w, "Unable to read stack file", http.StatusInternalServerError)
 		return
@@ -151,6 +151,15 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Unable to list stack files", http.StatusInternalServerError)
 		return
+	}
+	nestedListWarning := false
+	if local, ok := h.store.(store.LocalEditorWorkspace); ok {
+		nested, err := local.LocalEditorFiles(name)
+		if err != nil {
+			nestedListWarning = true
+		} else {
+			files = append(files, nested...)
+		}
 	}
 	entrypoint := stack.Entrypoint
 	if entrypoint == "" {
@@ -171,6 +180,8 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 		pageData:           pageData{Page: "stacks"},
 		Stack:              stack,
 		ActiveFile:         activeFile,
+		NestedFile:         strings.Contains(activeFile, "/"),
+		NestedListWarning:  nestedListWarning,
 		PklContent:         content,
 		Files:              files,
 		Snippets:           byCategory,
@@ -198,6 +209,28 @@ func (h *Handler) snippetCompletions() []map[string]string {
 		})
 	}
 	return completions
+}
+
+// Nested paths are intentionally limited to the local editor methods; the
+// general file, create, delete and entrypoint APIs keep their existing rules.
+func (h *Handler) editorReadFile(name, filename string) (string, error) {
+	if strings.Contains(filename, "/") {
+		if local, ok := h.store.(store.LocalEditorWorkspace); ok {
+			return local.ReadLocalEditorFile(name, filename)
+		}
+		return "", fmt.Errorf("nested editor unavailable")
+	}
+	return h.store.ReadFile(name, filename)
+}
+
+func (h *Handler) editorWriteFile(name, filename, content string) error {
+	if strings.Contains(filename, "/") {
+		if local, ok := h.store.(store.LocalEditorWorkspace); ok {
+			return local.WriteLocalEditorFile(name, filename, content)
+		}
+		return fmt.Errorf("nested editor unavailable")
+	}
+	return h.store.WriteFile(name, filename, content)
 }
 
 // --- HTMX partials ---
@@ -258,7 +291,7 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 	pkl := r.FormValue("pkl_content")
 	filename := r.FormValue("active_file")
 	if filename != "" {
-		if err := h.store.WriteFile(name, filename, pkl); err != nil {
+		if err := h.editorWriteFile(name, filename, pkl); err != nil {
 			h.renderAlert(w, "error", err.Error())
 			return
 		}
@@ -289,6 +322,10 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 	}
 	content, submitted := r.Form["pkl_content"]
 	if submitted {
+		if strings.Contains(r.FormValue("active_file"), "/") {
+			h.renderAlert(w, "warning", "Nested module drafts cannot be validated directly. Save the module, then validate the saved entrypoint.")
+			return
+		}
 		if h.agent.Dill().Profile == "alpha" || h.agent.Dill().QualifiedOperationConfigured() {
 			h.renderAlert(w, "warning", "Draft/stdin validation is unsupported by dill.operation/1. Save the source, then validate the saved entrypoint; validation does not approve deployment.")
 			return
@@ -332,6 +369,10 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeFile := r.FormValue("active_file")
+	if strings.Contains(activeFile, "/") {
+		http.Error(w, "Nested module formatting is unsupported; save the module, then validate the saved entrypoint", http.StatusUnprocessableEntity)
+		return
+	}
 	content := r.FormValue("pkl_content")
 
 	// Derive the path for context (PKL import resolution); content comes from the form.
