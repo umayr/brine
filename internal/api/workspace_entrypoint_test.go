@@ -14,6 +14,35 @@ import (
 	"github.com/umayr/brine/internal/store"
 )
 
+func TestStackReadPreservesEmptyEntrypointContent(t *testing.T) {
+	st, err := store.NewFSStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Create("empty", ""); err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewRouter()
+	Mount(router, nil, st, nil, nil, "docker", httpx.Timeouts{}, 0)
+	for _, tc := range []struct{ path, field string }{
+		{"/api/stacks/empty/files/compose.pkl", "content"},
+		{"/api/stacks/empty", "pkl_content"},
+	} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d, want 200", tc.path, w.Code)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(body[tc.field]); got != `""` {
+			t.Errorf("GET %s field %s = %q, want an explicit empty string", tc.path, tc.field, got)
+		}
+	}
+}
+
 func TestStackReadEndpointsReportEffectiveEntrypoint(t *testing.T) {
 	root := t.TempDir()
 	st, err := store.NewFSStore(root)
@@ -55,8 +84,11 @@ func TestStackReadEndpointsReportEffectiveEntrypoint(t *testing.T) {
 	}
 	var detail stackResponse
 	get("/api/stacks/legacy", &detail)
-	if detail.Entrypoint != "compose.pkl" || detail.PklPath != legacy.PklPath || detail.PklContent != legacyPkl {
-		t.Errorf("legacy detail entrypoint = %q, path = %q, content = %q", detail.Entrypoint, detail.PklPath, detail.PklContent)
+	if detail.Entrypoint != "compose.pkl" || detail.PklPath != legacy.PklPath {
+		t.Errorf("legacy detail entrypoint = %q, path = %q", detail.Entrypoint, detail.PklPath)
+	}
+	if detail.PklContent == nil || *detail.PklContent != legacyPkl {
+		t.Error("legacy detail did not preserve entrypoint content")
 	}
 	var listing []store.Stack
 	get("/api/stacks/", &listing)
