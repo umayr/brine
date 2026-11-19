@@ -72,7 +72,7 @@ func (h *imageHandler) remove(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	force := r.URL.Query().Get("force") == "true"
 	if err := h.agent.Engine().RemoveImage(r.Context(), id, force); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Image removal failed; check whether the image is in use and whether the local container engine is available")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
