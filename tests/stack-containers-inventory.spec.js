@@ -21,11 +21,18 @@ async function settledRetry(inventory) {
   return retry;
 }
 
-// The read-only fixture deliberately cannot execute Dill. Initial errors below
-// use the actual route/partial; only successful recovery is intercepted. Go
-// tests exercise the production success partial with a synthetic Dill process.
+// Observability is unavailable in the read-only fixture. Failure cases below
+// use the actual route/partial for errors and intercept successful recovery.
 const empty = '<div class="px-5 py-8 text-center text-dim">No containers in this stack.</div>';
 const populated = '<table><tbody><tr><td>recovered-web</td><td>running</td></tr></tbody></table>';
+
+test('the populated stack Containers table is named from its heading', async ({ page }) => {
+  await page.goto(new URL('/stacks/homepage', baseURL).href);
+  await expect(page.getByRole('heading', { name: 'Containers', exact: true })).toBeVisible();
+  const table = page.locator('#stack-containers').getByRole('table');
+  await expect(table.getByRole('link', { name: 'fixture-web', exact: true })).toBeVisible();
+  await expect(table).toHaveAccessibleName('Containers');
+});
 
 test('unavailable stack inventory has bounded keyboard retry and can recover to confirmed empty', async ({ page }) => {
   let requests = 0;
