@@ -14,7 +14,7 @@
       {{range .}}
       <tr class="hover:bg-raised/50" id="sc-{{.ID}}">
         <td>
-          <a href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Name}}</a>
+          <a id="sc-name-{{.ID}}" href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Name}}</a>
           <div class="font-mono text-xs text-dim mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
         </td>
         <td>
@@ -31,13 +31,13 @@
         <td class="text-right">
           <div class="flex gap-1 justify-end">
             {{if eq .State "running"}}
-            <button class="ui-button ui-button-ghost ui-button-xs"
+            <button class="ui-button ui-button-ghost ui-button-xs" aria-describedby="sc-name-{{.ID}}"
               hx-post="/web/containers/{{.ID}}/stop"
               hx-target="#sc-{{.ID}}"
               hx-swap="outerHTML"
             >Stop</button>
             {{else}}
-            <button class="ui-button ui-button-ghost ui-button-xs"
+            <button class="ui-button ui-button-ghost ui-button-xs" aria-describedby="sc-name-{{.ID}}"
               hx-post="/web/containers/{{.ID}}/start"
               hx-target="#sc-{{.ID}}"
               hx-swap="outerHTML"
