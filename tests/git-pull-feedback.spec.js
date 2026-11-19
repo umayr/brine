@@ -47,6 +47,12 @@ test('Git pull shows progress, prevents repeat while in flight, then displays th
 
 test('Git settings have labelled inputs', async ({ page }) => {
   await page.goto(new URL('/stacks/media', base).href);
-  await page.locator('#git-source-panel summary').click();
+  const disclosure = page.locator('#git-source-panel summary');
+  await expect(disclosure).toHaveAccessibleName('Git settings');
+  await disclosure.focus();
+  await page.keyboard.press('Enter');
+  await expect(disclosure).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('textbox', { name: 'Branch', exact: true })).toBeFocused();
   for (const name of ['Branch', 'Folder', 'Poll interval']) await expect(page.getByRole('textbox', { name, exact: true })).toBeVisible();
 });
