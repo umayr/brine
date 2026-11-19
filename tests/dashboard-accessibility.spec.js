@@ -1,6 +1,15 @@
 const { test, expect } = require('@playwright/test');
 const base = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('the populated dashboard Stacks table is named from its heading', async ({ page }) => {
+  await page.goto(new URL('/', base).href);
+  const heading = page.getByRole('heading', { name: 'Stacks', exact: true });
+  await expect(heading).toBeVisible();
+  const table = page.getByRole('table').filter({ has: page.getByRole('link', { name: 'View stack homepage', exact: true }) });
+  await expect(table).toBeVisible();
+  await expect(table).toHaveAccessibleName('Stacks');
+});
+
 test('the overflowing dashboard container table can be scrolled by keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(new URL('/', base).href);
