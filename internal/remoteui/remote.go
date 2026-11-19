@@ -160,7 +160,7 @@ type page struct {
 	Hosts                                             []Host
 	Containers                                        []Container
 	Inspection                                        *Inspection
-	Inventory, RevealEnabled                          bool
+	Inventory, BackToInventory, RevealEnabled         bool
 }
 
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +377,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || p.Host == "" || !fullID(p.Container) {
 			break
 		}
+		p.BackToInventory = true
 		item, err := h.backend.Inspect(ctx, p.Host, p.Container)
 		if err != nil {
 			p.Error = "Inspection unavailable"
