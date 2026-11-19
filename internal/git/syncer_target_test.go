@@ -108,7 +108,7 @@ func TestTwoEndpointChangedPullAndAlphaBackgroundBoundary(t *testing.T) {
 				}
 				counter, trace := filepath.Join(root, "counter"), filepath.Join(root, "trace")
 				gitBin := filepath.Join(root, "git")
-				script := "#!/bin/sh\nwhile [ \"$1\" = -c ]; do shift 2; done\ncase \"$1 $2\" in\n'status --porcelain') exit 0;;\n'pull --ff-only') echo pull >> '" + trace + "';;\n'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; echo new >> '" + trace + "'; else echo old; echo old >> '" + trace + "'; touch '" + counter + "'; fi;;\n'rev-parse --short') echo new;;\n*) exit 7;;\nesac\n"
+				script := "#!/bin/sh\nwhile [ \"$1\" = -c ]; do shift 2; done\nif [ \"$1\" = --git-dir=.git ]; then shift; fi\ncase \"$1 $2\" in\n'status --porcelain') exit 0;;\n'pull --ff-only') echo pull >> '" + trace + "';;\n'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; echo new >> '" + trace + "'; else echo old; echo old >> '" + trace + "'; touch '" + counter + "'; fi;;\n'rev-parse --short') echo new;;\n*) exit 7;;\nesac\n"
 				if err = os.WriteFile(gitBin, []byte(script), 0700); err != nil {
 					t.Fatal(err)
 				}

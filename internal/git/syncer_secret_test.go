@@ -54,7 +54,7 @@ func TestSyncRejectsDisabledStrictMode(t *testing.T) {
 	defer state.Close()
 	gitBin := filepath.Join(dir, "git")
 	counter := filepath.Join(dir, "counter")
-	gitScript := "#!/bin/sh\nwhile [ \"$1\" = -c ]; do shift 2; done\ncase \"$1 $2\" in 'status --porcelain') exit 0;; 'pull --ff-only') exit 0;; 'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; else echo old; touch '" + counter + "'; fi;; 'rev-parse --short') echo new;; esac\n"
+	gitScript := "#!/bin/sh\nwhile [ \"$1\" = -c ]; do shift 2; done\nif [ \"$1\" = --git-dir=.git ]; then shift; fi\ncase \"$1 $2\" in 'status --porcelain') exit 0;; 'pull --ff-only') exit 0;; 'rev-parse HEAD') if [ -e '" + counter + "' ]; then echo new; else echo old; touch '" + counter + "'; fi;; 'rev-parse --short') echo new;; esac\n"
 	if err = os.WriteFile(gitBin, []byte(gitScript), 0700); err != nil {
 		t.Fatal(err)
 	}

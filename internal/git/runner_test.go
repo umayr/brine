@@ -33,6 +33,30 @@ func repo(t *testing.T) string {
 	gitCmd(t, dir, "commit", "-m", "initial")
 	return dir
 }
+func TestShortRefDoesNotReadEnclosingRepository(t *testing.T) {
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_TEMPLATE_DIR", t.TempDir())
+	parent := repo(t)
+	workspace := filepath.Join(parent, "workspace")
+	if err := os.Mkdir(workspace, 0700); err != nil {
+		t.Fatal(err)
+	}
+	want := strings.TrimSpace(gitCmd(t, parent, "rev-parse", "--short", "HEAD"))
+	ctx := context.Background()
+	r := New()
+	if got, err := r.ShortRef(ctx, workspace); err == nil || got != "" {
+		t.Fatalf("workspace without Git metadata: ref = %q, err = %v; enclosing ref is %q", got, err, want)
+	}
+	linked := filepath.Join(t.TempDir(), "worktree")
+	gitCmd(t, parent, "worktree", "add", "--detach", linked, "HEAD")
+	for _, root := range []string{parent, linked} {
+		if got, err := r.ShortRef(ctx, root); err != nil || got != want {
+			t.Fatalf("workspace root %s: ref = %q, err = %v; want %q", root, got, err, want)
+		}
+	}
+}
+
 func TestPullBlocksDirtyAndStatusErrors(t *testing.T) {
 	dir := repo(t)
 	r := New()
