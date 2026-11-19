@@ -50,7 +50,8 @@ func (e *sentinelLogEngine) ContainerLogs(_ context.Context, id string, _ bool, 
 // strict raw stdout/stderr      errors/results/lifecycle      suppressed (api/dill)
 // valid strict plan field       API result/private preview    operator-visible (api/dill)
 // legacy Dill stdout/stderr     errors/lifecycle/cleanup      operator-visible
-// engine log/error producer     BOTH API and web/SSE routes   operator-visible
+// engine log lines              API and web SSE routes         operator-visible
+// engine log-open error         API / web error responses      suppressed / operator-visible
 // Git stderr (inherited env)    service logs + meta.json      operator-visible (git)
 // any unauthorized request      producer invocation           forbidden
 //
@@ -104,7 +105,7 @@ exit 2
 	}{
 		{"GET", "/api/containers/demo/logs", "engine", true},
 		{"GET", "/web/containers/demo/logs", "engine", true},
-		{"GET", "/api/containers/failure/logs", "engine-error", false},
+		{"GET", "/api/containers/failure/logs", "engine-error-redacted", false},
 		{"GET", "/web/containers/failure/logs", "engine-error", false},
 		{"GET", "/api/stacks/demo/validate", "dill", false},
 		{"POST", "/web/stacks/demo/validate", "dill", false},
@@ -146,6 +147,16 @@ exit 2
 			if row.producer == "dill" {
 				if !strings.Contains(w.Body.String(), "synthetic-deployment-dill-stdout") || !strings.Contains(w.Body.String(), "synthetic-deployment-dill-stderr") {
 					t.Fatalf("authenticated Dill diagnostics not exercised: status=%d", w.Code)
+				}
+			} else if row.producer == "engine-error-redacted" {
+				if eng.calls != beforeEngine+1 || w.Code != http.StatusInternalServerError || w.Header().Get("Content-Type") != "application/json" {
+					t.Fatal("API log-open failure did not reach the engine and return a JSON 500")
+				}
+				if strings.Contains(w.Body.String(), "synthetic-deployment-engine-error") {
+					t.Fatal("raw engine log-open error reached the API response")
+				}
+				if strings.TrimSpace(w.Body.String()) != `{"error":"Container logs unavailable; check the container and local engine, then retry"}` {
+					t.Fatal("API log-open failure did not return the expected safe diagnostic")
 				}
 			} else if row.producer == "engine-error" {
 				if w.Code != 500 || !strings.Contains(w.Body.String(), "synthetic-deployment-engine-error") {
