@@ -43,6 +43,13 @@ for (const enhanced of [true, false]) {
   });
 }
 
+test('the populated Snippets inventory table has an accessible name', async ({ page }) => {
+  await page.goto(new URL('/recipes', process.env.BRINE_FIXTURE_BASE_URL).href);
+  const table = page.getByRole('table');
+  await expect(table.getByRole('cell', { name: 'Simple Web Service', exact: true })).toBeVisible();
+  await expect(table).toHaveAccessibleName('Snippets');
+});
+
 test('snippet Edit links identify their targets without row context', async ({ page }) => {
   await page.goto(new URL('/recipes', process.env.BRINE_FIXTURE_BASE_URL).href);
   const table = page.getByRole('table');
