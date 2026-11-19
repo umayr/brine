@@ -2,6 +2,31 @@ const { test, expect } = require('@playwright/test');
 
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('the Images pull dialog skips its invisible backdrop in the tab order', async ({ page }) => {
+  const pulls = [];
+  await page.route('**/web/images/pull', route => {
+    pulls.push(route.request().method());
+    return route.abort();
+  });
+  await page.goto(new URL('/images', baseURL).href);
+  const opener = page.getByRole('button', { name: '+ Pull image', exact: true });
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Pull image' });
+  const reference = dialog.getByRole('textbox', { name: 'Image reference' });
+  await expect(reference).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Pull', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  expect(await dialog.evaluate(el => document.activeElement.closest('.ui-dialog-backdrop') !== null)).toBe(false);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+  expect(pulls).toEqual([]);
+});
+
 test('image inventory table has a name independent of its scroll region', async ({ page }) => {
   await page.goto(new URL('/images', baseURL).href);
   const region = page.getByRole('region', { name: 'Images table, scroll horizontally for all columns and actions' });
