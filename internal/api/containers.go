@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/docker/docker/errdefs"
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
 )
@@ -27,7 +28,11 @@ func (h *containerHandler) get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	c, err := h.agent.Engine().InspectContainer(r.Context(), id)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		if errdefs.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "Container not found")
+		} else {
+			writeError(w, http.StatusBadGateway, "Container inspection unavailable; check the local container engine and retry")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
