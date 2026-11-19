@@ -63,7 +63,7 @@ func stackReadMetadata(stack *store.Stack) *store.Stack {
 func (h *stackHandler) list(w http.ResponseWriter, r *http.Request) {
 	stacks, err := h.store.List()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Stack list unavailable; check local stack storage")
 		return
 	}
 	metadata := slices.Clone(stacks)
