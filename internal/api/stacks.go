@@ -347,7 +347,7 @@ func (h *stackHandler) listFiles(w http.ResponseWriter, r *http.Request) {
 	defer h.lockStack(name)()
 	files, err := h.store.Files(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusNotFound, "Stack file list unavailable; check the stack name and local workspace storage")
 		return
 	}
 	writeJSON(w, http.StatusOK, files)
