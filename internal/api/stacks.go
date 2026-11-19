@@ -359,7 +359,7 @@ func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 	filename := chi.URLParam(r, "filename")
 	content, err := h.store.ReadFile(name, filename)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusNotFound, "Stack file unavailable; check the file name and local workspace storage")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"filename": filename, "content": content})
