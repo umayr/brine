@@ -1,6 +1,24 @@
 const { test, expect } = require('@playwright/test');
 const base = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('the Git Push dialog skips its invisible backdrop in the tab order', async ({ page }) => {
+  await page.goto(new URL('/stacks/media', base).href);
+  const opener = page.getByRole('button', { name: 'Push staged changes', exact: true });
+  await opener.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Push changes', exact: true });
+  await expect(dialog.getByRole('textbox', { name: 'Commit message', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Push', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: 'Close dialog', exact: true })).not.toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(opener).toBeFocused();
+});
+
 for (const failure of ['network', 'http']) {
   test(`Git pull reports an unconfirmed outcome on ${failure} failure`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 390, height: 850 });
