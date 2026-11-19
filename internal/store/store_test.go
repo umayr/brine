@@ -3,6 +3,7 @@ package store_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/umayr/brine/internal/store"
@@ -93,6 +94,44 @@ func TestFSStore_MultiFile(t *testing.T) {
 	// Reject path separators.
 	if err := st.WriteFile("mystack", "../evil.pkl", ""); err == nil {
 		t.Error("WriteFile path traversal should return error")
+	}
+}
+
+func TestFSStore_FilesListsOnlyAddressableRootFiles(t *testing.T) {
+	st, err := store.NewFSStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := st.Create("local", "// entrypoint\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Dir(stack.PklPath)
+	// A backslash is legal on disk, but the root-file API treats it as a path separator.
+	const unaddressable = `archived\sample.pkl`
+	for _, name := range []string{"shared.pkl", unaddressable} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte("// synthetic\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.ReadFile("local", unaddressable); err == nil {
+		t.Fatal("root-file read unexpectedly accepted backslash")
+	}
+	files, err := st.Files("local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(files)
+	if want := []string{"compose.pkl", "shared.pkl"}; !slices.Equal(files, want) {
+		t.Fatalf("Files = %q, want %q", files, want)
+	}
+	for _, name := range files {
+		if _, err := st.ReadFile("local", name); err != nil {
+			t.Fatalf("listed file %q cannot be read: %v", name, err)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace, unaddressable)); err != nil || string(data) != "// synthetic\n" {
+		t.Fatalf("unlisted file changed: %q, %v", data, err)
 	}
 }
 

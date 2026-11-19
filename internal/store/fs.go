@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -262,7 +261,7 @@ func (s *FSStore) ReadPkl(name string) (string, error) {
 	return string(data), nil
 }
 
-// Files returns all .pkl filenames within the stack's files directory.
+// Files returns the addressable root .pkl filenames within the stack's files directory.
 func (s *FSStore) Files(name string) ([]string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -288,7 +287,7 @@ func (s *FSStore) Files(name string) ([]string, error) {
 	}
 	var files []string
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".pkl") {
+		if !e.IsDir() && validateFilename(e.Name()) == nil {
 			f, err := openWorkspaceFile(fd, e.Name(), unix.O_RDONLY)
 			if err != nil {
 				continue
