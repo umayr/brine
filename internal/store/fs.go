@@ -154,7 +154,7 @@ func (s *FSStore) Get(name string) (*Stack, error) {
 	stack, err := s.readMeta(name)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("stack %q not found", name)
+			return nil, fmt.Errorf("stack %q %w", name, ErrStackNotFound)
 		}
 		return nil, err
 	}

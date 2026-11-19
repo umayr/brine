@@ -78,7 +78,11 @@ func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		if errors.Is(err, store.ErrStackNotFound) || store.ValidateStackName(name) != nil {
+			writeError(w, http.StatusNotFound, "stack not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "stack metadata unavailable; check local stack storage")
+		}
 		return
 	}
 	pkl, err := h.store.ReadPkl(name)
