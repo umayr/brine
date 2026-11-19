@@ -28,6 +28,18 @@ type RemoteGitStore interface {
 	SwapRemoteGit(name, source string, expected, replacement *RemoteGitPolicy) error
 }
 
+// A policy stores only the exact attempted object IDs, not snapshots or results.
+// Bound metadata growth by bytes; never evict an ID to make room for another.
+const remoteGitSeenBytes = 1 << 20
+
+func (p *RemoteGitPolicy) CanRecordAttempt() bool {
+	return len(p.Seen)+65 <= remoteGitSeenBytes // separator + longest Git object ID
+}
+
+func (p *RemoteGitPolicy) AttemptHistoryLow() bool {
+	return len(p.Seen) >= remoteGitSeenBytes*9/10
+}
+
 var ErrRemoteGit = errors.New("remote Git configuration changed or is unavailable")
 
 func (s *Stack) RemoteGitSource() string {
@@ -67,8 +79,11 @@ func (p *RemoteGitPolicy) valid() bool {
 	if p.Commit != "" && !remoteGitHex(p.Commit, 20) && !remoteGitHex(p.Commit, 32) {
 		return false
 	}
+	if len(p.Seen) > remoteGitSeenBytes {
+		return false
+	}
 	seen := strings.Fields(p.Seen)
-	if len(seen) > 128 || strings.Join(seen, " ") != p.Seen || (len(seen) > 0 && seen[len(seen)-1] != p.Commit) || (len(seen) == 0 && p.Commit != "") {
+	if strings.Join(seen, " ") != p.Seen || (len(seen) > 0 && seen[len(seen)-1] != p.Commit) || (len(seen) == 0 && p.Commit != "") {
 		return false
 	}
 	unique := make(map[string]bool, len(seen))
@@ -88,7 +103,7 @@ func (p *RemoteGitPolicy) valid() bool {
 	case "ready", "succeeded":
 		return p.Request == "" && p.Reason == ""
 	case "blocked":
-		return p.Request == "" && (p.Reason == "" || p.Reason == "staging-or-preview" || p.Reason == "no-journal" || p.Reason == "not-admitted" || p.Reason == "failed")
+		return p.Request == "" && (p.Reason == "" || p.Reason == "staging-or-preview" || p.Reason == "no-journal" || p.Reason == "journal-capacity" || p.Reason == "not-admitted" || p.Reason == "failed")
 	case "pending":
 		return p.Request != "" && (p.Reason == "" || p.Reason == "awaiting-status" || p.Reason == "running" || p.Reason == "unknown" || p.Reason == "status-unavailable")
 	default:
@@ -104,6 +119,9 @@ func (s *FSStore) SwapRemoteGit(name, source string, expected, replacement *Remo
 		return ErrRemoteGit
 	}
 	if replacement == nil || replacement.Source != source {
+		return ErrRemoteGit
+	}
+	if expected != nil && expected.Source == replacement.Source && expected.Target == replacement.Target && expected.Seen != replacement.Seen && expected.Seen != "" && !strings.HasPrefix(replacement.Seen, expected.Seen+" ") {
 		return ErrRemoteGit
 	}
 	stack.RemoteGit = replacement

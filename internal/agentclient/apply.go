@@ -11,9 +11,13 @@ import (
 	"time"
 )
 
-const journalHeader = "X-Dill-Journal-Id"
+const (
+	journalHeader         = "X-Dill-Journal-Id"
+	journalCapacityHeader = "X-Dill-Journal-Capacity"
+)
 
 var ErrDeploymentUnknown = errors.New("deployment delivery unknown; look up the same request ID before taking further action")
+var ErrJournalCapacity = errors.New("deployment journal capacity reached; preserve the journal and inspect agent state")
 
 type DeploymentStatus struct {
 	RequestID   string `json:"requestId"`
@@ -119,14 +123,17 @@ func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack, postPat
 		return empty, failure
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/json" {
-		return empty, failure
-	}
 	if journal != "" {
 		values := resp.Header.Values(journalHeader)
 		if len(values) != 1 || values[0] != journal {
 			return empty, failure
 		}
+	}
+	if body != nil && resp.StatusCode == http.StatusInsufficientStorage && resp.Header.Get(journalCapacityHeader) == "low" {
+		return empty, ErrJournalCapacity
+	}
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("Content-Type") != "application/json" {
+		return empty, failure
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
 	if err != nil || len(b) > 4096 || checkJSON(b) != nil || ctx.Err() != nil || session.Err() != nil {

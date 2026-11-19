@@ -160,6 +160,11 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			if fenceState.Load() == 2 {
 				w.Header().Set("X-Dill-Journal-Id", strings.Repeat("c", 32))
 			}
+			if fenceState.Load() == 3 {
+				w.Header().Set("X-Dill-Journal-Capacity", "low")
+				w.WriteHeader(http.StatusInsufficientStorage)
+				return
+			}
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"not-admitted","effects":"none"}`, stranded)
 		case "/v1/deploy/operations/" + stranded:
 			http.NotFound(w, r)
@@ -310,6 +315,20 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(work, "compose.pkl"), []byte("mutable checkout must not ship"), 0600); err != nil {
 			t.Fatal(err)
 		}
+		// Keep exact deduplication after crossing the former 128-attempt limit.
+		prior, err := fs.Get("synthetic")
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed := *prior.RemoteGit
+		var earlier []string
+		for i := 1; i <= 128; i++ {
+			earlier = append(earlier, fmt.Sprintf("%040x", i))
+		}
+		seed.Seen, seed.Commit = strings.Join(earlier, " "), earlier[len(earlier)-1]
+		if err := fs.SwapRemoteGit("synthetic", seed.Source, prior.RemoteGit, &seed); err != nil {
+			t.Fatal(err)
+		}
 		h.pollGit(ctx)
 		got, err := fs.Get("synthetic")
 		if err != nil || got.RemoteGit == nil || got.RemoteGit.Commit != commit || got.RemoteGit.Request == "" || calls.Load() != 2 {
@@ -364,15 +383,19 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || readPolicy().Request != stranded || !strings.Contains(w.Body.String(), "No fence was verified") {
 			t.Fatal("foreign journal proof was accepted", w.Code)
 		}
+		fenceState.Store(3)
+		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || readPolicy().Request != stranded || !strings.Contains(w.Body.String(), "journal is full") {
+			t.Fatal("full journal cleared pending intent or showed no warning", w.Code)
+		}
 		fenceState.Store(0)
 		if w := invoke("POST", deployPath+"/git-config", params); w.Code != 200 || !strings.Contains(w.Body.String(), "without admitting it") {
 			t.Fatal("fence was not verified", w.Code)
 		}
-		if p := readPolicy(); p.Enabled || p.Request != "" || p.Journal != "" || p.Reason != "not-admitted" || p.Seen != commit {
+		if p := readPolicy(); p.Enabled || p.Request != "" || p.Journal != "" || p.Reason != "not-admitted" || p.Seen != seed.Seen+" "+commit {
 			t.Fatalf("incorrect recovery state: %+v", p)
 		}
 		restarted.pollGit(ctx)
-		if calls.Load() != 2 || fenceCalls.Load() != 3 {
+		if calls.Load() != 2 || fenceCalls.Load() != 4 {
 			t.Fatal("recovery caused an automatic submission")
 		}
 	})
