@@ -29,6 +29,20 @@ for (const { label, saved } of [
   }
 }
 
+for (const enhanced of [true, false]) {
+  test(`the ${enhanced ? 'enhanced' : 'fallback'} snippet body has a name and hint`, async ({ page }) => {
+    if (!enhanced) await page.route('**/static/vendor/editor.js', route => route.abort());
+    await page.goto(new URL('/recipes/new', process.env.BRINE_FIXTURE_BASE_URL).href);
+    const body = page.locator(enhanced ? '.cm-content' : '#recipe-body');
+    await expect(body).toBeVisible();
+    await expect(body).toHaveAccessibleName('Pkl body');
+    await expect(body).toHaveAccessibleDescription('Fragment to insert into a stack');
+    await body.focus();
+    await expect(body).toBeFocused();
+    if (enhanced) await expect(page.locator('#recipe-body')).toBeHidden();
+  });
+}
+
 test('snippet Edit links identify their targets without row context', async ({ page }) => {
   await page.goto(new URL('/recipes', process.env.BRINE_FIXTURE_BASE_URL).href);
   const table = page.getByRole('table');
