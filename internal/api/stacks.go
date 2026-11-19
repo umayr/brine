@@ -309,10 +309,10 @@ func (h *stackHandler) containers(w http.ResponseWriter, r *http.Request) {
 	defer h.lockStack(name)()
 	all, err := h.agent.Engine().ListContainers(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Stack container inventory unavailable; check the local container engine and retry")
 		return
 	}
-	var filtered []engine.ContainerInfo
+	filtered := []engine.ContainerInfo{}
 	for _, c := range all {
 		if c.Stack == name {
 			filtered = append(filtered, c)
