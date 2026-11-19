@@ -3,6 +3,7 @@ package remoteui
 import (
 	"context"
 	"errors"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,9 +26,14 @@ type fake struct {
 	inspectID                            string
 	inspection                           *Inspection
 	inventory                            []Container
+	acquireErr, inventoryErr             error
+	inventoryCalls                       int
 }
 
-func (*fake) AcquireRead(ctx context.Context, _ string) (context.Context, func() error, error) {
+func (f *fake) AcquireRead(ctx context.Context, _ string) (context.Context, func() error, error) {
+	if f.acquireErr != nil {
+		return nil, nil, f.acquireErr
+	}
 	return ctx, func() error { return nil }, nil
 }
 
@@ -35,6 +41,10 @@ func (*fake) Hosts(context.Context) ([]Host, error) {
 	return []Host{{ID: "h", Name: "Host <one>", State: "ready"}}, nil
 }
 func (f *fake) Inventory(context.Context, string) ([]Container, error) {
+	f.inventoryCalls++
+	if f.inventoryErr != nil {
+		return f.inventory, f.inventoryErr
+	}
 	if f.inventory != nil {
 		return f.inventory, nil
 	}
@@ -156,21 +166,72 @@ func TestBrowserFixture(t *testing.T) {
 	_, f, h, c, _ := setup(t)
 	f.inspection = inspectionFixture()
 	fixturePath := "/remote/inspect?host=h&container=" + testID
-	if os.Getenv("BRINE_REMOTE_INVENTORY") != "" {
+	status := http.StatusOK
+	switch os.Getenv("BRINE_REMOTE_INVENTORY") {
+	case "1":
 		f.inventory = []Container{{ID: testID, Name: "same", Stack: "app", Service: "web"}, {ID: otherID, Name: "same", Stack: "app", Service: "web"}}
+		fixturePath = "/remote/inventory?host=h"
+	case "unavailable":
+		f.acquireErr = errors.New("synthetic target unavailable")
+		fixturePath = "/remote/inventory?host=h"
+		status = http.StatusServiceUnavailable
+	case "empty":
+		f.inventory = []Container{}
 		fixturePath = "/remote/inventory?host=h"
 	}
 	r := httptest.NewRequest("GET", fixturePath, nil)
 	r.AddCookie(c)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != 200 {
+	if w.Code != status {
 		t.Fatal(w.Code)
 	}
 	if err := os.WriteFile(path, w.Body.Bytes(), 0600); err != nil {
 		t.Fatal(err)
 	}
 }
+
+func TestInventoryRefreshDistinguishesUnavailableFromEmpty(t *testing.T) {
+	for _, tc := range []struct {
+		name                   string
+		leaseErr, inventoryErr error
+		status, calls          int
+	}{
+		{"unverified target", errors.New("synthetic private backend error"), nil, http.StatusServiceUnavailable, 0},
+		{"inventory failed", nil, errors.New("synthetic private backend error"), http.StatusOK, 1},
+		{"verified empty", nil, nil, http.StatusOK, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, f, h, cookie, _ := setup(t)
+			f.acquireErr, f.inventoryErr = tc.leaseErr, tc.inventoryErr
+			f.inventory = []Container{}
+			if tc.leaseErr != nil || tc.inventoryErr != nil {
+				f.inventory = []Container{{ID: testID, Name: "unverified-row"}}
+			}
+			path := "/remote/inventory?host=" + url.QueryEscape("h & another=target")
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			r.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			body := w.Body.String()
+			if w.Code != tc.status || f.inventoryCalls != tc.calls || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("HTTP %d, %d inventory calls, Cache-Control %q", w.Code, f.inventoryCalls, w.Header().Get("Cache-Control"))
+			}
+			refresh := regexp.MustCompile(`href="([^"]+)">Refresh inventory</a>`).FindStringSubmatch(body)
+			if len(refresh) != 2 || html.UnescapeString(refresh[1]) != path || !strings.Contains(body, "h &amp; another=target") {
+				t.Fatal("missing same-target refresh or target label")
+			}
+			if tc.leaseErr != nil || tc.inventoryErr != nil {
+				if !strings.Contains(body, "Inventory unavailable") || !strings.Contains(body, "container list is unknown") || strings.Contains(body, "no Dill-managed containers") || strings.Contains(body, "unverified-row") || strings.Contains(body, "synthetic private backend error") {
+					t.Fatal("failure should show unknown inventory without rows, empty text, or backend details")
+				}
+			} else if !strings.Contains(body, "Verified inventory returned no Dill-managed containers") || strings.Contains(body, `role="alert"`) {
+				t.Fatal("verified empty inventory should not show an unavailable alert")
+			}
+		})
+	}
+}
+
 func TestInventoryDuplicateNamesHaveAccessibleIDs(t *testing.T) {
 	_, f, h, c, _ := setup(t)
 	f.inventory = []Container{{ID: testID, Name: "same", Stack: "app", Service: "web"}, {ID: otherID, Name: "same", Stack: "app", Service: "web"}}
