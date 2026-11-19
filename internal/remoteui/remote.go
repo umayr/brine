@@ -153,12 +153,14 @@ func (h *Handler) Protected() http.Handler {
 	})
 }
 
+const inventoryUnavailable = "Inventory unavailable. Brine could not verify the target or read its inventory. The container list is unknown."
+
 type page struct {
 	CSRF, Host, Container, Error, Notice, ReviewToken string
 	Hosts                                             []Host
 	Containers                                        []Container
 	Inspection                                        *Inspection
-	RevealEnabled                                     bool
+	Inventory, RevealEnabled                          bool
 }
 
 func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +187,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	p := page{CSRF: h.auth.CSRFFor(r), Host: r.FormValue("host"), Container: r.FormValue("container"), RevealEnabled: h.revealEnabled}
+	p.Inventory = r.URL.Path == "/remote/inventory" && r.Method == http.MethodGet && p.Host != ""
 	ctx, cancelSession, ok := h.auth.SessionContext(r)
 	if !ok {
 		http.Error(w, "Session expired", http.StatusForbidden)
@@ -237,7 +240,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 	w = &sessionWriter{ResponseWriter: w, ctx: ctx}
 	// The protected dispatcher requires this capability. The lease surrounds
 	// rendering and streaming, not merely the backend method call.
-	needsLease := r.URL.Path == "/remote/inventory" && r.Method == http.MethodGet && p.Host != "" ||
+	needsLease := p.Inventory ||
 		r.URL.Path == "/remote/inspect" && r.Method == http.MethodGet && p.Host != "" && fullID(p.Container) ||
 		r.URL.Path == "/remote/logs" && r.Method == http.MethodPost && auth.CookieAuthenticated(r) && p.Host != "" && fullID(p.Container)
 	if needsLease {
@@ -255,7 +258,12 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 				if errors.Is(err, ErrReadCleanup) {
 					log.Print("remote read cleanup failed; operator reconciliation required")
 				}
-				http.Error(w, "Target unavailable", http.StatusServiceUnavailable)
+				if p.Inventory {
+					p.Error = inventoryUnavailable
+					h.renderStatus(w, p, http.StatusServiceUnavailable)
+				} else {
+					http.Error(w, "Target unavailable", http.StatusServiceUnavailable)
+				}
 				return
 			}
 			defer func() {
@@ -359,7 +367,7 @@ func (h *Handler) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		items, err := h.backend.Inventory(ctx, p.Host)
 		if err != nil {
-			p.Error = "Inventory unavailable or identity changed"
+			p.Error = inventoryUnavailable
 		} else {
 			p.Containers = items
 		}
@@ -598,7 +606,14 @@ func safeText(s string) bool {
 	return true
 }
 func (h *Handler) render(w http.ResponseWriter, p page) {
+	h.renderStatus(w, p, http.StatusOK)
+}
+
+func (h *Handler) renderStatus(w http.ResponseWriter, p page, status int) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	_ = view.Execute(w, p)
 }
 
