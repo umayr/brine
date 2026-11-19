@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	"github.com/docker/docker/errdefs"
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
+	"github.com/umayr/brine/internal/engine"
 )
 
 type containerHandler struct {
@@ -59,7 +61,11 @@ func (h *containerHandler) stop(w http.ResponseWriter, r *http.Request) {
 func (h *containerHandler) restart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().RestartContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		msg := "Container restart failed; check the container state before retrying"
+		if errors.Is(err, engine.ErrCheckedUpRequired) {
+			msg = engine.ErrCheckedUpRequired.Error()
+		}
+		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "restarted"})
