@@ -26,3 +26,41 @@ test('mobile inspection discloses details safely with keyboard', async ({page}) 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   } finally { if(fs.existsSync(fixture)) fs.unlinkSync(fixture); }
 });
+
+test('keyboard navigation returns a direct inspection link to the same target inventory', async ({ browser }) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'brine-inspection-back-'));
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  try {
+    const origin = 'http://remote.test';
+    const inspectURL = `${origin}/remote/inspect?host=h&container=${'a'.repeat(64)}`;
+    const inventoryURL = `${origin}/remote/inventory?host=h`;
+    const fixtures = new Map();
+    for (const [url, inventory] of [[inspectURL, ''], [inventoryURL, '1']]) {
+      const fixture = path.join(dir, inventory ? 'inventory.html' : 'inspect.html');
+      execFileSync('go', ['test', './internal/remoteui', '-run', '^TestBrowserFixture$', '-count=1'], {
+        env: { ...process.env, BRINE_REMOTE_FIXTURE: fixture, BRINE_REMOTE_INVENTORY: inventory },
+      });
+      fixtures.set(url, fixture);
+    }
+    const requests = [];
+    await context.route(`${origin}/**`, (route) => {
+      const request = route.request();
+      requests.push([request.method(), request.url()]);
+      const fixture = fixtures.get(request.url());
+      return fixture ? route.fulfill({ contentType: 'text/html', path: fixture }) : route.abort();
+    });
+    const page = await context.newPage();
+    await page.goto(inspectURL);
+    const back = page.getByRole('link', { name: 'Back to inventory' });
+    await expect(back).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(back).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(inventoryURL);
+    await expect(page.getByRole('heading', { name: 'Dill-managed containers on h' })).toBeVisible();
+    expect(requests).toEqual([['GET', inspectURL], ['GET', inventoryURL]]);
+  } finally {
+    await context.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
