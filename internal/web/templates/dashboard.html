@@ -49,11 +49,11 @@
     </section>
 
     <section class="overview-section">
-      <div class="overview-section-header"><h2>Running containers</h2><a href="/containers" class="overview-link" aria-label="View all containers">View all <span aria-hidden="true">→</span></a></div>
+      <div class="overview-section-header"><h2 id="dashboard-running-containers-heading">Running containers</h2><a href="/containers" class="overview-link" aria-label="View all containers">View all <span aria-hidden="true">→</span></a></div>
       {{if .ContainersUnavailable}}
       <div class="overview-empty"><div><h3>Containers unavailable</h3><p>Could not load container inventory. Check the configured engine and permissions.</p></div></div>
       {{else if .Stats.Running}}
-      <div class="overflow-x-auto" role="region" aria-label="Running containers table" tabindex="0"><table class="ui-table ui-table-sm">
+      <div class="overflow-x-auto" role="region" aria-label="Running containers table" tabindex="0"><table class="ui-table ui-table-sm" aria-labelledby="dashboard-running-containers-heading">
         <thead><tr><th>Name</th><th>Image</th><th>Stack</th></tr></thead><tbody>
         {{range .Containers}}{{if eq .State "running"}}<tr>
           <td><a href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono">{{.Name}}</a></td>

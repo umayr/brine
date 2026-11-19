@@ -10,6 +10,15 @@ test('the populated dashboard Stacks table is named from its heading', async ({ 
   await expect(table).toHaveAccessibleName('Stacks');
 });
 
+test('the populated dashboard Running containers table is named from its heading', async ({ page }) => {
+  await page.goto(new URL('/', base).href);
+  await expect(page.getByRole('heading', { name: 'Running containers', exact: true })).toBeVisible();
+  const region = page.getByRole('region', { name: 'Running containers table', exact: true });
+  const table = region.getByRole('table');
+  await expect(table.getByRole('link', { name: 'grafana', exact: true })).toBeVisible();
+  await expect(table).toHaveAccessibleName('Running containers');
+});
+
 test('the overflowing dashboard container table can be scrolled by keyboard', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(new URL('/', base).href);
