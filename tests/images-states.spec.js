@@ -2,6 +2,13 @@ const { test, expect } = require('@playwright/test');
 
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('image inventory table has a name independent of its scroll region', async ({ page }) => {
+  await page.goto(new URL('/images', baseURL).href);
+  const region = page.getByRole('region', { name: 'Images table, scroll horizontally for all columns and actions' });
+  await expect(region.getByRole('cell', { name: 'grafana/grafana:11.4', exact: true })).toBeVisible();
+  await expect(region.getByRole('table')).toHaveAccessibleName('Images');
+});
+
 test('images inventory shows loading, empty and failed request states with retry', async ({ page }) => {
   let release;
   const pending = new Promise(resolve => { release = resolve; });
