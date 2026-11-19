@@ -37,7 +37,7 @@ func (h *imageHandler) pull(w http.ResponseWriter, r *http.Request) {
 
 	rc, err := h.agent.Engine().PullImage(r.Context(), req.Ref)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Image pull unavailable; check the image reference and local container engine")
 		return
 	}
 	defer rc.Close()
