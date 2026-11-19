@@ -57,7 +57,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var manifest atomic.Value
 	var operationID atomic.Value
 	var fenceCalls, fenceState atomic.Int32
-	journal, stranded := strings.Repeat("d", 32), strings.Repeat("e", 32)
+	journal, stranded, unknown := strings.Repeat("d", 32), strings.Repeat("e", 32), strings.Repeat("f", 32)
 	enabled := atomic.Bool{}
 	enabled.Store(true)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,6 +168,8 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"not-admitted","effects":"none"}`, stranded)
 		case "/v1/deploy/operations/" + stranded:
 			http.NotFound(w, r)
+		case "/v1/deploy/operations/" + unknown:
+			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, unknown)
 		default:
 			if r.Header.Get("X-Dill-Journal-Id") != "" {
 				w.Header().Set("X-Dill-Journal-Id", journal)
@@ -248,14 +250,47 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal("invalid CSRF admitted")
 	}
 	params.Set("_csrf", csrf)
+	statusPath := deployPath + "?host=demo&id=" + id
+	assertStatusControls := func(w *httptest.ResponseRecorder, requestID, host string) {
+		t.Helper()
+		body := w.Body.String()
+		for _, want := range []string{
+			`<label for="deployment-request-id">Request ID</label>`,
+			`id="deployment-request-id" value="` + requestID + `" readonly`,
+			`href="` + deployPath + `?host=` + host + `&amp;id=` + requestID + `">Refresh status</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("status view missing %q", want)
+			}
+		}
+	}
 	if w := invoke("POST", deployPath+"/create", params); !strings.Contains(w.Body.String(), "No retry was sent") || calls.Load() != 1 {
 		t.Fatal("lost response not held", w.Code)
+	} else {
+		assertStatusControls(w, id, "demo")
 	}
 	if w := invoke("POST", deployPath+"/create", params); w.Code != 409 || calls.Load() != 1 {
 		t.Fatal("create replayed", w.Code)
 	}
-	if w := invoke("GET", deployPath+"?host=demo&id="+id, nil); !strings.Contains(w.Body.String(), "State succeeded") || calls.Load() != 1 {
+	if w := invoke("GET", statusPath, nil); !strings.Contains(w.Body.String(), "State succeeded") || calls.Load() != 1 {
 		t.Fatal("status did not reconcile request", w.Code)
+	} else {
+		assertStatusControls(w, id, "demo")
+	}
+	if w := invoke("GET", deployPath+"?host=demo&id="+unknown, nil); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Outcome unknown. Dill recorded this request") || strings.Contains(w.Body.String(), "Status unavailable") {
+		t.Fatal("recorded unknown was not distinguished from unavailable status", w.Code)
+	} else {
+		assertStatusControls(w, unknown, "demo")
+	}
+	for _, tc := range []struct {
+		host, id string
+		code     int
+	}{{"demo", stranded, http.StatusOK}, {"missing", id, http.StatusConflict}} {
+		w := invoke("GET", deployPath+"?host="+tc.host+"&id="+tc.id, nil)
+		if w.Code != tc.code || !strings.Contains(w.Body.String(), "Status unavailable") || calls.Load() != 1 || fenceCalls.Load() != 0 {
+			t.Errorf("unavailable status for %s: HTTP %d", tc.host, w.Code)
+		}
+		assertStatusControls(w, tc.id, tc.host)
 	}
 	t.Run("git persists and reconciles the same request after restart", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
