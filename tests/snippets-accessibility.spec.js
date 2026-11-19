@@ -1,5 +1,17 @@
 const { test, expect } = require('@playwright/test');
 
+for (const [path, value] of [['/recipes/new', ''], ['/recipes/simple-web-service/edit', 'Simple Web Service']]) {
+  test(`the visible Name label names and focuses the textbox on ${path}`, async ({ page }) => {
+    await page.goto(new URL(path, process.env.BRINE_FIXTURE_BASE_URL).href);
+    const label = page.locator('label').filter({ hasText: /^Name$/ });
+    await expect(label).toBeVisible();
+    const name = page.getByRole('textbox', { name: 'Name', exact: true });
+    await expect(name).toHaveValue(value);
+    await label.click();
+    await expect(name).toBeFocused();
+  });
+}
+
 test('snippet Edit links identify their targets without row context', async ({ page }) => {
   await page.goto(new URL('/recipes', process.env.BRINE_FIXTURE_BASE_URL).href);
   const table = page.getByRole('table');

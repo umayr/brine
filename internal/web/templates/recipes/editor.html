@@ -34,8 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     >
       <div class="grid grid-cols-2 gap-4">
         <div class="ui-field">
-          <label class="ui-label"><span class="ui-label-text">Name</span></label>
-          <input type="text" name="name" class="ui-input "
+          <label class="ui-label" for="recipe-name"><span class="ui-label-text">Name</span></label>
+          <input id="recipe-name" type="text" name="name" class="ui-input "
             value="{{if .Recipe}}{{.Recipe.Name}}{{end}}"
             placeholder="Simple Web Service" required />
         </div>
