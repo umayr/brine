@@ -47,7 +47,7 @@ func (h *stackHandler) qualifiedActionAllowed(w http.ResponseWriter, r *http.Req
 
 type stackResponse struct {
 	*store.Stack
-	PklContent string `json:"pkl_content,omitempty"`
+	PklContent *string `json:"pkl_content,omitempty"` // a successful read can return an empty file
 }
 
 // stackReadMetadata reports the effective entrypoint without changing stored metadata.
@@ -90,7 +90,7 @@ func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "unable to read stack configuration")
 		return
 	}
-	writeJSON(w, http.StatusOK, stackResponse{Stack: stackReadMetadata(stack), PklContent: pkl})
+	writeJSON(w, http.StatusOK, stackResponse{Stack: stackReadMetadata(stack), PklContent: &pkl})
 }
 
 type createRequest struct {
