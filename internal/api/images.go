@@ -17,7 +17,7 @@ type imageHandler struct {
 func (h *imageHandler) list(w http.ResponseWriter, r *http.Request) {
 	images, err := h.agent.Engine().ListImages(r.Context())
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "Image inventory unavailable; check the local container engine and retry")
 		return
 	}
 	writeJSON(w, http.StatusOK, images)
