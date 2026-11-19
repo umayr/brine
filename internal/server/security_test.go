@@ -5,15 +5,54 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"testing"
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/dill"
 )
+
+func TestServerLocalOperationLookupRemainsDisabled(t *testing.T) {
+	const token = "synthetic-token"
+	a, err := auth.New(auth.Config{User: "admin", Password: "synthetic-password", APIToken: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(config.Default(), agent.NewLocalAgent(nil, dill.New("dill")), nil, nil, nil, a)
+	id := "br_" + strings.Repeat("a", 32)
+	for _, tc := range []struct {
+		name          string
+		authenticated bool
+		status        int
+	}{
+		{"unauthenticated", false, http.StatusUnauthorized},
+		{"authenticated", true, http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/operations/"+id, nil)
+			req.Header.Set("Accept", "application/json")
+			if tc.authenticated {
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			if w.Code != tc.status {
+				t.Fatalf("lookup status = %d, want %d", w.Code, tc.status)
+			}
+			if tc.authenticated && (!strings.Contains(w.Body.String(), "Alpha operation history is disabled") ||
+				w.Header().Get("Cache-Control") != "no-store" ||
+				w.Header().Get("X-Content-Type-Options") != "nosniff") {
+				t.Fatal("disabled lookup response lost its message or safety headers")
+			}
+			if w.Header().Get("X-Brine-Request-ID") != "" || strings.Contains(w.Body.String(), id) {
+				t.Fatal("lookup disclosed operation ID")
+			}
+		})
+	}
+}
 
 func TestAllRegisteredRoutesAreGuarded(t *testing.T) {
 	a, err := auth.New(auth.Config{User: "admin", Password: "synthetic-password"})
