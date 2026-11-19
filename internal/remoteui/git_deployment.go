@@ -60,6 +60,9 @@ func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *
 			result, err := c.FenceDeployment(ctx, epoch, policy.Request, p.Stack, policy.Journal)
 			if err != nil {
 				p.Error = "No fence was verified. The pending request has not been cleared."
+				if err == agentclient.ErrJournalCapacity {
+					p.Error = "Dill could not record a fence because the journal is full. The pending request remains. Preserve the journal and inspect agent state."
+				}
 				break
 			}
 			p.Status = &result
@@ -191,6 +194,9 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 		}
 		return
 	}
+	if !p.CanRecordAttempt() {
+		return
+	}
 	entry := s.Entrypoint
 	if entry == "" {
 		entry = "compose.pkl"
@@ -202,7 +208,7 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 		return
 	}
 	seen := strings.Fields(p.Seen)
-	if slices.Contains(seen, commit) || len(seen) >= 128 {
+	if slices.Contains(seen, commit) {
 		return
 	}
 	// Remember that staging was attempted, including any ambiguous upload.
@@ -218,9 +224,12 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	if err != nil || plan.SelectionDigest == nil || (plan.Mode != "create" && plan.Mode != "update") {
 		return
 	}
-	if plan.JournalID == "" {
+	if plan.JournalID == "" || plan.JournalCapacityLow {
 		next := staged
 		next.Reason = "no-journal"
+		if plan.JournalCapacityLow {
+			next.Reason = "journal-capacity"
+		}
 		_ = h.gitStore.SwapRemoteGit(name, p.Source, &staged, &next)
 		return
 	}

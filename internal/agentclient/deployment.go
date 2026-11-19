@@ -18,6 +18,7 @@ type DeploymentPreview struct {
 	*dill.PreflightResult
 	CreateEnabled                   bool
 	Mode, PriorRequestID, JournalID string
+	JournalCapacityLow              bool
 }
 
 // PreviewDeployment asks the authenticated agent to run Dill's qualified
@@ -87,7 +88,7 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 	if len(j) > 1 || (len(j) == 1 && !canonicalHex(j[0], 16)) {
 		return nil, ErrProtocol
 	}
-	return &DeploymentPreview{PreflightResult: result, CreateEnabled: mode == "create", Mode: mode, PriorRequestID: prior, JournalID: resp.Header.Get(journalHeader)}, nil
+	return &DeploymentPreview{PreflightResult: result, CreateEnabled: mode == "create", Mode: mode, PriorRequestID: prior, JournalID: resp.Header.Get(journalHeader), JournalCapacityLow: resp.Header.Get(journalCapacityHeader) == "low"}, nil
 }
 
 func canonicalHex(s string, size int) bool {

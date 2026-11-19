@@ -59,6 +59,7 @@ type deploymentPage struct {
 	GitSettings                  bool
 	Branch, Source, Target       string
 	GitPolicy                    *store.RemoteGitPolicy
+	JournalCapacityLow           bool
 }
 
 func NewDeployment(a *auth.Authenticator, registry *targetregistry.Registry, stacks store.StackStore) (*Deployment, error) {
@@ -172,6 +173,9 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			p.Status = &status
 		} else {
 			p.Error = "Operation not confirmed. Look up this exact request before taking further action. No retry was sent."
+			if err == agentclient.ErrJournalCapacity {
+				p.JournalCapacityLow = true
+			}
 		}
 		h.render(w, p)
 		return
@@ -283,6 +287,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview) {
+	p.JournalCapacityLow = plan.JournalCapacityLow
 	p.Plan, p.ID = plan.PreflightResult, ""
 	if plan.Mode == "" || plan.SelectionDigest == nil || len(plan.Resources) == 0 {
 		return
@@ -410,14 +415,15 @@ func IsDeploymentPath(path string) bool {
 }
 
 var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><title>Remote deployment</title><main><h1>Remote deployment</h1><p><a href="/remote">Remote hosts</a></p>
-{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}<p>Target: <bdi>{{.Host}}</bdi></p>
+{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .JournalCapacityLow}}<p role="alert">Dill's journal is nearing its size limit. Preserve the journal; do not delete it to make room.</p>{{end}}<p>Target: <bdi>{{.Host}}</bdi></p>
 {{if .Status}}<p>Stack {{.Status.Stack}} · State {{.Status.State}} · Effects {{.Status.Effects}}{{if .Status.OperationID}} · Dill operation <code>{{.Status.OperationID}}</code>{{end}}</p>{{end}}
 {{if .Review}}<h2>Review captured files</h2><p>Only transfer trusted projects. Staging may contain credentials; the configured target can evaluate Pkl with the agent account’s privileges. This is not a sandbox. Effective Brine variables are not transferred. No files have been sent yet.</p><p>Entrypoint: <code>{{.Review.Entrypoint}}</code></p><ul>{{range .Review.Files}}<li>{{.Path}} · {{.Size}} bytes · <code>{{printf "%x" .SHA256}}</code></li>{{end}}</ul>
 <form method="post" action="/remote/deployment/stage"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="id" value="{{.Review.ID}}"><label><input type="checkbox" name="confirm" value="transfer" required> Send these exact files and request a preview</label><button>Stage and preview</button></form>
 {{else if .Plan}}<h2>Deployment preview for {{.Stack}}</h2><ul>{{range .Plan.Resources}}<li>{{.Kind}} {{.Name}} · {{.Presence}} · {{.Action}}{{if .Retention}} · {{.Retention}}{{end}}</li>{{end}}</ul>
 {{if .Mode}}<p>This preview did not permit writes. Save the status link before confirming if you need to recover after a disconnect.</p><form method="post" action="/remote/deployment/create"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="{{.Mode}}" required> Confirm {{.Mode}} for this stack on this target</label><button>{{if eq .Mode "create"}}Create stack{{else if eq .Mode "update"}}Update stack{{else}}Remove containers; keep data{{end}}</button></form>{{else}}<p>Mutation unavailable. Existing resources are not adopted.</p>{{end}}
 {{else if .GitPolicy}}<h2>Remote Git automation for {{.Stack}}</h2><p>Selected target: {{.Host}} · Branch: <code>{{.Branch}}</code> · State: {{.GitPolicy.Phase}} · Commit: <code>{{.GitPolicy.Commit}}</code></p>
-{{with .GitPolicy.Reason}}<p>{{if eq . "awaiting-status"}}No terminal status has been recorded yet.{{else if eq . "running"}}Dill admitted the request and it is running.{{else if eq . "unknown"}}Dill admitted the request but cannot prove its outcome. Inspect the target; do not retry.{{else if eq . "status-unavailable"}}The exact request or its original journal could not be verified.{{else if eq . "staging-or-preview"}}Staging or preview did not complete. Inspect the receiver before taking further action.{{else if eq . "no-journal"}}The agent does not advertise a recoverable journal. No apply was sent.{{else if eq . "not-admitted"}}Dill fenced the request without admitting it. Automation is disabled and the same commit will not be resubmitted.{{else if eq . "failed"}}Dill reported a failure. Inspect the target before re-enabling automation.{{end}}</p>{{end}}
+{{if .GitPolicy.AttemptHistoryLow}}<p role="alert">{{if .GitPolicy.CanRecordAttempt}}The Git attempt history is nearing its size limit.{{else}}The Git attempt history is full. No new commits will be sent.{{end}} Preserve the recorded attempts.</p>{{end}}
+{{with .GitPolicy.Reason}}<p>{{if eq . "awaiting-status"}}No terminal status has been recorded yet.{{else if eq . "running"}}Dill admitted the request and it is running.{{else if eq . "unknown"}}Dill admitted the request but cannot prove its outcome. Inspect the target; do not retry.{{else if eq . "status-unavailable"}}The exact request or its original journal could not be verified.{{else if eq . "staging-or-preview"}}Staging or preview did not complete. Inspect the receiver before taking further action.{{else if eq . "journal-capacity"}}Dill reports that its journal is near capacity. No apply was sent. Preserve the journal and inspect agent state.{{else if eq . "no-journal"}}The agent does not advertise a recoverable journal. No apply was sent.{{else if eq . "not-admitted"}}Dill fenced the request without admitting it. Automation is disabled and the same commit will not be resubmitted.{{else if eq . "failed"}}Dill reported a failure. Inspect the target before re-enabling automation.{{end}}</p>{{end}}
 {{if .GitPolicy.Request}}<p><a href="/remote/deployment?host={{.GitPolicy.Host|urlquery}}&amp;id={{.GitPolicy.Request|urlquery}}">Look up pending request <code>{{.GitPolicy.Request}}</code></a>. A missing result is not evidence of no effects.</p>
 {{if and .GitPolicy.Journal (eq .Target .GitPolicy.Target)}}<form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}"><input type="hidden" name="request" value="{{.GitPolicy.Request}}"><label><input type="checkbox" name="confirm" value="fence-unadmitted" required> Forbid this exact request from ever starting if Dill has not admitted it. This cannot cancel an admitted operation.</label><button name="mode" value="recover">Check and fence request</button></form>{{else}}<p>Fencing is unavailable without the original target and a journal binding.</p>{{end}}{{end}}
 <form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}">{{if .GitPolicy.Enabled}}<button name="mode" value="disable">Disable remote auto-deploy</button>{{else if not .GitPolicy.Request}}<label><input type="checkbox" name="confirm" value="trusted" required> Authorize this Git branch to send exact commits and create or update this stack without individual review. The target evaluates trusted Pkl with agent privileges.</label><button name="mode" value="enable">Enable remote auto-deploy</button>{{end}}</form>
