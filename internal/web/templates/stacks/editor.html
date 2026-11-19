@@ -61,9 +61,10 @@
         class="p-4 space-y-3"
       >
         <input type="hidden" name="active_file" value="{{.ActiveFile}}">
+        <p class="text-sm font-medium break-words">Pkl file contents: <bdi>{{.ActiveFile}}</bdi></p>
         <textarea
           id="pkl-editor"
-          aria-label="Pkl file contents"
+          aria-label="Pkl file contents: {{.ActiveFile}}"
           name="pkl_content"
           class="ui-textarea font-mono text-sm resize-y w-full"
           style="min-height: var(--editor-edit-min-height);"
