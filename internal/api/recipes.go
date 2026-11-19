@@ -25,7 +25,7 @@ func (h *recipeHandler) get(w http.ResponseWriter, r *http.Request) {
 	slug := chi.URLParam(r, "slug")
 	recipe, err := h.store.Get(slug)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeError(w, http.StatusNotFound, "Recipe unavailable; check the recipe name and local recipe storage")
 		return
 	}
 	writeJSON(w, http.StatusOK, recipe)
