@@ -62,7 +62,7 @@ the old b3/v1 entrypoint is not silently reinterpreted or switched.
 
 No artifact is automatically downloaded or installed by Brine. Artifact expiry
 is an input-receiving bound, not an invitation to use a different or latest run.
-The bundled/released Dill v0.7.0 and legacy secret CI pins remain unchanged.
+The qualification did not change the then-bundled Dill v0.7.0 or the legacy secret CI pins.
 Source execution and actual app qualification stay disabled pending their own
 evidence and integration; the original Pkl audit is deferred, not waived.
 
@@ -96,8 +96,7 @@ public handoff tar SHA256 is
 Use externally reviewed provenance/checksums before extracting/executing artifacts;
 an archive's own manifest cannot authenticate itself. Brine does not download,
 install or select a new candidate automatically. Choose its executable explicitly
-with `--dill /absolute/operator-installed/b3/dill`. The bundled/released **Dill
-v0.7.0 remains unchanged and incompatible with this operation contract**. Version
+with `--dill /absolute/operator-installed/b3/dill`. The then-bundled **Dill v0.7.0 was incompatible with this operation contract**. Version
 text or metadata `protocol.check` does not negotiate execution.
 
 Pinned complete producer docs:

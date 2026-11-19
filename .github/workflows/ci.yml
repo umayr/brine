@@ -65,7 +65,9 @@ jobs:
       - name: Smoke test bundled binaries
         run: |
           docker run --rm brine:ci --version
-          docker run --rm --entrypoint /usr/local/bin/dill brine:ci version
+          dill_version=$(awk -F= '$1 == "ARG DILL_VERSION" {print $2}' Dockerfile)
+          test -n "$dill_version"
+          test "$(docker run --rm --entrypoint /usr/local/bin/dill brine:ci version)" = "v$dill_version"
           docker run --rm --entrypoint /usr/local/bin/pkl brine:ci --version
       - name: Disabled Brine features
         run: |

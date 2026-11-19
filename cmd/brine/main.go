@@ -63,7 +63,7 @@ func run() error {
 	flag.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "directory for storing stack configs")
 	flag.StringVar(&cfg.Engine, "engine", cfg.Engine, "container engine: docker or podman")
 	flag.StringVar(&cfg.EngineSocket, "engine-socket", cfg.EngineSocket, "container engine socket/host, e.g. unix:///var/run/docker.sock")
-	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "operator-selected Dill binary (bundled v0.7.0 is incompatible with qualified operations)")
+	flag.StringVar(&cfg.DillBin, "dill", cfg.DillBin, "operator-selected Dill binary for local execution")
 	flag.StringVar(&cfg.StagingSocket, "staging-socket", "", "opt-in local dill-serve Unix socket")
 	flag.StringVar(&cfg.StagingIdentity, "staging-identity", "", "stable operator-asserted staging target identifier")
 	flag.StringVar(&cfg.OperationStateDir, "operation-state-dir", "", "S1 opt-in: preexisting canonical private0700 neutral request history outside data and coordination state")

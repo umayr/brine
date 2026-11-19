@@ -25,7 +25,7 @@ func (c *Config) validateCoordination() error {
 		return fmt.Errorf("qualified operations require authenticated Alpha with explicit Docker target")
 	}
 	if !filepath.IsAbs(c.DillBin) || filepath.Clean(c.DillBin) != c.DillBin {
-		return fmt.Errorf("qualified operations require an explicit absolute operator-selected --dill candidate; bundled v0.7.0 is incompatible")
+		return fmt.Errorf("qualified operations require an explicit absolute operator-selected --dill candidate")
 	}
 	if c.CoordinationLayout != "native-local-docker-v1" {
 		return fmt.Errorf("unsupported coordination layout")
