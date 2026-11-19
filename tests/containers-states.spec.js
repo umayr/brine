@@ -1,6 +1,18 @@
 const { test, expect } = require('@playwright/test');
 const baseURL = process.env.BRINE_FIXTURE_BASE_URL;
 
+test('local container Logs links identify their targets by accessible name', async ({ page }) => {
+  await page.goto(new URL('/containers', baseURL).href);
+  const list = page.locator('#containers-body');
+  for (const name of ['grafana', 'prometheus']) {
+    const container = list.getByRole('link', { name, exact: true });
+    const logs = list.getByRole('link', { name: `Logs for ${name}`, exact: true });
+    await expect(logs).toBeVisible();
+    await expect(logs).toHaveText('Logs');
+    await expect(logs).toHaveAttribute('href', await container.getAttribute('href'));
+  }
+});
+
 test('container detail keeps labels and log controls usable on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 700 });
   await page.goto(new URL('/containers/grafana', baseURL).href);
