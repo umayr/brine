@@ -72,7 +72,28 @@ func main() {
 	}
 	fixtureStacks := &fixtureStore{StackStore: st, LocalEditorWorkspace: st}
 	eng := &fixtureEngine{}
-	runner := dill.New("/nonexistent-brine-fixture-dill")
+	// Serve one populated stack inventory through the real read-only handler.
+	// The stub cannot invoke Dill or contact an engine; all other invocations fail.
+	homepage, err := st.Get("homepage")
+	if err != nil {
+		log.Fatal(err)
+	}
+	stub := filepath.Join(dir, "fixture-dill")
+	if err := os.WriteFile(stub, []byte(`#!/bin/sh
+[ "$4" = homepage ] && [ "${9}" = ps ] || exit 1
+printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"}]'
+`), 0700); err != nil {
+		log.Fatal(err)
+	}
+	runner := dill.New(stub)
+	runner.Engine = "docker"
+	runner.Socket = filepath.Join(dir, "unused.sock")
+	runner.ResolveStack = func(path string) (string, error) {
+		if path == homepage.PklPath {
+			return "homepage", nil
+		}
+		return "", fmt.Errorf("no synthetic inventory for this stack")
+	}
 	variables, err := configvars.New(dir, fixtureStacks)
 	if err != nil {
 		log.Fatal(err)

@@ -246,7 +246,7 @@
   <!-- Containers in this stack -->
   <div class="ui-panel">
     <div class="flex items-center justify-between px-5 py-4 border-b border-line">
-      <h2 class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="stack-containers-panel">Containers <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
+      <h2 id="stack-containers-heading" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="stack-containers-panel">Containers <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
       <button
         hx-get="/web/stacks/{{.Stack.Name}}/containers"
         hx-target="#stack-containers"
