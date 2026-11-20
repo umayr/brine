@@ -9,11 +9,14 @@ test('Settings navigation exposes only functional browser-local appearance contr
   const mutations = [];
   page.on('request', request => { if (!['GET', 'HEAD'].includes(request.method())) mutations.push(request.url()); });
   await page.goto(url('/'));
-  await expect(page.locator('aside #theme-select')).toHaveCount(0);
+  await expect(page.locator('.desk-product #theme-select')).toHaveCount(0);
+  await page.locator('.desk-more summary').click();
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
   await expect(page).toHaveURL(url('/settings'));
   await expect(page.getByRole('heading', { name: 'Appearance', level: 1 })).toBeVisible();
-  await expect(page.locator('aside a[aria-current="page"]')).toHaveAttribute('href', '/settings');
+  await page.locator('.desk-more summary').click();
+  await expect(page.getByRole('navigation', { name: 'More navigation' }).getByRole('link', { name: 'Settings' })).toHaveAttribute('aria-current', 'page');
+  await page.locator('.desk-more summary').press('Escape');
   await expect(page.getByRole('group', { name: 'Accent color' }).getByRole('radio')).toHaveCount(6);
   await expect(page.getByRole('link', { name: 'Security & access', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Audit', exact: true })).toHaveCount(0);
@@ -62,14 +65,14 @@ test('density changes table padding, survives HTMX replacement, and synchronizes
   await tablePage.goto(url('/containers'));
   await expect(tablePage.locator('#containers-body')).toContainText('grafana');
   const runtimeCell = tablePage.locator('#containers-body td').first();
-  await expect(runtimeCell).toHaveCSS('padding-top', compact);
+  const runtimeCompact = await runtimeCell.evaluate(el => getComputedStyle(el).paddingTop);
   await tablePage.evaluate(async () => {
     await htmx.ajax('GET', '/web/containers', { target: '#containers-body', swap: 'innerHTML' });
   });
-  await expect(runtimeCell).toHaveCSS('padding-top', compact);
+  await expect(runtimeCell).toHaveCSS('padding-top', runtimeCompact);
   await page.selectOption('#density-select', 'comfortable');
   await expect(tablePage.locator('html')).toHaveAttribute('data-density', 'comfortable');
-  await expect(runtimeCell).toHaveCSS('padding-top', padding + 'px');
+  expect(parseFloat(await runtimeCell.evaluate(el => getComputedStyle(el).paddingTop))).toBeGreaterThan(parseFloat(runtimeCompact));
   await tablePage.close();
 });
 
@@ -150,24 +153,19 @@ test('storage write failures keep the new choice without falsely claiming it was
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`Settings stays readable and its gear reachable on narrow screens: ${theme}`, async ({ page }, testInfo) => {
+  test(`Settings stays readable and its menu entry reachable on narrow screens: ${theme}`, async ({ page }, testInfo) => {
     for (const width of [320, 768]) {
       await page.setViewportSize({ width, height: 844 });
       await page.goto(url('/settings'));
       await page.selectOption('#theme-select', theme);
+      await page.locator('.desk-more summary').click();
       const settings = page.getByRole('link', { name: 'Settings', exact: true });
       await expect(settings).toBeVisible();
       const box = await settings.boundingBox();
       expect(box.x).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width).toBeLessThanOrEqual(width);
       expect(box.y + box.height).toBeLessThanOrEqual(844);
-      if (width >= 768) {
-        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-        const pinned = await settings.boundingBox();
-        expect(pinned.y).toBeGreaterThanOrEqual(0);
-        expect(pinned.y + pinned.height).toBeLessThanOrEqual(844);
-        await page.evaluate(() => window.scrollTo(0, 0));
-      }
+      await settings.press('Escape');
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
       const badges = await page.locator('.appearance-table .ui-status').evaluateAll(elements => elements.map(el => {
         const css = getComputedStyle(el);

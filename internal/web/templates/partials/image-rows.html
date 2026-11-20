@@ -1,9 +1,9 @@
 {{range .}}
-<tr class="hover:bg-raised/50" id="image-{{.ID}}">
+<tr class="hover:bg-raised/50" id="image-{{.ID}}" data-inventory-row data-name="{{if .Tags}}{{index .Tags 0}}{{else}}{{.ID}}{{end}}" data-filter="{{if .Tags}}tagged{{else}}untagged{{end}}" data-newest="{{.Created.Unix}}" data-largest="{{.Size}}">
   <td id="image-label-{{.ID}}" class="font-mono text-xs text-muted">{{.ID}}</td>
   <td>
     {{range .Tags}}
-    <span class="ui-status ui-status-neutral ui-status-sm font-mono mr-1">{{.}}</span>
+    <span class="image-tag ui-status ui-status-neutral ui-status-sm font-mono mr-1">{{.}}</span>
     {{else}}
     <span class="font-mono text-xs text-dim">untagged</span>
     {{end}}

@@ -5,24 +5,27 @@ test.skip(!base, 'Read-only fixture required');
 test('mobile Settings is discoverable through a named navigation landmark', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(base + '/settings');
-  const landmark = page.getByRole('navigation', { name: 'Settings', exact: true });
+  const more = page.locator('.desk-more summary');
+  await more.focus();
+  await page.keyboard.press('Enter');
+  const landmark = page.getByRole('navigation', { name: 'More navigation', exact: true });
   const settings = landmark.getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toBeVisible();
   await expect(settings).toHaveAttribute('aria-current', 'page');
   await expect(settings).toHaveAttribute('href', '/settings');
-  const nav = page.getByRole('navigation', { name: 'Main navigation', exact: true });
-  await nav.getByRole('link', { name: 'Snippets', exact: true }).focus();
+  await landmark.getByRole('link', { name: 'Snippets' }).focus();
   await page.keyboard.press('Tab');
   await expect(settings).toBeFocused();
-  await page.keyboard.press('Tab');
-  await expect(page.locator('header .runtime-summary')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(more).toBeFocused();
+  await expect(landmark).toBeHidden();
 });
 
 test('mobile navigation shows the current section on arrival without moving focus', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 850 });
-  await page.goto(base + '/recipes');
+  await page.goto(base + '/images');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
-  const current = nav.getByRole('link', { name: 'Snippets', exact: true });
+  const current = nav.getByRole('link', { name: 'Images', exact: true });
   await expect(current).toHaveAttribute('aria-current', 'page');
   await expect.poll(async () => {
     const bar = await nav.boundingBox();

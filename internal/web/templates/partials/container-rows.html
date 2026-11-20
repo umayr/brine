@@ -1,5 +1,5 @@
 {{range .}}
-<tr class="hover:bg-raised/50" id="container-{{.ID}}">
+<tr class="hover:bg-raised/50" id="container-{{.ID}}" data-inventory-row data-name="{{.Name}}" data-filter="{{.State}}">
   <td>
     <a id="container-name-{{.ID}}" href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono text-sm">{{.Name}}</a>
     <div class="font-mono text-xs text-dim mt-0.5" title="{{.ID}}">{{shortID .ID}}</div>
@@ -21,7 +21,7 @@
     {{if .Stack}}<a href="/stacks/{{.Stack}}" class="underline-offset-2 hover:underline font-mono text-muted">{{.Stack}}</a>{{else}}<span class="text-dim">—</span>{{end}}
   </td>
   <td class="font-mono text-xs text-muted">
-    {{range .Ports}}{{.}}<br>{{end}}
+    {{range $i, $port := .Ports}}{{if $i}} · {{end}}{{$port}}{{else}}—{{end}}
   </td>
   <td class="text-right">
     <span class="container-action-name" aria-hidden="true">{{.Name}}</span>

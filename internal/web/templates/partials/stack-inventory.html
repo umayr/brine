@@ -1,6 +1,6 @@
-<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1{{if .}} id="stack-inventory-heading"{{end}}>Stacks</h1></div><span class="index-count">{{len .}} TOTAL</span></div>
+<div class="index-heading"><div><span class="section-code">01 / CONFIGURATION</span><h1 id="stack-inventory-heading">Stacks</h1><p>Configured stacks and their observed container counts.</p></div><span class="index-count">{{len .Rows}} TOTAL</span></div>
 <div class="index-table">
-  {{if .}}
+  {{if .Rows}}
   <p class="stack-table-hint">Scroll horizontally to see all columns and actions.</p>
   <div id="stack-inventory-table" class="stack-table-scroll" role="region" aria-label="Stacks table, scroll horizontally for all columns and actions" tabindex="0">
     <table class="ui-table" aria-labelledby="stack-inventory-heading">
@@ -8,12 +8,14 @@
         <tr class="text-muted">
           <th>Name</th>
           <th>Source</th>
+          <th>Runtime</th>
+          <th>Containers</th>
           <th>Updated</th>
           <th class="text-right">Actions</th>
         </tr>
       </thead>
       <tbody>
-        {{range .}}
+        {{range .Rows}}
         <tr class="hover:bg-raised/50 cursor-pointer" id="stack-row-{{.Name}}" onclick="window.location='/stacks/{{.Name}}'">
           <td>
             <div class="flex items-center gap-2">
@@ -27,13 +29,15 @@
             {{if .Git}}
             <span class="ui-status ui-status-neutral ui-status-sm gap-1 font-normal">
               <i data-lucide="git-branch" class="w-3 h-3"></i>
-              {{.Git.Branch}}
+              Git · {{.Git.Branch}}
               {{if .Git.ReadOnly}}<span class="opacity-60">· ro</span>{{end}}
             </span>
             {{else}}
-            <span class="text-dim text-xs">local</span>
+            <span class="text-muted text-xs">Local</span>
             {{end}}
           </td>
+          <td>{{if not $.RuntimeAvailable}}<span class="ui-status ui-status-unknown ui-status-sm">unavailable</span>{{else if not .Total}}<span class="ui-status ui-status-neutral ui-status-sm">none observed</span>{{else if eq .Running .Total}}<span class="ui-status ui-status-running ui-status-sm">running</span>{{else if .Running}}<span class="ui-status ui-status-warning ui-status-sm">mixed</span>{{else}}<span class="ui-status ui-status-neutral ui-status-sm">not running</span>{{end}}</td>
+          <td class="text-xs text-muted">{{if $.RuntimeAvailable}}{{.Running}} of {{.Total}} running{{else}}—{{end}}</td>
           <td class="stack-updated font-mono text-xs text-muted">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
           <td class="text-right" onclick="event.stopPropagation()">
             <span class="stack-actions-name" aria-hidden="true">{{.Name}}</span>

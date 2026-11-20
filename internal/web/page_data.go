@@ -1,6 +1,8 @@
 package web
 
 import (
+	"time"
+
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/target"
@@ -48,11 +50,20 @@ func (p *pageData) setAuth(csrf, user string, enabled bool) {
 type dashboardData struct {
 	pageData
 	Stats                 dashboardStats
-	Stacks                []*store.Stack
-	Containers            []engine.ContainerInfo
+	Attention             []dashboardAlert
+	Observations          []dashboardObservation
 	StacksUnavailable     bool
 	ContainersUnavailable bool
 	ImagesUnavailable     bool
+}
+
+type dashboardAlert struct {
+	Label, Subject, Detail, URL, Action string
+}
+
+type dashboardObservation struct {
+	Name string
+	At   time.Time
 }
 
 type dashboardStats struct {

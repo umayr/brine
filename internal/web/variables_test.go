@@ -71,7 +71,7 @@ func TestVariablesRoutes(t *testing.T) {
 	}
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/variables", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "BRINE_VAR_DOMAIN") || !strings.Contains(w.Body.String(), `href="/variables" class="nav-item active"`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "BRINE_VAR_DOMAIN") || !strings.Contains(w.Body.String(), `href="/variables" aria-current="page"`) {
 		t.Fatalf("shared page: %d %s", w.Code, w.Body.String())
 	}
 	w = httptest.NewRecorder()

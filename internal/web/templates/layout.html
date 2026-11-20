@@ -8,6 +8,8 @@
   <script src="/static/theme.js"></script>
   <link href="/static/theme.css" rel="stylesheet">
   <link href="/static/vendor/app.css?v=stack-panels-4" rel="stylesheet">
+  <link href="/static/operations-desk.css" rel="stylesheet">
+  <script src="/static/inventory-view.js" defer></script>
   <script src="/static/vendor/htmx.min.js"></script>
   <script src="/static/vendor/htmx-sse.js"></script>
   <script src="/static/vendor/lucide.min.js"></script>
@@ -17,56 +19,30 @@
 <body class="bg-canvas min-h-screen">
 <a href="#main-content" class="skip-link">Skip to main content</a>
 
-<div class="app-shell flex min-h-screen">
-
-  <!-- Sidebar -->
-  <aside class="app-sidebar w-52 bg-panel border-r border-line flex flex-col shrink-0">
-    <div class="sidebar-brand px-5 py-5 border-b border-line">
-      <a href="/" class="brand-mark" aria-label="Brine home"><span class="brand-symbol" aria-hidden="true">b.</span><span>brine</span></a>
-      <div class="brand-caption">CONTAINER CONTROL</div>
-    </div>
-
-    <nav class="flex-1 py-4 px-3 space-y-0.5" aria-label="Main navigation">
-      <a href="/" class="nav-item {{if eq .Page "dashboard"}}active{{end}}" {{if eq .Page "dashboard"}}aria-current="page"{{end}}>
-        <i data-lucide="layout-dashboard" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Overview
-      </a>
-      <a href="/stacks" class="nav-item {{if eq .Page "stacks"}}active{{end}}" {{if eq .Page "stacks"}}aria-current="page"{{end}}>
-        <i data-lucide="layers" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Stacks
-      </a>
-      <a href="/containers" class="nav-item {{if eq .Page "containers"}}active{{end}}" {{if eq .Page "containers"}}aria-current="page"{{end}}>
-        <i data-lucide="container" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Containers
-      </a>
-      <a href="/images" class="nav-item {{if eq .Page "images"}}active{{end}}" {{if eq .Page "images"}}aria-current="page"{{end}}>
-        <i data-lucide="disc-3" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Images
-      </a>
-      <a href="/variables" class="nav-item {{if eq .Page "variables"}}active{{end}}" {{if eq .Page "variables"}}aria-current="page"{{end}}>
-        <i data-lucide="variable" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Variables
-      </a>
-      <a href="/recipes" class="nav-item {{if eq .Page "recipes"}}active{{end}}" {{if eq .Page "recipes"}}aria-current="page"{{end}}>
-        <i data-lucide="braces" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        Snippets
-      </a>
-      {{if .RemoteEnabled}}<a href="/remote" class="nav-item">Remote hosts</a>{{end}}
+<div class="app-shell ops-shell flex min-h-screen flex-col">
+  <header class="desk-product">
+    <a href="/" class="brand-mark" aria-label="Brine home"><span class="brand-symbol" aria-hidden="true">b.</span><span>brine</span></a>
+    <nav aria-label="Main navigation">
+      <a href="/" {{if eq .Page "dashboard"}}aria-current="page"{{end}}>Dashboard</a>
+      <a href="/stacks" {{if eq .Page "stacks"}}aria-current="page"{{end}}>Stacks</a>
+      <a href="/containers" {{if eq .Page "containers"}}aria-current="page"{{end}}>Containers</a>
+      <a href="/images" {{if eq .Page "images"}}aria-current="page"{{end}}>Images</a>
+      {{if .RemoteEnabled}}<a href="/remote">Remote hosts</a>{{end}}
     </nav>
-
-    <div class="sidebar-settings px-3 py-3 border-t border-line" role="navigation" aria-label="Settings">
-      <a href="/settings" class="nav-item {{if eq .Page "settings"}}active{{end}}" aria-label="Settings" title="Settings" {{if eq .Page "settings"}}aria-current="page"{{end}}>
-        <i data-lucide="settings" class="w-4 h-4 shrink-0" aria-hidden="true"></i>
-        <span class="nav-label">Settings</span>
-      </a>
-    </div>
-  </aside>
-
-  <!-- Main -->
-  <div class="flex-1 flex flex-col min-h-screen overflow-hidden">
-    <header class="app-header bg-panel border-b border-line px-6 py-3.5 flex items-center justify-between shrink-0">
-      <div class="text-sm text-muted">{{block "header" .}}Brine{{end}}</div>
-      <div class="flex items-center gap-2">
+    <details class="desk-more">
+      <summary class="ui-button ui-button-outline">More{{if eq .Page "settings"}} · Settings{{else if eq .Page "variables"}} · Variables{{else if eq .Page "recipes"}} · Snippets{{end}}</summary>
+      <nav aria-label="More navigation">
+        <a href="/variables" {{if eq .Page "variables"}}aria-current="page"{{end}}>Variables</a>
+        <a href="/recipes" {{if eq .Page "recipes"}}aria-current="page"{{end}}>Snippets</a>
+        <a href="/settings" {{if eq .Page "settings"}}aria-current="page"{{end}}>Settings</a>
+      </nav>
+    </details>
+    <button type="button" class="ui-button ui-button-ghost desk-theme" data-desk-theme>Toggle color scheme</button>
+  </header>
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="desk-context flex items-center justify-between">
+      <div class="desk-page-context">{{block "header" .}}{{end}}</div>
+      <div class="desk-target flex items-center gap-2">
         <details class="runtime-details">
           <summary class="runtime-summary">
             <span class="runtime-label">ENGINE</span>
@@ -135,15 +111,24 @@
   document.addEventListener('DOMContentLoaded', () => lucide.createIcons());
   document.addEventListener('htmx:afterSettle',  () => lucide.createIcons());
 
-  document.addEventListener('DOMContentLoaded', () => {
-    // Reveal the active link in the narrow navigation strip without moving focus.
-    const nav = document.querySelector('.app-sidebar nav');
-    const current = nav.querySelector('[aria-current="page"]');
-    if (!current || nav.scrollWidth <= nav.clientWidth) return;
-    const bar = nav.getBoundingClientRect();
-    const link = current.getBoundingClientRect();
-    if (link.left < bar.left) nav.scrollLeft += link.left - bar.left;
-    else if (link.right > bar.right) nav.scrollLeft += link.right - bar.right;
+  const themeButton = document.querySelector('[data-desk-theme]');
+  function labelTheme() {
+    themeButton.textContent = document.documentElement.dataset.theme === 'dark' ? 'Light mode' : 'Dark mode';
+  }
+  labelTheme();
+  window.addEventListener('brine:theme', labelTheme);
+  themeButton.addEventListener('click', () =>
+    setBrineTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'));
+
+  const more = document.querySelector('.desk-more');
+  more.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && more.open) {
+      more.open = false;
+      more.querySelector('summary').focus();
+    }
+  });
+  document.addEventListener('click', event => {
+    if (more.open && !more.contains(event.target)) more.open = false;
   });
 
   // Attach the CSRF token to every HTMX request and expose a helper for fetch().
