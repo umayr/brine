@@ -9,7 +9,7 @@ test('the Images pull dialog skips its invisible backdrop in the tab order', asy
     return route.abort();
   });
   await page.goto(new URL('/images', baseURL).href);
-  const opener = page.getByRole('button', { name: '+ Pull image', exact: true });
+  const opener = page.getByRole('button', { name: 'Pull image', exact: true });
   await opener.focus();
   await page.keyboard.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Pull image' });

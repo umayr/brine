@@ -25,7 +25,7 @@ func TestAppearanceSettingsRoute(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		"Appearance — Brine", "Settings / Appearance", "podman",
-		`class="nav-item active" aria-label="Settings"`,
+		`href="/settings" aria-current="page"`,
 		`id="theme-select"`, `id="density-select"`,
 		`data-reset-appearance`, `role="status"`,
 		"examples, not live observations",

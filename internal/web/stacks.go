@@ -25,7 +25,34 @@ func (h *Handler) stackInventory(w http.ResponseWriter, r *http.Request) {
 		h.renderPartial(w, r, "stack-inventory-error", err.Error())
 		return
 	}
-	h.renderPartial(w, r, "stack-inventory", stacks)
+	type stackRow struct {
+		*store.Stack
+		Running, Total int
+	}
+	data := struct {
+		Rows             []stackRow
+		RuntimeAvailable bool
+	}{}
+	byName := make(map[string]int, len(stacks))
+	for i, stack := range stacks {
+		byName[stack.Name] = i
+		data.Rows = append(data.Rows, stackRow{Stack: stack})
+	}
+	if h.agent != nil && len(data.Rows) > 0 {
+		containers, err := h.agent.Engine().ListContainers(r.Context())
+		data.RuntimeAvailable = err == nil
+		if data.RuntimeAvailable {
+			for _, c := range containers {
+				if i, ok := byName[c.Stack]; ok {
+					data.Rows[i].Total++
+					if c.State == "running" {
+						data.Rows[i].Running++
+					}
+				}
+			}
+		}
+	}
+	h.renderPartial(w, r, "stack-inventory", data)
 }
 
 func (h *Handler) stackNew(w http.ResponseWriter, r *http.Request) {

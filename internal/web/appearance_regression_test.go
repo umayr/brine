@@ -112,28 +112,33 @@ func TestDashboardAvailability(t *testing.T) {
 	}{
 		{
 			name:      "empty is not unavailable",
-			want:      []string{"No stacks yet.", "No running containers.", ">0</strong>"},
-			notWanted: []string{"Stacks unavailable", "Containers unavailable", "inventory unavailable"},
+			want:      []string{"No issues flagged", ">00</strong>", ">00 / 00</strong>", "Last observed", "<dt>Containers</dt>"},
+			notWanted: []string{"Inventory unavailable"},
 		},
 		{
-			name: "stopped containers do not produce an empty running table", populated: true,
-			want:      []string{"No running containers.", "example-stack", " / 1</span>"},
-			notWanted: []string{"stopped-container", "Containers unavailable", "Stacks unavailable"},
+			name: "managed stopped container is shown as an observed state", populated: true,
+			want:      []string{"Container exited", "stopped-container", "/containers/stopped-id", ">00 / 01</strong>"},
+			notWanted: []string{"Inventory unavailable", "No issues flagged"},
 		},
 		{
 			name: "stack failure is independent", stackErr: unavailable,
-			want:      []string{"Stacks unavailable", "No running containers."},
-			notWanted: []string{"No stacks yet.", "Containers unavailable", "inventory unavailable"},
+			want:      []string{"Open Stacks: Stacks", ">00 / 00</strong>", "<dt>Containers</dt>"},
+			notWanted: []string{"<dt>Stacks</dt>", "Open Containers: Containers"},
 		},
 		{
 			name: "container failure is independent", containerErr: unavailable,
-			want:      []string{"Containers unavailable", "inventory unavailable", "No stacks yet."},
-			notWanted: []string{"No running containers.", "Stacks unavailable"},
+			want:      []string{"Open Containers: Containers", "<dt>Stacks</dt>", "<dt>Images</dt>"},
+			notWanted: []string{"<dt>Containers</dt>", ">00 / 00</strong>"},
 		},
 		{
 			name: "image failure is independent", imageErr: unavailable,
-			want:      []string{"inventory unavailable", "No running containers.", "No stacks yet."},
-			notWanted: []string{"Containers unavailable", "Stacks unavailable"},
+			want:      []string{"Open Images: Images", "<dt>Stacks</dt>", "<dt>Containers</dt>"},
+			notWanted: []string{"<dt>Images</dt>", "Open Containers: Containers"},
+		},
+		{
+			name: "all unavailable", stackErr: unavailable, containerErr: unavailable, imageErr: unavailable,
+			want:      []string{"No current observations", "Open Stacks: Stacks", "Open Containers: Containers", "Open Images: Images"},
+			notWanted: []string{"<time datetime=", ">00 / 00</strong>"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,7 +146,7 @@ func TestDashboardAvailability(t *testing.T) {
 			eng := dashboardEngine{containerErr: tc.containerErr, imageErr: tc.imageErr}
 			if tc.populated {
 				st.stacks = []*store.Stack{{Name: "example-stack"}}
-				eng.containers = []engine.ContainerInfo{{Name: "stopped-container", State: "exited"}}
+				eng.containers = []engine.ContainerInfo{{ID: "stopped-id", Name: "stopped-container", State: "exited", Stack: "example-stack"}}
 			}
 			h := &Handler{store: st, agent: agent.NewLocalAgent(eng, nil)}
 			response := httptest.NewRecorder()

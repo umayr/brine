@@ -16,8 +16,8 @@ for (const theme of ['light', 'dark']) {
         expect(response.status(), route).toBe(200);
         await expect(page.locator('main')).toBeVisible();
         if (name === 'overview') {
-          await expect(page.locator('main')).toContainText('observability');
-          await expect(page.locator('main')).toContainText('grafana');
+          await expect(page.getByRole('region', { name: 'Needs attention' })).toContainText('jellyfin');
+          await expect(page.getByRole('region', { name: 'Inventory' })).toContainText('03 / 04');
         }
         if (name === 'containers') await expect(page.locator('#containers-body')).toContainText('grafana');
         if (name === 'images') await expect(page.locator('#images-body')).toContainText('grafana/grafana');

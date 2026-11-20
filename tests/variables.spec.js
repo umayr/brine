@@ -5,7 +5,9 @@ const base = process.env.BRINE_FIXTURE_BASE_URL || 'http://127.0.0.1:18082';
 test('shared variables have their own navigation and stack panel shows inheritance', async ({ page }) => {
   await page.goto(`${base}/variables`);
   await expect(page.getByRole('heading', { name: 'Variables', exact: true })).toBeVisible();
+  await page.locator('.desk-more summary').click();
   await expect(page.getByRole('link', { name: 'Variables', exact: true })).toHaveAttribute('aria-current', 'page');
+  await page.locator('.desk-more summary').press('Escape');
   await expect(page.getByText('BRINE_VAR_APP_DOMAIN', { exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Value for APP_DOMAIN' })).toHaveValue('example.test');
   await page.goto(`${base}/stacks/homepage`);

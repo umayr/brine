@@ -4,12 +4,17 @@
 {{define "header"}}Containers{{end}}
 
 {{define "content"}}
-<div class="index-page">
+<div class="index-page" data-inventory-view>
   <div class="index-heading"><div><span class="section-code">02 / RUNTIME</span><h1 id="containers-heading">Containers</h1><p class="text-muted text-sm mt-2">Containers available to the configured container engine. Refreshes every 5 seconds.</p></div></div>
   <div id="container-action-uncertain" class="ui-notice ui-notice-warning mb-4" role="alert" hidden>
     <div>A container action could not be confirmed. Inventory may be stale; inspect the container before retrying.
       <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Refresh containers</button>
     </div>
+  </div>
+  <div class="desk-inventory-controls" data-inventory-controls="containers-body" hidden>
+    <label>Search containers<input class="ui-input" type="search" data-inventory-search placeholder="Search containers"></label>
+    <label>Filter<select class="ui-input" data-inventory-filter><option value="">All</option><option value="running">Running</option><option value="exited">Exited</option><option value="paused">Paused</option><option value="other">Other states</option></select></label>
+    <label>Sort<select class="ui-input" data-inventory-sort><option value="">Engine order</option><option value="name">Name A–Z</option><option value="reverse">Name Z–A</option></select></label>
   </div>
   <p class="container-table-hint">Scroll horizontally to see all columns and actions.</p>
   <div class="index-table overflow-x-auto container-table-scroll" role="region" aria-label="Containers table, scroll horizontally for all columns and actions" tabindex="0">
@@ -41,6 +46,10 @@
         </tr>
       </tbody>
     </table>
+  </div>
+  <div class="desk-inventory-footer" data-inventory-result hidden>
+    <p role="status" data-inventory-summary></p>
+    <nav aria-label="Container pagination"><button type="button" class="ui-button ui-button-outline" data-inventory-prev>Previous</button><button type="button" class="ui-button ui-button-outline" data-inventory-next>Next</button></nav>
   </div>
   <template id="containers-request-error"><tr><td colspan="7" class="py-8 text-center"><div role="alert" class="text-error">Containers could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/containers" hx-target="#containers-body" hx-swap="innerHTML" hx-sync="#containers-body:replace">Retry</button></td></tr></template>
 </div>

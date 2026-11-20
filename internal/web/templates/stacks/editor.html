@@ -2,13 +2,7 @@
 
 {{define "title"}}Edit {{.Stack.Name}} — Brine{{end}}
 {{define "header"}}
-<div class="flex items-center gap-2 text-muted">
-  <a href="/stacks" class="hover:text-foreground transition-colors">Stacks</a>
-  <span class="text-dim">/</span>
-  <a href="/stacks/{{.Stack.Name}}" class="hover:text-foreground transition-colors font-mono">{{.Stack.Name}}</a>
-  <span class="text-dim">/</span>
-  <span class="text-foreground">Edit</span>
-</div>
+<nav class="desk-crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Dashboard</a></li><li><a href="/stacks">Stacks</a></li><li><a href="/stacks/{{.Stack.Name}}">{{.Stack.Name}}</a></li><li aria-current="page">Edit</li></ol></nav>
 {{end}}
 
 {{define "content"}}

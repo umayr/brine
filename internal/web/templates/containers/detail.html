@@ -2,15 +2,12 @@
 
 {{define "title"}}{{.Container.Name}} — Brine{{end}}
 {{define "header"}}
-<div class="flex items-center gap-2 text-muted">
-  <a href="/containers" class="hover:text-foreground transition-colors">Containers</a>
-  <span class="text-dim">/</span>
-  <span class="font-mono text-foreground">{{.Container.Name}}</span>
-</div>
+<nav class="desk-crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Dashboard</a></li><li><a href="/containers">Containers</a></li><li aria-current="page">{{.Container.Name}}</li></ol></nav>
 {{end}}
 
 {{define "content"}}
 <div class="space-y-4">
+  <header class="index-heading"><div><span class="section-code">02 / CONTAINER</span><h1>{{.Container.Name}}</h1></div></header>
 
   <!-- Meta + actions -->
   <div class="ui-panel p-5">

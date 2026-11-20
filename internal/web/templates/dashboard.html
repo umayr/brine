@@ -1,70 +1,47 @@
 {{template "layout.html" .}}
 
 {{define "title"}}Dashboard — Brine{{end}}
-{{define "header"}}Overview{{end}}
 
 {{define "content"}}
-<div class="overview">
-  <div class="overview-heading">
-    <div>
-      <h1>Overview</h1>
-    </div>
-    <a href="/stacks/new" class="ui-button ui-button-primary ui-button-sm gap-1.5">
-      <i data-lucide="plus" class="w-4 h-4"></i> New stack
-    </a>
-  </div>
+<div class="desk-dashboard">
+  <header class="index-heading">
+    <div><span class="section-code">01 / WORKSPACE</span><h1>Dashboard</h1><p>What needs attention, what is running, and what changed.</p></div>
+    <a href="/stacks/new" class="ui-button ui-button-primary">New stack</a>
+  </header>
 
-  <section class="overview-metrics" aria-label="Environment summary">
-    <a href="/stacks" class="overview-metric">
-      <span class="overview-metric-label">Stacks <i data-lucide="arrow-up-right" class="w-4 h-4"></i></span>
-      <strong>{{if .StacksUnavailable}}—{{else}}{{.Stats.Stacks}}{{end}}</strong><span class="overview-metric-note">{{if .StacksUnavailable}}unavailable{{else}}configured{{end}}</span>
-    </a>
-    <a href="/containers" class="overview-metric">
-      <span class="overview-metric-label">Containers <i data-lucide="arrow-up-right" class="w-4 h-4"></i></span>
-      <strong>{{if .ContainersUnavailable}}—{{else}}{{.Stats.Running}}<span class="overview-metric-total"> / {{.Stats.Containers}}</span>{{end}}</strong><span class="overview-metric-note">{{if .ContainersUnavailable}}inventory unavailable{{else}}running / total{{end}}</span>
-    </a>
-    <a href="/images" class="overview-metric">
-      <span class="overview-metric-label">Images <i data-lucide="arrow-up-right" class="w-4 h-4"></i></span>
-      <strong>{{if .ImagesUnavailable}}—{{else}}{{.Stats.Images}}{{end}}</strong><span class="overview-metric-note">{{if .ImagesUnavailable}}inventory unavailable{{else}}reported by engine{{end}}</span>
-    </a>
+  <section class="desk-attention{{if not .Attention}} desk-attention-clear{{end}}" aria-labelledby="attention-heading">
+    <header><div><span class="section-code">OPERATOR QUEUE</span><h2 id="attention-heading">Needs attention</h2></div><strong>{{printf "%02d" (len .Attention)}} <small>open</small></strong></header>
+    {{if .Attention}}
+    <ul class="desk-dispatch">
+      {{range .Attention}}<li><span aria-hidden="true">◇</span><div><p class="desk-signal">{{.Label}}</p><strong>{{.Subject}}</strong><p>{{.Detail}}</p><a class="ui-button desk-alert-action" href="{{.URL}}" aria-label="{{.Action}}: {{.Subject}}">{{.Action}} <span aria-hidden="true">→</span></a></div></li>{{end}}
+    </ul>
+    {{else}}<p>No issues flagged by the current inventory checks. This is not a health check.</p>{{end}}
   </section>
 
-  <div class="overview-sections">
-    <section class="overview-section">
-      <div class="overview-section-header"><h2 id="dashboard-stacks-heading">Stacks</h2><a href="/stacks" class="overview-link" aria-label="View all stacks">View all <span aria-hidden="true">→</span></a></div>
-      {{if .StacksUnavailable}}
-      <div class="overview-empty"><div><h3>Stacks unavailable</h3><p>Could not load stack data.</p></div></div>
-      {{else if .Stacks}}
-      <div class="overflow-x-auto"><table class="ui-table ui-table-sm" aria-labelledby="dashboard-stacks-heading">
-        <thead><tr><th>Name</th><th>Updated</th><th></th></tr></thead><tbody>
-        {{range .Stacks}}<tr>
-          <td><a href="/stacks/{{.Name}}" class="underline-offset-2 hover:underline font-mono font-medium">{{.Name}}</a> {{if .Git}}<span class="ui-status ui-status-neutral ui-status-xs">git</span>{{end}}</td>
-          <td class="font-mono text-xs text-muted">{{.UpdatedAt.Format "2006-01-02 15:04"}}</td>
-          <td class="text-right"><a href="/stacks/{{.Name}}" class="overview-link" aria-label="View stack {{.Name}}">View <span aria-hidden="true">→</span></a></td>
-        </tr>{{end}}
-        </tbody></table></div>
-      {{else}}
-      <div class="overview-empty"><div><p>No stacks yet.</p><a href="/stacks/new" class="overview-link">Create a stack <span aria-hidden="true">→</span></a></div></div>
-      {{end}}
-    </section>
+  <section aria-labelledby="desk-inventory-heading">
+    <h2 id="desk-inventory-heading">Inventory</h2>
+    <div class="desk-inventory">
+      <a href="/stacks"><span>Stacks</span><strong>{{if .StacksUnavailable}}—{{else}}{{printf "%02d" .Stats.Stacks}}{{end}}</strong><small>{{if .StacksUnavailable}}Unavailable{{else}}Configured{{end}}</small></a>
+      <a href="/containers"><span>Containers</span><strong>{{if .ContainersUnavailable}}—{{else}}{{printf "%02d / %02d" .Stats.Running .Stats.Containers}}{{end}}</strong><small>{{if .ContainersUnavailable}}Inventory unavailable{{else}}Running / total{{end}}</small></a>
+      <a href="/images"><span>Images</span><strong>{{if .ImagesUnavailable}}—{{else}}{{printf "%02d" .Stats.Images}}{{end}}</strong><small>{{if .ImagesUnavailable}}Inventory unavailable{{else}}Reported by engine{{end}}</small></a>
+      {{if .RemoteEnabled}}<a href="/remote"><span>Remote hosts</span><strong aria-hidden="true">↗</strong><small>Open host registry</small></a>{{end}}
+    </div>
+  </section>
 
-    <section class="overview-section">
-      <div class="overview-section-header"><h2 id="dashboard-running-containers-heading">Running containers</h2><a href="/containers" class="overview-link" aria-label="View all containers">View all <span aria-hidden="true">→</span></a></div>
-      {{if .ContainersUnavailable}}
-      <div class="overview-empty"><div><h3>Containers unavailable</h3><p>Could not load container inventory. Check the configured engine and permissions.</p></div></div>
-      {{else if .Stats.Running}}
-      <div class="overflow-x-auto" role="region" aria-label="Running containers table" tabindex="0"><table class="ui-table ui-table-sm" aria-labelledby="dashboard-running-containers-heading">
-        <thead><tr><th>Name</th><th>Image</th><th>Stack</th></tr></thead><tbody>
-        {{range .Containers}}{{if eq .State "running"}}<tr>
-          <td><a href="/containers/{{.ID}}" class="underline-offset-2 hover:underline font-mono">{{.Name}}</a></td>
-          <td class="font-mono text-xs text-muted">{{.Image}}</td>
-          <td>{{if .Stack}}<a href="/stacks/{{.Stack}}" class="underline-offset-2 hover:underline">{{.Stack}}</a>{{else}}—{{end}}</td>
-        </tr>{{end}}{{end}}
-        </tbody></table></div>
-      {{else}}
-      <div class="overview-empty"><div><p>No running containers.</p></div></div>
-      {{end}}
-    </section>
-  </div>
+  <section aria-labelledby="desk-operations-heading">
+    <h2 id="desk-operations-heading">Recent operations</h2>
+    <p>Operator requests and their recorded outcomes, not inventory refreshes or container events.</p>
+    <p class="desk-empty">{{if .OperationHistory}}History is available by request ID, not as a list. Open a stack to check a saved operation ID.{{else}}An aggregate request history is not available for this workspace. Check operation results on the stack where the request was made.{{end}} <a href="/stacks">Open stacks</a></p>
+  </section>
+
+  <section class="desk-observations" aria-labelledby="desk-observed-heading">
+    <h2 id="desk-observed-heading">Last observed</h2>
+    {{if .Observations}}
+    <dl><div><dt>Target</dt><dd>Local engine · {{.RuntimeEngine}}</dd></div>
+    {{range .Observations}}<div><dt>{{.Name}}</dt><dd><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "02 Jan 15:04:05 UTC"}}</time></dd></div>{{end}}
+    </dl>
+    <p>Successful inventory reads on this page load, not a health check. Stacks are read from local configuration.</p>
+    {{else}}<p>No current observations. None of the inventory checks succeeded.</p>{{end}}
+  </section>
 </div>
 {{end}}

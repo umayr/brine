@@ -2,12 +2,7 @@
 
 {{define "title"}}{{.Stack.Name}} — Brine{{end}}
 {{define "header"}}
-<div class="flex items-center gap-2 text-muted">
-  <a href="/stacks" class="hover:text-foreground transition-colors">Stacks</a>
-  <span class="text-dim">/</span>
-  <span class="font-mono text-foreground">{{.Stack.Name}}</span>
-  {{if .Stack.Git}}<span class="ui-status ui-status-neutral ui-status-sm gap-1 font-normal"><i data-lucide="git-branch" class="w-3 h-3"></i>git</span>{{end}}
-</div>
+<nav class="desk-crumbs" aria-label="Breadcrumb"><ol><li><a href="/">Dashboard</a></li><li><a href="/stacks">Stacks</a></li><li aria-current="page">{{.Stack.Name}}</li></ol></nav>
 {{end}}
 
 {{define "header-actions"}}
@@ -22,8 +17,10 @@
 {{define "content"}}
 <div class="space-y-4">
 
-  <!-- Action bar -->
-  <div class="ui-panel px-4 py-3 flex flex-wrap items-center gap-1.5">
+  <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1><p>{{if .Stack.Git}}Git · {{.Stack.Git.Branch}}{{else}}Local source{{end}}</p></div></header>
+  <nav class="desk-object-nav" aria-label="Stack sections"><a href="#stack-containers-heading">Runtime</a>{{if not (and .Stack.Git .Stack.Git.ReadOnly)}}<a href="/stacks/{{.Stack.Name}}/edit">Source</a>{{else}}<a href="#git-source-panel">Source</a>{{end}}<a href="#plan-button">Plan and requests</a></nav>
+
+  <div class="desk-stack-actions">
     <!-- Primary action -->
     <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
       onclick="runAction('up', '{{.Stack.Name}}')"
@@ -34,7 +31,7 @@
     </button>
 
     <!-- Lifecycle -->
-    <div class="flex items-center gap-1 border-l border-line pl-1.5 ml-0.5">
+    <div class="flex flex-wrap items-center gap-1">
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action title="Stop containers and remove them"
         onclick="confirmAction('Run down', 'Stop and remove containers for {{.Stack.Name}}?', () => runAction('down', '{{.Stack.Name}}'))"
       >
@@ -64,7 +61,7 @@
     </div>
 
     <!-- Plan -->
-    <div class="border-l border-line pl-1.5 ml-0.5">
+    <div class="flex flex-wrap gap-1">
       <button id="plan-button" class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action
         hx-get="/web/stacks/{{.Stack.Name}}/plan"
         hx-target="#plan-result"
@@ -83,7 +80,7 @@
     </div>
 
     <!-- Danger zone -->
-    <div class="flex items-center gap-1.5 ml-auto">
+    <div class="desk-danger flex flex-wrap items-center gap-1.5">
       <div id="action-status" role="status" aria-live="polite" class="hidden ui-status ui-status-neutral ui-status-sm font-mono mr-1">idle</div>
       <button class="ui-button ui-button-sm ui-button-outline ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Teardown stack', 'This removes containers, images, volumes, and networks for {{.Stack.Name}}.', '{{.Stack.Name}}', () => runAction('teardown', '{{.Stack.Name}}'))"
