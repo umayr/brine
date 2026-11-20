@@ -187,7 +187,8 @@ async function verifyGitPause(page, deployURL) {
       break;
     }
   }
-  assert.ok(blocked, 'remote Git policy did not enter blocked state after invalid preview');
+  assert.ok(blocked, 'remote Git policy did not enter blocked state during staging or preview');
+  await page.getByRole('button', { name: 'Disable remote auto-deploy' }).waitFor();
   await page.getByText('Staging or preview did not complete. Inspect the receiver before taking further action.').waitFor();
   assert.match(await page.getByText(/State: blocked/).textContent(), new RegExp(invalidCommit));
 
@@ -218,9 +219,6 @@ async function verifyGitPause(page, deployURL) {
     }
   }
   assert.ok(witnessed, 'no successful Git poll witness after advertising the successor');
-  const journal = JSON.parse(fs.readFileSync(process.env.PILOT_JOURNAL, 'utf8'));
-  assert.ok(journal.operations.some(row => row.stack === witness && row.state === 'succeeded'));
-  assert.ok(!journal.operations.some(row => row.stack === stack), 'blocked Git project has an admitted operation');
   await page.goto(deployURL);
   await page.getByLabel('Managed stack name').fill(witness);
   await page.getByRole('button', { name: 'Preview removal' }).click();
@@ -233,7 +231,11 @@ async function verifyGitPause(page, deployURL) {
   assert.equal(await page.getByRole('link', { name: /Look up pending request/ }).count(), 0);
   assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${stack}`), '');
   assert.equal(docker('network', 'ls', '--filter', `name=^${stack}$`, '-q'), '');
-  console.log('Remote Git pause retained blocked commit and guidance while a separate Git stack deployed; no admitted operation or matching Docker resources for the blocked stack');
+  await page.getByRole('button', { name: 'Disable remote auto-deploy' }).waitFor();
+  const journal = JSON.parse(fs.readFileSync(process.env.PILOT_JOURNAL, 'utf8'));
+  assert.ok(journal.operations.some(row => row.stack === witness && row.state === 'succeeded'));
+  assert.ok(!journal.operations.some(row => row.stack === stack), 'blocked Git project has an admitted operation');
+  console.log('Enabled Git policy remained blocked while a separate Git stack deployed; final journal and Docker checks found no admission or matching resources for the blocked stack');
 }
 
 // Avoid Playwright call logs that could contain pairing or login values.
