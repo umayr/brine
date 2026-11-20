@@ -86,7 +86,7 @@ func TestLifecycleGuard(t *testing.T) {
 		lookupErr  error
 		allow      bool
 	}{
-		{"ordinary", &ContainerInfo{ID: "ordinary"}, nil, false, nil, true}, {"managed", managed(), nil, false, nil, true}, {"record", managed(), nil, true, nil, false}, {"record-error", managed(), nil, false, errors.New("bad"), false}, {"ambiguous", &ContainerInfo{ID: "id", Stack: "demo", Labels: map[string]string{"dill.stack": "demo"}}, nil, false, nil, false}, {"missing-id", &ContainerInfo{}, nil, false, nil, false}, {"inspect", nil, errors.New("synthetic"), false, nil, false},
+		{"ordinary", &ContainerInfo{ID: "ordinary"}, nil, false, nil, true}, {"managed", managed(), nil, false, nil, false}, {"record", managed(), nil, true, nil, false}, {"record-error", managed(), nil, false, errors.New("bad"), false}, {"ambiguous", &ContainerInfo{ID: "id", Stack: "demo", Labels: map[string]string{"dill.stack": "demo"}}, nil, false, nil, false}, {"missing-id", &ContainerInfo{}, nil, false, nil, false}, {"inspect", nil, errors.New("synthetic"), false, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &guardEngine{info: tc.info, inspectErr: tc.inspectErr}
@@ -94,6 +94,9 @@ func TestLifecycleGuard(t *testing.T) {
 			err := g.StartContainer(ctx, "mutable-name")
 			if (err == nil) != tc.allow {
 				t.Fatalf("start %v", err)
+			}
+			if tc.name == "managed" && !errors.Is(err, ErrManagedStart) {
+				t.Fatalf("managed start denial: %v", err)
 			}
 			err = g.RestartContainer(ctx, "mutable-name")
 			allowRestart := tc.name == "ordinary"

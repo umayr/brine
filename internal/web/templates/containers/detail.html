@@ -58,7 +58,7 @@
         hx-swap="innerHTML"
       >
         <i data-lucide="square" class="w-3.5 h-3.5"></i>
-        Stop
+        {{if .Container.Stack}}Emergency stop{{else}}Stop{{end}}
       </button>
       <button class="ui-button ui-button-ghost ui-button-sm gap-1.5"
         data-detail-action hx-disabled-elt="#container-detail-actions button" hx-sync="#container-detail-actions:drop"

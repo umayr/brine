@@ -45,6 +45,10 @@ func (h *Handler) containerRows(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerStart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().StartContainer(r.Context(), id); err != nil {
+		if errors.Is(err, engine.ErrManagedStart) {
+			http.Error(w, engine.ErrManagedStart.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
