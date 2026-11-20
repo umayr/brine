@@ -19,6 +19,55 @@ import (
 	"github.com/umayr/brine/internal/dill"
 )
 
+func TestJournalDeploymentStatusRequiresMatchingEvidence(t *testing.T) {
+	id, journal := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	for _, tc := range []struct {
+		name, responseJournal, responseID, responseStack string
+		status                                           int
+		duplicate, wantOK                                bool
+	}{
+		{name: "matching", responseJournal: journal, responseID: id, responseStack: "synthetic", status: http.StatusOK, wantOK: true},
+		{name: "unavailable", responseJournal: journal, status: http.StatusServiceUnavailable},
+		{name: "missing journal", responseID: id, responseStack: "synthetic", status: http.StatusOK},
+		{name: "foreign journal", responseJournal: strings.Repeat("c", 32), responseID: id, responseStack: "synthetic", status: http.StatusOK},
+		{name: "duplicate journal", responseJournal: journal, responseID: id, responseStack: "synthetic", status: http.StatusOK, duplicate: true},
+		{name: "different request", responseJournal: journal, responseID: strings.Repeat("d", 32), responseStack: "synthetic", status: http.StatusOK},
+		{name: "different stack", responseJournal: journal, responseID: id, responseStack: "other", status: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/deploy/operations/"+id || r.Header.Get(journalHeader) != journal {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				if tc.responseJournal != "" {
+					w.Header().Add(journalHeader, tc.responseJournal)
+				}
+				if tc.duplicate {
+					w.Header().Add(journalHeader, tc.responseJournal)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				fmt.Fprintf(w, `{"requestId":%q,"stack":%q,"state":"not-admitted","effects":"none"}`, tc.responseID, tc.responseStack)
+			})
+			c.bearer = "synthetic"
+			c.epochCtx = context.Background()
+			got, err := c.JournalDeploymentStatus(context.Background(), testEpoch, id, "synthetic", journal)
+			if tc.wantOK {
+				if err != nil || got.RequestID != id || got.State != "not-admitted" {
+					t.Fatalf("matching evidence: status=%+v err=%v", got, err)
+				}
+			} else if err != ErrProtocol || got != (DeploymentStatus{}) {
+				t.Fatalf("unverified evidence accepted: status=%+v err=%v", got, err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("got %d requests; want exactly one lookup and no submission", calls.Load())
+			}
+		})
+	}
+}
+
 func TestHTTPSPreviewVerifiesReceiptTarget(t *testing.T) {
 	golden, err := os.ReadFile("../dill/testdata/preflight-v1/preview-up-create.json")
 	if err != nil {
