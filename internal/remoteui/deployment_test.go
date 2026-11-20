@@ -132,13 +132,22 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			files := make([]file, 0, len(req.Files))
 			found := false
 			for _, row := range req.Files {
-				files = append(files, row.file)
+				observed := file{Path: row.Path, Length: len(row.Bytes), SHA256: fmt.Sprintf("%x", sha256.Sum256(row.Bytes))}
+				if row.file != observed {
+					t.Error("uploaded metadata did not match the uploaded bytes")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
 				if row.Path == req.Entrypoint {
 					found = string(row.Bytes) == "original-reviewed-project"
 					if differentManifest.Load() {
-						files[len(files)-1].SHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte("different synthetic content")))
+						// Use equally sized alternate fixture bytes: the catalog
+						// differs in exactly one valid field, the file digest.
+						alternate := bytes.Repeat([]byte{'x'}, observed.Length)
+						observed.SHA256 = fmt.Sprintf("%x", sha256.Sum256(alternate))
 					}
 				}
+				files = append(files, observed)
 			}
 			if !found {
 				t.Error("uploaded bytes were not the reviewed capture")
