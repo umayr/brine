@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/umayr/brine/internal/secretbindings"
@@ -120,6 +121,33 @@ func TestDisabledDirectSecretAndAlphaOperations(t *testing.T) {
 	}
 	if _, err := r.PS(context.Background(), "/synthetic"); !errors.Is(err, ErrAlphaDisabled) {
 		t.Fatalf("alpha ps: %v", err)
+	}
+}
+
+// A valid provider review is evidence, not permission to enable local apply.
+func TestDisabledApplyRejectsMatchingPreflight(t *testing.T) {
+	binding := PreflightBinding{
+		Stack: "synthetic", Operation: "up", Engine: "docker",
+		EndpointDigest:          "sha256:" + strings.Repeat("1", 64),
+		QualifiedIdentityDigest: "sha256:" + strings.Repeat("2", 64),
+	}
+	exit := 0
+	review := ObservePreflightInvocation(preflightFixtureRead(t, "preview-up-create.json").Stdout, &exit)
+	if err := CheckPreflightBinding(&review, binding); err != nil {
+		t.Fatalf("fixture must satisfy the binding: %v", err)
+	}
+	observer := testObserver{
+		start:  func() error { t.Error("disabled apply recorded start"); return nil },
+		finish: func(OperationInvocation) error { t.Error("disabled apply recorded completion"); return nil },
+	}
+	ctx := WithOperationObserver(context.Background(), observer)
+	r := New("/must-not-execute")
+	var out bytes.Buffer
+	if _, err := r.ApplyBoundPreflight(ctx, "/synthetic", &review, binding, false, &out); !errors.Is(err, ErrAlphaDisabled) {
+		t.Fatalf("disabled apply: got %v, want %v", err, ErrAlphaDisabled)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("disabled apply wrote output: %q", out.String())
 	}
 }
 
