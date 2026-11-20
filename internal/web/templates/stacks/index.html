@@ -76,8 +76,10 @@ async function deployStack(name, btn) {
       summary.hidden = false;
       summary.textContent = stream.summary();
       showToast('Deploy ' + stream.status.result + ': ' + name, stream.status.result === 'succeeded' ? 'success' : 'error');
-    } else if (stream.status.error || !stream.status.done) {
+    } else if (stream.status.error) {
       showToast('Deploy failed: ' + name, 'error');
+    } else if (!stream.status.done) {
+      showToast('Deploy outcome unknown: ' + name + '. Inspect resources before retrying.', 'error');
     } else {
       showToast('Deploy complete: ' + name, 'success');
     }
@@ -87,7 +89,7 @@ async function deployStack(name, btn) {
       summary.hidden = false;
       summary.textContent = 'Invocation: unknown. No complete validated terminal receipt. Inspect offline coordination state and resources; do not automatically retry.';
     }
-    showToast(qualified ? 'Deploy unknown; inspect offline' : 'Deploy failed', 'error');
+    showToast(qualified ? 'Deploy unknown; inspect offline' : 'Deploy outcome unknown; inspect resources before retrying', 'error');
   } finally {
     stackActions.delete(name);
     updateStackActions();

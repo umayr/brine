@@ -182,6 +182,39 @@ test('stream status handles markers split at every chunk boundary', () => {
   }
 });
 
+test('legacy deploy pages report interrupted streams as unknown', async () => {
+  const ui = require('../internal/web/static/ui.js');
+  for (const scenario of ['eof', 'read-error', 'fetch-error', 'error-marker', 'done-marker']) {
+    const expected = scenario === 'error-marker' ? 'failed' : scenario === 'done-marker' ? 'complete' : 'unknown';
+    const fetch = async () => {
+      if (scenario === 'fetch-error') throw new Error('network');
+      let count = 0;
+      return {ok: true, body: {getReader: () => ({read: async () => {
+        if (count++ === 0) return {done: false, value: new TextEncoder().encode(scenario === 'error-marker' ? '[brine:error] failure\n' : scenario === 'done-marker' ? '[brine:done] complete\n' : 'partial output\n')};
+        if (scenario === 'read-error') throw new Error('disconnected');
+        return {done: true};
+      }})}};
+    };
+    const detail = read('internal/web/templates/stacks/detail.html');
+    const script = detail.slice(detail.indexOf('async function runAction('), detail.indexOf('</script>', detail.indexOf('async function runAction(')));
+    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status', 'plan-button', 'plan-result'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, replaceChildren() {}}]));
+    const context = {document: {body: {}, getElementById: id => elements[id] || null, querySelectorAll: () => []}, htmx: {trigger() {}}, fetch, BrineUI: ui, brineHeaders: x => x, showToast() {}, TextDecoder, Date};
+    vm.createContext(context); vm.runInContext(script, context);
+    await context.runAction('up', 'test');
+    assert.equal(elements['action-status'].textContent, expected, `detail ${scenario}`);
+    if (expected === 'unknown') assert.match(elements['action-log'].textContent, /Inspect resources before retrying/);
+
+    const index = read('internal/web/templates/stacks/index.html');
+    const deploy = index.slice(index.indexOf('async function deployStack('), index.indexOf('async function deleteStack('));
+    const toasts = [];
+    const indexContext = {document: {getElementById: () => null}, fetch, BrineUI: ui, brineHeaders: () => ({}), showToast: message => toasts.push(message), stackActions: new Map(), updateStackActions() {}, lucide: {createIcons() {}}, TextDecoder};
+    vm.createContext(indexContext); vm.runInContext(deploy, indexContext);
+    await indexContext.deployStack('test', {});
+    assert.match(toasts.at(-1), new RegExp(expected, 'i'), `index ${scenario}`);
+    if (expected === 'unknown') assert.match(toasts.at(-1), /inspect resources before retrying/i);
+  }
+});
+
 test('new file fields assign untrusted names as DOM values, never HTML', () => {
   const { createFileFields } = require('../internal/web/static/ui.js');
   const doc = { createElement: () => ({ style: {}, setAttribute(name, value) { this[name] = value; } }) };
