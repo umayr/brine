@@ -82,7 +82,8 @@ verify_manifest() {
 validate() {
   local path=$1 expected=$2 receipt
   receipt=$("${as_reader[@]}" "$root/dill" validate -f "$path" --format operation-v1)
-  jq -e --arg expected "$expected" '. == {version:"dill.validate/1", operation:"validate", outcome:"succeeded", engineEffects:"none", stack:$expected}' <<<"$receipt" >/dev/null
+  # Slurp so an extra JSON value cannot be hidden by a matching last receipt.
+  jq -es --arg expected "$expected" '. == [{version:"dill.validate/1", operation:"validate", outcome:"succeeded", engineEffects:"none", stack:$expected}]' <<<"$receipt" >/dev/null
 }
 verify_manifest
 validate "$root/workspace/compose.pkl" edited-workspace
