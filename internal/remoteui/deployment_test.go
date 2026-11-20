@@ -77,6 +77,8 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	plan := bytes.ReplaceAll(golden.Stdout, []byte("sha256:"+strings.Repeat("1", 64)), []byte(fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(socket)))))
 	var calls atomic.Int32
 	var manifest atomic.Value
+	var differentManifest atomic.Bool
+	var catalogReads, previewCalls atomic.Int32
 	var operationID atomic.Value
 	var fenceCalls, fenceState atomic.Int32
 	var partial atomic.Bool
@@ -126,6 +128,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				files = append(files, row.file)
 				if row.Path == req.Entrypoint {
 					found = string(row.Bytes) == "original-reviewed-project"
+					if differentManifest.Load() {
+						files[len(files)-1].SHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte("different synthetic content")))
+					}
 				}
 			}
 			if !found {
@@ -140,8 +145,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			w.WriteHeader(201)
 			fmt.Fprintf(w, `{"status":"staged","stage_id":%q}`, stage)
 		case "/v1/snapshots/" + stage:
+			catalogReads.Add(1)
 			fmt.Fprint(w, manifest.Load().(string))
 		case "/v1/deploy/preview":
+			previewCalls.Add(1)
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			if enabled.Load() {
 				w.Header().Set("X-Dill-Create-Enabled", "1")
@@ -307,6 +314,19 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	partial.Store(false)
 	calls.Store(0)
 	params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
+	t.Run("catalog must match reviewed bytes before preview", func(t *testing.T) {
+		differentManifest.Store(true)
+		defer differentManifest.Store(false)
+		w := invoke("POST", deployPath+"/review", params)
+		stageParams := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}, "id": {field(w, "id")}, "confirm": {"transfer"}}
+		w = invoke("POST", deployPath+"/stage", stageParams)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Staging or preview could not be confirmed") || strings.Contains(w.Body.String(), `action="/remote/deployment/create"`) {
+			t.Fatalf("changed manifest did not suppress confirmation: HTTP %d", w.Code)
+		}
+		if catalogReads.Load() != 1 || previewCalls.Load() != 0 || calls.Load() != 0 {
+			t.Fatal("expected one catalog read and no preview or apply")
+		}
+	})
 	w := invoke("POST", deployPath+"/review", params)
 	review := field(w, "id")
 	if strings.Contains(w.Body.String(), "original-reviewed-project") {
@@ -319,7 +339,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	params.Set("confirm", "transfer")
 	w = invoke("POST", deployPath+"/stage", params)
 	id := field(w, "id")
-	if calls.Load() != 0 || !strings.Contains(w.Body.String(), "Create stack") {
+	if previewCalls.Load() != 1 || calls.Load() != 0 || !strings.Contains(w.Body.String(), "Create stack") {
 		t.Fatal("stage unexpectedly applied")
 	}
 	params = url.Values{"id": {id}, "_csrf": {"wrong"}, "confirm": {"create"}}
