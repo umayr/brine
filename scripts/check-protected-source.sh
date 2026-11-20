@@ -5,6 +5,11 @@ set -euo pipefail
   echo 'Requires root on disposable GitHub-hosted x86_64 Linux CI' >&2
   exit 1
 }
+[[ $# == 1 && $1 == /* && -x $1 ]] || {
+  echo 'Expected an absolute path to the freshly built fixture helper' >&2
+  exit 1
+}
+capture_helper=$1
 # Fail closed when the application pins move; update the verified hashes together.
 grep -qx 'ARG DILL_VERSION=0.8.1' Dockerfile
 grep -qx 'ARG PKL_VERSION=0.31.1' Dockerfile
@@ -38,10 +43,10 @@ config {
 }
 PKL
 printf 'stackName = "captured-source"\n' >workspace/values.pkl
-(cd workspace && sha256sum compose.pkl values.pkl) >manifest
-install -m 0444 workspace/{compose,values}.pkl export/
+# The helper captures in memory, edits the workspace, and publishes only
+# captured bytes. The manifest it emits is from the capture, not the export.
+"$capture_helper" >manifest
 chmod 0555 export
-printf 'stackName = "edited-workspace"\n' >workspace/values.pkl
 
 # Drop groups, capabilities and privilege escalation for both the controls and
 # the provider. Use no inherited environment or engine credentials.
@@ -53,11 +58,14 @@ as_reader=(setpriv --reuid="$uid" --regid="$gid" --clear-groups --bounding-set=-
   env -i PATH=/usr/bin:/bin HOME="$root/home" DILL_PKL_PATH="$root/pkl")
 "${as_reader[@]}" sh -ec '
   test "$(id -u)" = "$1"
-  test -w "$HOME" && test -r "$2/export/values.pkl"
-  for file in / /tmp "$2" "$2/export" "$2/export/compose.pkl" "$2/export/values.pkl"; do
-    if test -w "$file" && test "$file" != /tmp; then exit 1; fi
+  test "$(id -g)" = "$3"
+  test -w "$HOME"
+  for path in / "$2" "$2/export" "$2/export/compose.pkl" "$2/export/values.pkl"; do
+    test "$(stat -c %u "$path")" = 0 && test ! -w "$path" || exit 1
   done
   # Sticky /tmp prevents this reader from renaming the root-owned fixture.
+  # The hosted runner and root provisioner are trusted; no other writer is
+  # part of this fixture. These checks do not prove protection against root.
   test -k /tmp && test "$(stat -c %u /tmp)" = 0
   # Opening without truncation tests write access without changing the capture.
   python3 -I -c "import os, sys
@@ -67,7 +75,7 @@ except PermissionError:
     sys.exit(0)
 os.close(fd)
 sys.exit(1)" "$2/export/values.pkl"
-' sh "$uid" "$root"
+' sh "$uid" "$root" "$gid"
 verify_manifest() {
   (cd export && [[ $(find . -mindepth 1 | LC_ALL=C sort) == $'./compose.pkl\n./values.pkl' ]] && sha256sum -c ../manifest)
 }
@@ -80,4 +88,4 @@ verify_manifest
 validate "$root/workspace/compose.pkl" edited-workspace
 validate "$root/export/compose.pkl" captured-source
 verify_manifest
-echo 'PASS: Dill validated the protected capture, not the edited workspace'
+echo 'PASS: Dill validated the protected Brine capture, not the edited workspace'
