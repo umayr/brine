@@ -1,0 +1,29 @@
+name: Protected source fixture
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/protected-source.yml'
+      - 'scripts/check-protected-source.sh'
+      - 'Dockerfile'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/protected-source.yml'
+      - 'scripts/check-protected-source.sh'
+      - 'Dockerfile'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protected-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate a protected synthetic capture without an engine
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT bash scripts/check-protected-source.sh
