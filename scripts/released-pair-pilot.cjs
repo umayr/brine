@@ -153,24 +153,31 @@ async function verifyGitPause(page, deployURL) {
   const source = process.env.PILOT_GIT_SOURCE;
   const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' }).trim();
   const invalidCommit = git('rev-parse', 'HEAD');
-  const response = await fetch(`${base}/api/stacks/git`, {
-    method: 'POST', headers: { ...api, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: stack, git: { url: process.env.PILOT_GIT_URL, branch: 'main' } }),
-  });
-  assert.ok(response.ok, `create synthetic Git workspace: HTTP ${response.status}`);
+  async function createGitWorkspace(name, branch) {
+    const response = await fetch(`${base}/api/stacks/git`, {
+      method: 'POST', headers: { ...api, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, git: { url: process.env.PILOT_GIT_URL, branch } }),
+    });
+    assert.ok(response.ok, `create synthetic Git workspace (${branch}): HTTP ${response.status}`);
+  }
 
-  async function settings() {
+  async function settings(name = stack) {
     await page.goto(deployURL);
-    await page.getByLabel('Git-backed Brine project').fill(stack);
+    await page.getByLabel('Git-backed Brine project').fill(name);
     const result = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/remote/deployment/git'));
     await page.getByRole('button', { name: 'Remote auto-deploy settings' }).click();
     return (await result).status();
   }
 
-  assert.equal(await settings(), 200);
-  await page.locator('input[type=checkbox][value=trusted]').check();
-  await page.getByRole('button', { name: 'Enable remote auto-deploy' }).click();
-  await page.getByText(/State: ready/).waitFor();
+  async function enable(name) {
+    assert.equal(await settings(name), 200);
+    await page.locator('input[type=checkbox][value=trusted]').check();
+    await page.getByRole('button', { name: 'Enable remote auto-deploy' }).click();
+    await page.getByText(/State: ready/).waitFor();
+  }
+
+  await createGitWorkspace(stack, 'main');
+  await enable(stack);
   const deadline = Date.now() + 90_000;
   let blocked = false;
   while (Date.now() < deadline) {
@@ -188,13 +195,45 @@ async function verifyGitPause(page, deployURL) {
   fs.writeFileSync(`${source}/compose.pkl`, project('git-next').replace(name, stack));
   git('add', 'compose.pkl');
   git('-c', 'user.name=Pilot', '-c', 'user.email=pilot@example.invalid', 'commit', '-qm', 'Synthetic valid successor');
-  await delay(65_000); // longer than the released poller's 60s interval
+  const successor = git('rev-parse', 'HEAD');
+  const advertised = git('ls-remote', '--exit-code', process.env.PILOT_GIT_URL, 'refs/heads/main');
+  assert.equal(advertised.split(/\s+/)[0], successor);
+
+  // Enable a separate valid stack only after advertising the successor. Its
+  // durable receipt proves the serial Git worker completed subsequent work.
+  const witness = 'released-git-witness';
+  git('switch', '-qc', 'witness');
+  fs.writeFileSync(`${source}/compose.pkl`, project('git-witness').replace(name, witness));
+  git('add', 'compose.pkl');
+  git('-c', 'user.name=Pilot', '-c', 'user.email=pilot@example.invalid', 'commit', '-qm', 'Synthetic poll witness');
+  await createGitWorkspace(witness, 'witness');
+  await enable(witness);
+  const stop = Date.now() + 90_000;
+  let witnessed = false;
+  while (Date.now() < stop) {
+    await delay(3000);
+    if (await settings(witness) === 200 && await page.getByText(/State: succeeded/).isVisible()) {
+      witnessed = true;
+      break;
+    }
+  }
+  assert.ok(witnessed, 'no successful Git poll witness after advertising the successor');
+  const journal = JSON.parse(fs.readFileSync(process.env.PILOT_JOURNAL, 'utf8'));
+  assert.ok(journal.operations.some(row => row.stack === witness && row.state === 'succeeded'));
+  assert.ok(!journal.operations.some(row => row.stack === stack), 'blocked Git project has an admitted operation');
+  await page.goto(deployURL);
+  await page.getByLabel('Managed stack name').fill(witness);
+  await page.getByRole('button', { name: 'Preview removal' }).click();
+  await page.locator('form[action="/remote/deployment/create"] input[type=checkbox]').check();
+  await page.getByRole('button', { name: 'Remove containers; keep data' }).click();
+  await page.getByText(/State succeeded · Effects complete/).waitFor();
   assert.equal(await settings(), 200);
+  await page.getByText('Staging or preview did not complete. Inspect the receiver before taking further action.').waitFor();
   assert.match(await page.getByText(/State: blocked/).textContent(), new RegExp(invalidCommit));
   assert.equal(await page.getByRole('link', { name: /Look up pending request/ }).count(), 0);
   assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${stack}`), '');
   assert.equal(docker('network', 'ls', '--filter', `name=^${stack}$`, '-q'), '');
-  console.log('Remote Git pause retained the blocked commit and guidance across a poll with a valid successor; no pending apply or deployment resources');
+  console.log('Remote Git pause retained blocked commit and guidance while a separate Git stack deployed; no admitted operation or matching Docker resources for the blocked stack');
 }
 
 // Avoid Playwright call logs that could contain pairing or login values.

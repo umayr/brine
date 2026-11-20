@@ -40,6 +40,7 @@ d run --rm -v "$volume:/data" "$image" --init-remote-registry --remote-registry-
 "$root/dill" agent init-https --dir "$root/agent"
 export PILOT_AGENT_ADDR=127.0.0.1:17641 PILOT_BRINE_URL=http://127.0.0.1:17642
 export PILOT_PAIRING="$root/pairing.json" PILOT_CHECKPOINT="$root/checkpoint.json"
+export PILOT_JOURNAL="$root/operations/operations.json"
 export PILOT_GIT_SOURCE="$root/git-source"
 git init -q -b main "$PILOT_GIT_SOURCE"
 printf 'config {\n' > "$PILOT_GIT_SOURCE/compose.pkl"
