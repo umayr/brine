@@ -23,6 +23,12 @@ SUMS
 chmod 0555 dill pkl
 cat >workspace/compose.pkl <<'PKL'
 import "values.pkl"
+
+// Dill invokes plain `pkl eval` and expects JSON.
+output {
+  renderer = new JsonRenderer {}
+}
+
 config {
   name = values.stackName
   engine = "docker"
