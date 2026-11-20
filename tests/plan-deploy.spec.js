@@ -63,16 +63,18 @@ test('new plan request shows progress instead of an earlier plan', async ({ page
   await expect(page.locator('#plan-result')).toHaveText('Current plan');
 });
 
-for (const outcome of ['success', 'failure']) {
-  test(`deploy clears the previous plan even on ${outcome}`, async ({ page }) => {
+for (const [outcome, response, expected] of [
+  ['success', { status: 200, body: '[brine:done]' }, 'complete'],
+  ['explicit failure', { status: 200, body: '[brine:error] up failed' }, 'failed'],
+  ['missing terminal result', { status: 500, body: 'deployment failed' }, 'unknown'],
+]) {
+  test(`deploy clears the previous plan on ${outcome}`, async ({ page }) => {
     await page.route('**/web/stacks/observability/plan', route => route.fulfill({ body: '<div>Previous plan</div>', contentType: 'text/html' }));
     let release;
     const held = new Promise(resolve => { release = resolve; });
     await page.route('**/api/stacks/observability/up', async route => {
       await held;
-      await route.fulfill(outcome === 'success'
-        ? { status: 200, body: '[brine:done]' }
-        : { status: 500, body: 'deployment failed' });
+      await route.fulfill(response);
     });
     await page.goto(new URL('/stacks/observability', baseURL).href);
     const plan = page.locator('#plan-button');
@@ -82,7 +84,10 @@ for (const outcome of ['success', 'failure']) {
     await expect(page.locator('#plan-result')).toBeEmpty();
     await expect(plan).toBeDisabled();
     release();
-    await expect(page.locator('#action-status')).toHaveText(outcome === 'success' ? 'complete' : 'failed');
+    await expect(page.locator('#action-status')).toHaveText(expected);
+    if (expected === 'unknown') {
+      await expect(page.locator('#action-log')).toContainText('Inspect resources before retrying');
+    }
     await expect(plan).toBeEnabled();
     await expect(page.locator('#plan-result')).toBeEmpty();
   });
@@ -122,7 +127,7 @@ test('deploy cancels an in-flight plan so its stale response cannot appear', asy
   await planStarted;
   await page.getByRole('button', { name: 'Deploy', exact: true }).click();
   await page.evaluate(() => window.planAborted);
-  await expect(page.locator('#action-status')).toHaveText('failed');
+  await expect(page.locator('#action-status')).toHaveText('unknown');
   release();
   await expect(page.locator('#plan-result')).toBeEmpty();
 });
