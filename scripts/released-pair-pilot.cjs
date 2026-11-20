@@ -155,7 +155,7 @@ async function verifyGitPause(page, deployURL) {
   const invalidCommit = git('rev-parse', 'HEAD');
   const response = await fetch(`${base}/api/stacks/git`, {
     method: 'POST', headers: { ...api, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: stack, git: { url: 'file:///pilot-git', branch: 'main' } }),
+    body: JSON.stringify({ name: stack, git: { url: process.env.PILOT_GIT_URL, branch: 'main' } }),
   });
   assert.ok(response.ok, `create synthetic Git workspace: HTTP ${response.status}`);
 

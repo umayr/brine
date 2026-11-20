@@ -16,6 +16,7 @@ fi
 root=$(mktemp -d "$HOME/brine-released-pair.XXXXXX")
 volume=${root##*/}
 cleanup() {
+  if [[ -n ${git_pid:-} ]]; then kill "$git_pid" 2>/dev/null || true; wait "$git_pid" 2>/dev/null || true; fi
   if [[ -n ${agent_pid:-} ]]; then kill "$agent_pid" 2>/dev/null || true; wait "$agent_pid" 2>/dev/null || true; fi
   if [[ -f $root/container-id ]]; then d rm -fv "$( < "$root/container-id" )" >/dev/null 2>&1 || true; fi
   d volume rm "$volume" >/dev/null 2>&1 || true
@@ -44,6 +45,17 @@ git init -q -b main "$PILOT_GIT_SOURCE"
 printf 'config {\n' > "$PILOT_GIT_SOURCE/compose.pkl"
 git -C "$PILOT_GIT_SOURCE" add compose.pkl
 git -C "$PILOT_GIT_SOURCE" -c user.name=Pilot -c user.email=pilot@example.invalid commit -qm 'Synthetic invalid project'
+# Serve only the synthetic repository on runner loopback, as its owning user.
+touch "$PILOT_GIT_SOURCE/.git/git-daemon-export-ok"
+export PILOT_GIT_URL=git://127.0.0.1:17643/git-source/.git
+git daemon --listen=127.0.0.1 --port=17643 --strict-paths --base-path="$root" "$PILOT_GIT_SOURCE/.git" > "$root/git.log" 2>&1 &
+git_pid=$!
+for _ in {1..15}; do
+  kill -0 "$git_pid" || { echo 'Disposable Git server exited' >&2; exit 1; }
+  if git ls-remote --exit-code "$PILOT_GIT_URL" refs/heads/main >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+git ls-remote --exit-code "$PILOT_GIT_URL" refs/heads/main >/dev/null
 export BRINE_AUTH_PASSWORD=$(openssl rand -hex 24) BRINE_API_TOKEN=$(openssl rand -hex 24)
 printf '::add-mask::%s\n::add-mask::%s\n' "$BRINE_AUTH_PASSWORD" "$BRINE_API_TOKEN"
 engine_id=$(< /proc/sys/kernel/random/uuid)
@@ -59,7 +71,6 @@ echo 'Exporting pairing for the disposable native Dill agent'
 "${agent[@]}" > "$root/agent.log" 2>&1 &
 agent_pid=$!
 d run --detach --network host --cidfile "$root/container-id" -v "$volume:/data" \
-  -v "$PILOT_GIT_SOURCE:/pilot-git:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock -e BRINE_AUTH_PASSWORD -e BRINE_API_TOKEN "$image" \
   --bind 127.0.0.1 --port 17642 --remote-enabled --remote-timeout 20s --remote-registry-dir /data/remote >/dev/null
 for _ in {1..30}; do
