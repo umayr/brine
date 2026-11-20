@@ -265,9 +265,30 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		return m[1]
 	}
 	csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
+	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	for _, tc := range []struct {
+		name, target, message string
+		expiry                time.Time
+	}{
+		{"expired", targetDigest(row), "Missing, expired, or already used confirmation", time.Now().Add(-time.Minute)},
+		{"changed target", "different-reviewed-target", "Target was re-paired; no creation sent", time.Now().Add(time.Minute)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "create", TargetDigest: tc.target, Expiry: tc.expiry})
+			if id == "" {
+				t.Fatal("could not create confirmation fixture")
+			}
+			w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"create"}})
+			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), tc.message) {
+				t.Fatalf("expected reviewed confirmation to be rejected: HTTP %d", w.Code)
+			}
+			if calls.Load() != 0 {
+				t.Fatal("rejected confirmation reached apply")
+			}
+		})
+	}
 	// Exercise the immediate result and a later GET against the same validated status.
 	partial.Store(true)
-	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
 	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 	partialPath := deployPath + "?host=demo&id=" + partialID
 	for _, w := range []*httptest.ResponseRecorder{
