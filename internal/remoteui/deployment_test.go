@@ -343,7 +343,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		code     int
 	}{{"demo", stranded, http.StatusOK}, {"missing", id, http.StatusConflict}} {
 		w := invoke("GET", deployPath+"?host="+tc.host+"&id="+tc.id, nil)
-		if w.Code != tc.code || !strings.Contains(w.Body.String(), "Status unavailable") || calls.Load() != 1 || fenceCalls.Load() != 0 {
+		if w.Code != tc.code || !strings.Contains(w.Body.String(), "Status unavailable") || !strings.Contains(w.Body.String(), "Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result.") || calls.Load() != 1 || fenceCalls.Load() != 0 {
 			t.Errorf("unavailable status for %s: HTTP %d", tc.host, w.Code)
 		}
 		assertStatusControls(w, tc.id, tc.host)
