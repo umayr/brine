@@ -30,7 +30,6 @@ type Server struct {
 	store             store.StackStore
 	recipes           store.RecipeStore
 	git               *git.Runner
-	syncer            *git.Syncer
 	router            http.Handler
 	web               *web.Handler
 	authn             *auth.Authenticator
@@ -71,12 +70,10 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 	}
 	web.Mount(r, h, timeouts)
 
-	syncer := git.NewSyncer(st, gr, ag.Dill(), cfg.DeployTimeout)
-
-	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, syncer: syncer, router: r, web: h, authn: authn}
+	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, router: r, web: h, authn: authn}
 }
 
-// Run starts the HTTP server and the GitOps syncer, blocking until ctx is cancelled.
+// Run starts HTTP and any configured remote Git worker until ctx is cancelled.
 func (s *Server) Run(ctx context.Context) error {
 	defer s.web.CloseStaging()
 	defer func() {
@@ -98,7 +95,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// Do not start background mutations until the configuration is validated.
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
-	go s.syncer.Run(workerCtx)
+	// Local Git auto-deploy is paused until it can apply a reviewed candidate.
 	if s.remoteDeploy != nil {
 		go s.remoteDeploy.RunGit(workerCtx)
 	}
