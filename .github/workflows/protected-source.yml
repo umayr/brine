@@ -5,6 +5,13 @@ on:
     paths:
       - '.github/workflows/protected-source.yml'
       - 'scripts/check-protected-source.sh'
+      - 'Dockerfile'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/protected-source.yml'
+      - 'scripts/check-protected-source.sh'
+      - 'Dockerfile'
   workflow_dispatch:
 
 permissions:
@@ -19,4 +26,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate a protected synthetic capture without an engine
-        run: sudo bash scripts/check-protected-source.sh
+        run: sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT bash scripts/check-protected-source.sh

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# Run only on a disposable native Linux CI runner: sudo bash scripts/check-protected-source.sh
+# Run from the repository root only on a disposable GitHub-hosted runner.
 set -euo pipefail
-[[ $(uname -s) == Linux && $(uname -m) == x86_64 && $EUID == 0 ]] || {
-  echo 'Requires root on disposable x86_64 Linux CI' >&2
+[[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted && $(uname -sm) == 'Linux x86_64' && $EUID == 0 ]] || {
+  echo 'Requires root on disposable GitHub-hosted x86_64 Linux CI' >&2
   exit 1
 }
+# Fail closed when the application pins move; update the verified hashes together.
+grep -qx 'ARG DILL_VERSION=0.8.1' Dockerfile
+grep -qx 'ARG PKL_VERSION=0.31.1' Dockerfile
 umask 022
 root=$(mktemp -d /tmp/brine-protected-source.XXXXXXXX)
 trap 'rm -rf -- "$root"' EXIT
