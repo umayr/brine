@@ -229,7 +229,7 @@ config {
               onchange="document.getElementById('poll-row').classList.toggle('hidden', !this.checked)" />
             <div>
               <div class="text-sm font-medium">Auto-deploy</div>
-              <div class="text-xs text-muted">{{if eq .Target.Profile "alpha"}}Unavailable in Alpha; manual source review is required.{{else}}Poll the branch and run <code class="font-mono bg-canvas px-1 rounded">dill up</code> automatically when new commits arrive.{{end}}</div>
+              <div class="text-xs text-muted">{{if eq .Target.Profile "alpha"}}Unavailable in Alpha; manual source review is required.{{else}}Save this preference for later. Local Git auto-deploy is paused; pull, review, and deploy manually.{{end}}</div>
             </div>
           </label>
           <div id="poll-row" class="pl-9 hidden">

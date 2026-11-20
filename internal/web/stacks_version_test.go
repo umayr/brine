@@ -40,7 +40,7 @@ func TestNewStackAutoDeployReflectsTargetProfile(t *testing.T) {
 	}
 	for _, tc := range []struct{ profile, want, notWanted string }{
 		{"alpha", `name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" disabled`, "Poll the branch and run"},
-		{"legacy", "Poll the branch and run", `name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" disabled`},
+		{"legacy", "Local Git auto-deploy is paused", `name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent mt-0.5" disabled`},
 	} {
 		var body bytes.Buffer
 		data := &stackNewData{pageData: pageData{Target: target.Identity{Profile: tc.profile}}}

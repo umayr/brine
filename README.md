@@ -234,7 +234,7 @@ local processes and non-browser clients can still control it.
 
 ## Remote hosts
 
-Remote targets are read-only by default. On a paired HTTPS host, the agent operator can explicitly enable staging, preview, and checked creation, updates and removal of managed stacks. The same Brine server retains its local stack and container controls, and its GitOps syncer can deploy existing local auto-deploy stacks. This is not a whole-server read-only mode.
+Remote targets are read-only by default. On a paired HTTPS host, the agent operator can explicitly enable staging, preview, and checked creation, updates and removal of managed stacks. The same Brine server retains its local stack and container controls, but local Git auto-deploy is paused. This is not a whole-server read-only mode.
 
 Remote access is opt-in and requires an authenticated administrator and a private registry. For direct HTTPS, no SSH forwarding directory is needed:
 
@@ -397,9 +397,10 @@ Brine does not rewrite existing stack files, recipes, or Git repositories.
 Validate the migrated project and review its plan before deploying. These Pkl
 schema changes do not rename Brine's own REST API fields or Git settings.
 
-Git-backed stacks support branch, subfolder, entrypoint, read-only, and auto-deploy
-with a poll interval. For local stacks, auto-deploy runs `dill up` only when the pull changed `HEAD`; Alpha background polling/pull/auto-deploy is explicitly disabled even with qualified manual operations configured;
-uncommitted local edits are skipped rather than clobbered.
+Git-backed stacks support branch, subfolder, entrypoint, and read-only settings.
+Local Git auto-deploy is paused until reviewed-candidate apply is available.
+Saved preferences and intervals are preserved. Pull explicitly, review the
+changes, and deploy manually. Remote HTTPS Git policy is separate.
 
 ## API
 

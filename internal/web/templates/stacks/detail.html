@@ -282,7 +282,7 @@
         <span class="ui-status ui-status-warning ui-status-sm">read-only</span>
         {{end}}
         {{if .Stack.Git.AutoDeploy}}
-        {{if eq .Target.Profile "alpha"}}<span class="ui-status ui-status-warning ui-status-sm">auto-deploy disabled in Alpha</span>{{else}}<span class="ui-status ui-status-info ui-status-sm">auto-deploy</span>{{end}}
+        {{if eq .Target.Profile "alpha"}}<span class="ui-status ui-status-warning ui-status-sm">auto-deploy disabled in Alpha</span>{{else}}<span class="ui-status ui-status-info ui-status-sm">local auto-deploy paused</span>{{end}}
         {{end}}
       </div>
       <div id="git-source-actions"><div class="git-source-actions flex items-center gap-2">
@@ -330,7 +330,7 @@
       {{end}}
       {{if .Stack.Git.AutoDeploy}}
       <div>
-        <div class="field-label mb-1">{{if eq .Target.Profile "alpha"}}Background polling disabled (saved interval){{else}}Poll interval{{end}}</div>
+        <div class="field-label mb-1">{{if eq .Target.Profile "alpha"}}Background polling disabled (saved interval){{else}}Saved interval (polling paused){{end}}</div>
         <div class="font-mono text-sm">{{if .Stack.Git.PollInterval}}{{.Stack.Git.PollInterval}}{{else}}5m{{end}}</div>
       </div>
       {{end}}
@@ -399,7 +399,7 @@
             <label class="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" name="git_auto_deploy" class="ui-checkbox ui-checkbox-accent ui-checkbox-sm"
                 {{if .Stack.Git.AutoDeploy}}checked{{end}} {{if eq .Target.Profile "alpha"}}disabled{{end}} />
-              <span class="ui-label-text text-xs">{{if eq .Target.Profile "alpha"}}Auto-deploy unavailable in Alpha; manual source review required{{else}}Auto-deploy on new commits{{end}}</span>
+              <span class="ui-label-text text-xs">{{if eq .Target.Profile "alpha"}}Auto-deploy unavailable in Alpha; manual source review required{{else}}Save local auto-deploy preference (paused; deploy manually){{end}}</span>
             </label>
           </div>
           <div class="col-span-2">
