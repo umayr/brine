@@ -67,7 +67,7 @@ test('failed container action does not replace inventory with an inventory error
   await page.route('**/web/containers/*/stop', route => route.fulfill({ status: 503 }));
   await page.goto(new URL('/containers', baseURL).href);
   const body = page.locator('#containers-body');
-  const stop = body.getByRole('button', { name: 'Stop', exact: true }).first();
+  const stop = body.getByRole('button', { name: 'Emergency stop', exact: true }).first();
   await expect(stop).toBeVisible();
   const rowCount = await body.locator('tr').count();
   await stop.evaluate(button => {
@@ -90,7 +90,7 @@ test('lost action response remains unconfirmed across an inventory refresh', asy
   await page.route('**/web/containers/*/stop', route => { requests++; return route.abort(); });
   await page.goto(new URL('/containers', baseURL).href);
   const body = page.locator('#containers-body');
-  await body.getByRole('button', { name: 'Stop', exact: true }).first().click();
+  await body.getByRole('button', { name: 'Emergency stop', exact: true }).first().click();
   const warning = page.locator('#container-action-uncertain');
   await expect(warning).toBeVisible();
   await expect(warning).toContainText('Inventory may be stale');
@@ -109,12 +109,12 @@ test('mobile container actions retain their target and support keyboard scrollin
   await page.goto(new URL('/containers', baseURL).href);
   const region = page.getByRole('region', { name: 'Containers table, scroll horizontally for all columns and actions' });
   await expect(page.getByText('Scroll horizontally to see all columns and actions.')).toBeVisible();
-  await expect(region.getByRole('button', { name: 'Stop', exact: true }).first()).toBeVisible();
+  await expect(region.getByRole('button', { name: 'Emergency stop', exact: true }).first()).toBeVisible();
   expect(await region.evaluate(el => el.scrollWidth > el.clientWidth)).toBe(true);
   await region.focus();
   for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
   const row = region.locator('tbody tr').first();
-  const stop = row.getByRole('button', { name: 'Stop', exact: true });
+  const stop = row.getByRole('button', { name: 'Emergency stop', exact: true });
   await stop.focus();
   await expect(stop).toBeFocused();
   await expect(stop).toHaveAccessibleDescription(/.+/);
@@ -136,7 +136,7 @@ test('action failure is reported even if polling replaces its row', async ({ pag
   });
   await page.goto(new URL('/containers', baseURL).href);
   const body = page.locator('#containers-body');
-  const stop = body.getByRole('button', { name: 'Stop', exact: true }).first();
+  const stop = body.getByRole('button', { name: 'Emergency stop', exact: true }).first();
   await stop.click(); await begun;
   const refresh = page.waitForResponse(response => response.url().endsWith('/web/containers'));
   await page.evaluate(() => htmx.ajax('GET', '/web/containers', { target: '#containers-body', swap: 'innerHTML' }));
