@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const { setTimeout: delay } = require('node:timers/promises');
 const { chromium } = require('playwright');
 
 const base = process.env.PILOT_BRINE_URL;
@@ -143,7 +144,57 @@ async function exercise(page) {
     assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Manual lifecycle passed: update replaced the container; removal retained network identity');
+    await verifyGitPause(page, deployURL);
   }
+}
+
+async function verifyGitPause(page, deployURL) {
+  const stack = 'released-git-pause';
+  const source = process.env.PILOT_GIT_SOURCE;
+  const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' }).trim();
+  const invalidCommit = git('rev-parse', 'HEAD');
+  const response = await fetch(`${base}/api/stacks/git`, {
+    method: 'POST', headers: { ...api, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: stack, git: { url: 'file:///pilot-git', branch: 'main' } }),
+  });
+  assert.ok(response.ok, `create synthetic Git workspace: HTTP ${response.status}`);
+
+  async function settings() {
+    await page.goto(deployURL);
+    await page.getByLabel('Git-backed Brine project').fill(stack);
+    const result = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/remote/deployment/git'));
+    await page.getByRole('button', { name: 'Remote auto-deploy settings' }).click();
+    return (await result).status();
+  }
+
+  assert.equal(await settings(), 200);
+  await page.locator('input[type=checkbox][value=trusted]').check();
+  await page.getByRole('button', { name: 'Enable remote auto-deploy' }).click();
+  await page.getByText(/State: ready/).waitFor();
+  const deadline = Date.now() + 90_000;
+  let blocked = false;
+  while (Date.now() < deadline) {
+    await delay(3000);
+    if (await settings() === 200 && await page.getByText(/State: blocked/).isVisible()) {
+      blocked = true;
+      break;
+    }
+  }
+  assert.ok(blocked, 'remote Git policy did not enter blocked state after invalid preview');
+  await page.getByText('Staging or preview did not complete. Inspect the receiver before taking further action.').waitFor();
+  assert.match(await page.getByText(/State: blocked/).textContent(), new RegExp(invalidCommit));
+
+  // A fresh valid commit must not implicitly clear the existing pause.
+  fs.writeFileSync(`${source}/compose.pkl`, project('git-next').replace(name, stack));
+  git('add', 'compose.pkl');
+  git('-c', 'user.name=Pilot', '-c', 'user.email=pilot@example.invalid', 'commit', '-qm', 'Synthetic valid successor');
+  await delay(65_000); // longer than the released poller's 60s interval
+  assert.equal(await settings(), 200);
+  assert.match(await page.getByText(/State: blocked/).textContent(), new RegExp(invalidCommit));
+  assert.equal(await page.getByRole('link', { name: /Look up pending request/ }).count(), 0);
+  assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${stack}`), '');
+  assert.equal(docker('network', 'ls', '--filter', `name=^${stack}$`, '-q'), '');
+  console.log('Remote Git pause retained the blocked commit and guidance across a poll with a valid successor; no pending apply or deployment resources');
 }
 
 // Avoid Playwright call logs that could contain pairing or login values.

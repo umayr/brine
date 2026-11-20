@@ -39,6 +39,11 @@ d run --rm -v "$volume:/data" "$image" --init-remote-registry --remote-registry-
 "$root/dill" agent init-https --dir "$root/agent"
 export PILOT_AGENT_ADDR=127.0.0.1:17641 PILOT_BRINE_URL=http://127.0.0.1:17642
 export PILOT_PAIRING="$root/pairing.json" PILOT_CHECKPOINT="$root/checkpoint.json"
+export PILOT_GIT_SOURCE="$root/git-source"
+git init -q -b main "$PILOT_GIT_SOURCE"
+printf 'config {\n' > "$PILOT_GIT_SOURCE/compose.pkl"
+git -C "$PILOT_GIT_SOURCE" add compose.pkl
+git -C "$PILOT_GIT_SOURCE" -c user.name=Pilot -c user.email=pilot@example.invalid commit -qm 'Synthetic invalid project'
 export BRINE_AUTH_PASSWORD=$(openssl rand -hex 24) BRINE_API_TOKEN=$(openssl rand -hex 24)
 printf '::add-mask::%s\n::add-mask::%s\n' "$BRINE_AUTH_PASSWORD" "$BRINE_API_TOKEN"
 engine_id=$(< /proc/sys/kernel/random/uuid)
@@ -54,6 +59,7 @@ echo 'Exporting pairing for the disposable native Dill agent'
 "${agent[@]}" > "$root/agent.log" 2>&1 &
 agent_pid=$!
 d run --detach --network host --cidfile "$root/container-id" -v "$volume:/data" \
+  -v "$PILOT_GIT_SOURCE:/pilot-git:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock -e BRINE_AUTH_PASSWORD -e BRINE_API_TOKEN "$image" \
   --bind 127.0.0.1 --port 17642 --remote-enabled --remote-timeout 20s --remote-registry-dir /data/remote >/dev/null
 for _ in {1..30}; do
