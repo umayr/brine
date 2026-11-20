@@ -41,11 +41,15 @@ export PILOT_AGENT_ADDR=127.0.0.1:17641 PILOT_BRINE_URL=http://127.0.0.1:17642
 export PILOT_PAIRING="$root/pairing.json"
 export BRINE_AUTH_PASSWORD=$(openssl rand -hex 24) BRINE_API_TOKEN=$(openssl rand -hex 24)
 printf '::add-mask::%s\n::add-mask::%s\n' "$BRINE_AUTH_PASSWORD" "$BRINE_API_TOKEN"
+engine_id=$(< /proc/sys/kernel/random/uuid)
+daemon_id=$(d info --format '{{.ID}}')
+[[ -n $daemon_id ]] || { echo 'Disposable Docker daemon did not report an ID' >&2; exit 1; }
 agent=( "$root/dill" agent --https-dir "$root/agent" --https-listen "$PILOT_AGENT_ADDR"
-        --engine-socket /var/run/docker.sock --engine-id released-pilot --generation 1
-        --daemon-id "$(d info --format '{{.ID}}')" --https-staging-root "$root/stages"
+        --engine-socket /var/run/docker.sock --engine-id "$engine_id" --generation 1
+        --daemon-id "$daemon_id" --https-staging-root "$root/stages"
         --https-staging-catalog "$root/catalog" --https-preview-state "$root/coordination"
         --https-preview-pkl "$root/pkl" --https-apply-state "$root/operations" )
+echo 'Exporting pairing for the disposable native Dill agent'
 "${agent[@]}" --print-https-pairing > "$PILOT_PAIRING"
 "${agent[@]}" > "$root/agent.log" 2>&1 &
 agent_pid=$!
