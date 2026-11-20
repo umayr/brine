@@ -104,6 +104,11 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 
 ## Docker
 
+Tagged builds are published to `ghcr.io/umayr/brine` for Linux amd64 and
+arm64. Use the tag or digest from the [GitHub release](https://github.com/umayr/brine/releases)
+rather than a floating `latest` tag. A new Brine image updates its bundled
+Dill binary, not the Dill agents installed on remote hosts.
+
 The image bundles Brine, Dill (v0.8.1), and Pkl (0.31.1):
 
 ```sh
