@@ -44,7 +44,14 @@ func (h *containerHandler) get(w http.ResponseWriter, r *http.Request) {
 func (h *containerHandler) start(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().StartContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		msg := "Container start failed; check the container state before retrying"
+		switch {
+		case errors.Is(err, engine.ErrCheckedUpRequired):
+			msg = engine.ErrCheckedUpRequired.Error()
+		case errors.Is(err, target.ErrNegotiationUnavailable):
+			msg = target.ErrNegotiationUnavailable.Error()
+		}
+		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "started"})
