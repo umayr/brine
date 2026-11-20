@@ -23,6 +23,31 @@ func (e *guardEngine) RestartContainer(_ context.Context, id string) error {
 	e.restarted = id
 	return nil
 }
+
+type restartReinspectionEngine struct {
+	guardEngine
+	next *ContainerInfo
+}
+
+func (e *restartReinspectionEngine) InspectContainer(_ context.Context, id string) (*ContainerInfo, error) {
+	if id == "mutable-name" {
+		return e.info, nil
+	}
+	return e.next, nil
+}
+
+func TestLifecycleGuardRejectsDillMarkerInEitherRestartObservation(t *testing.T) {
+	ordinary := &ContainerInfo{ID: "immutable-id"}
+	marked := &ContainerInfo{ID: "immutable-id", Labels: map[string]string{"dill.service": ""}}
+	for _, pair := range [][2]*ContainerInfo{{marked, ordinary}, {ordinary, marked}} {
+		e := &restartReinspectionEngine{guardEngine: guardEngine{info: pair[0]}, next: pair[1]}
+		g := &LifecycleGuard{Engine: e}
+		if err := g.RestartContainer(context.Background(), "mutable-name"); !errors.Is(err, ErrManagedRestart) || e.restarted != "" {
+			t.Fatalf("restart error %v, called with %q", err, e.restarted)
+		}
+	}
+}
+
 func TestLifecycleGuardWaitsForDeploymentBeforeClassification(t *testing.T) {
 	var lock sync.Mutex
 	lock.Lock()
@@ -71,8 +96,15 @@ func TestLifecycleGuard(t *testing.T) {
 				t.Fatalf("start %v", err)
 			}
 			err = g.RestartContainer(ctx, "mutable-name")
-			if (err == nil) != tc.allow {
-				t.Fatalf("restart %v", err)
+			allowRestart := tc.name == "ordinary"
+			if (err == nil) != allowRestart || (!allowRestart && e.restarted != "") {
+				t.Fatalf("restart %v, called with %q", err, e.restarted)
+			}
+			if tc.name == "managed" && !errors.Is(err, ErrManagedRestart) {
+				t.Fatalf("managed restart denial: %v", err)
+			}
+			if allowRestart && e.restarted != tc.info.ID {
+				t.Fatal("restart did not use immutable ID")
 			}
 			if tc.allow && e.started != tc.info.ID {
 				t.Fatal("not immutable ID")

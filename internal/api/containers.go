@@ -73,6 +73,10 @@ func (h *containerHandler) stop(w http.ResponseWriter, r *http.Request) {
 func (h *containerHandler) restart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().RestartContainer(r.Context(), id); err != nil {
+		if errors.Is(err, engine.ErrManagedRestart) {
+			writeError(w, http.StatusConflict, engine.ErrManagedRestart.Error())
+			return
+		}
 		msg := "Container restart failed; check the container state before retrying"
 		if errors.Is(err, engine.ErrCheckedUpRequired) {
 			msg = engine.ErrCheckedUpRequired.Error()

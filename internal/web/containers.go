@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,6 +63,10 @@ func (h *Handler) containerStop(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) containerRestart(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().RestartContainer(r.Context(), id); err != nil {
+		if errors.Is(err, engine.ErrManagedRestart) {
+			http.Error(w, engine.ErrManagedRestart.Error(), http.StatusConflict)
+			return
+		}
 		http.Error(w, "Container action could not be confirmed", http.StatusBadGateway)
 		return
 	}
