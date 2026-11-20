@@ -46,6 +46,9 @@ func (h *containerHandler) start(w http.ResponseWriter, r *http.Request) {
 	if err := h.agent.Engine().StartContainer(r.Context(), id); err != nil {
 		msg := "Container start failed; check the container state before retrying"
 		switch {
+		case errors.Is(err, engine.ErrManagedStart):
+			writeError(w, http.StatusConflict, engine.ErrManagedStart.Error())
+			return
 		case errors.Is(err, engine.ErrCheckedUpRequired):
 			msg = engine.ErrCheckedUpRequired.Error()
 		case errors.Is(err, target.ErrNegotiationUnavailable):

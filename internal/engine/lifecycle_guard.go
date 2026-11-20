@@ -7,9 +7,11 @@ import (
 
 var ErrCheckedUpRequired = errors.New("container cannot be started or restarted directly; use checked stack up")
 
+var ErrManagedStart = errors.New("Dill-associated containers cannot be started directly; review the stack's supported lifecycle operations")
+
 var ErrManagedRestart = errors.New("Dill-associated containers cannot be restarted directly; review the stack's supported lifecycle operations")
 
-// LifecycleGuard blocks direct start/restart for secret-enabled containers and
+// LifecycleGuard blocks direct start/restart for Dill-associated containers and
 // consults the trusted deployment record even if its container label vanished.
 // A nil record lookup means no Brine secret state has been configured.
 type LifecycleGuard struct {
@@ -56,6 +58,9 @@ func (g *LifecycleGuard) inspectStart(ctx context.Context, id, expectedStack str
 			}
 		}
 	}
+	if !restart && dillAssociated(c) {
+		return "", ErrManagedStart
+	}
 	return c.ID, nil
 }
 func (g *LifecycleGuard) change(ctx context.Context, id string, restart bool) error {
@@ -82,6 +87,9 @@ func (g *LifecycleGuard) change(ctx context.Context, id string, restart bool) er
 	}
 	if restart {
 		return g.Engine.RestartContainer(ctx, immutable)
+	}
+	if dillAssociated(first) {
+		return ErrManagedStart
 	}
 	return g.Engine.StartContainer(ctx, immutable)
 }

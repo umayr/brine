@@ -32,7 +32,7 @@
         hx-post="/web/containers/{{.ID}}/stop"
         hx-target="#container-{{.ID}}"
         hx-swap="outerHTML"
-      >Stop</button>
+      >{{if .Stack}}Emergency stop{{else}}Stop{{end}}</button>
       <button class="ui-button ui-button-ghost ui-button-xs"
         data-container-action hx-disabled-elt="this" aria-describedby="container-name-{{.ID}}"
         hx-post="/web/containers/{{.ID}}/restart"
