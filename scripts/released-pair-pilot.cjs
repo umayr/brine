@@ -219,11 +219,17 @@ async function verifyGitPause(page, deployURL) {
     }
   }
   assert.ok(witnessed, 'no successful Git poll witness after advertising the successor');
+  console.log('Witness deployment succeeded; disabling its Git policy before manual removal');
+  await page.getByRole('button', { name: 'Disable remote auto-deploy' }).click();
+  await page.getByRole('button', { name: 'Enable remote auto-deploy' }).waitFor();
   await page.goto(deployURL);
   await page.getByLabel('Managed stack name').fill(witness);
   await page.getByRole('button', { name: 'Preview removal' }).click();
   await page.locator('form[action="/remote/deployment/create"] input[type=checkbox]').check();
+  const removal = page.waitForResponse(r => r.request().method() === 'POST' && r.url().endsWith('/remote/deployment/create'));
   await page.getByRole('button', { name: 'Remove containers; keep data' }).click();
+  const removalResponse = await removal;
+  assert.ok(removalResponse.ok(), `witness removal: HTTP ${removalResponse.status()}`);
   await page.getByText(/State succeeded · Effects complete/).waitFor();
   assert.equal(await settings(), 200);
   await page.getByText('Staging or preview did not complete. Inspect the receiver before taking further action.').waitFor();
