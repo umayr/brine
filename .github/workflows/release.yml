@@ -36,7 +36,20 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve an already published image
+        id: existing
+        run: |
+          if digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE:$VERSION" 2>&1); then
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          else
+            case "${digest,,}" in
+              *'not found'*|*'manifest unknown'*) ;;
+              *) printf '%s\n' "$digest" >&2; exit 1 ;;
+            esac
+          fi
       - name: Build and upload untagged candidate
+        if: steps.existing.outputs.digest == ''
         uses: docker/build-push-action@v6
         id: candidate
         with:
@@ -50,7 +63,7 @@ jobs:
             org.opencontainers.image.version=${{ github.ref_name }}
       - name: Smoke test both architectures by digest
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
+          DIGEST: ${{ steps.existing.outputs.digest || steps.candidate.outputs.digest }}
         run: |
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           image="$IMAGE@$DIGEST"
@@ -58,6 +71,10 @@ jobs:
           pkl_version=$(awk -F= '$1 == "ARG PKL_VERSION" {print $2}' Dockerfile)
           test -n "$dill_version" && test -n "$pkl_version"
           for platform in linux/amd64 linux/arm64; do
+            container=$(docker create --platform "$platform" "$image" --version)
+            revision=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container")
+            docker rm "$container" >/dev/null
+            test "$revision" = "$(git rev-parse HEAD)"
             test "$(docker run --rm --platform "$platform" "$image" --version)" = "$VERSION"
             test "$(docker run --rm --platform "$platform" --entrypoint dill "$image" version)" = "v$dill_version"
             output=$(docker run --rm --platform "$platform" --entrypoint pkl "$image" --version)
@@ -65,12 +82,12 @@ jobs:
           done
       - name: Publish version tag and GitHub release
         env:
-          DIGEST: ${{ steps.candidate.outputs.digest }}
+          DIGEST: ${{ steps.existing.outputs.digest || steps.candidate.outputs.digest }}
           GH_TOKEN: ${{ github.token }}
         run: |
           if ! existing=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE:$VERSION" 2>&1); then
-            case "$existing" in
-              *'not found'*) docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$DIGEST" ;;
+            case "${existing,,}" in
+              *'not found'*|*'manifest unknown'*) docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$DIGEST" ;;
               *) printf '%s\n' "$existing" >&2; exit 1 ;;
             esac
           elif [[ "$existing" != "$DIGEST" ]]; then
@@ -80,4 +97,8 @@ jobs:
           tagged_digest=$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}' "$IMAGE:$VERSION")
           test "$tagged_digest" = "$DIGEST"
           notes=$(printf 'Container image (Linux amd64 and arm64): `%s`\n\nDigest: `%s`\n' "$IMAGE:$VERSION" "$IMAGE@$DIGEST")
-          gh release create "$VERSION" --verify-tag --generate-notes --notes "$notes"
+          if published=$(gh release view "$VERSION" --json body --jq .body 2>&1); then
+            grep -Fq "\`$IMAGE@$DIGEST\`" <<< "$published"
+          else
+            gh release create "$VERSION" --verify-tag --generate-notes --notes "$notes"
+          fi
