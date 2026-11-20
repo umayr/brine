@@ -38,7 +38,7 @@ d run --rm --entrypoint /bin/mkdir -v "$volume:/data" "$image" -m 0700 /data/rem
 d run --rm -v "$volume:/data" "$image" --init-remote-registry --remote-registry-dir /data/remote
 "$root/dill" agent init-https --dir "$root/agent"
 export PILOT_AGENT_ADDR=127.0.0.1:17641 PILOT_BRINE_URL=http://127.0.0.1:17642
-export PILOT_PAIRING="$root/pairing.json"
+export PILOT_PAIRING="$root/pairing.json" PILOT_CHECKPOINT="$root/checkpoint.json"
 export BRINE_AUTH_PASSWORD=$(openssl rand -hex 24) BRINE_API_TOKEN=$(openssl rand -hex 24)
 printf '::add-mask::%s\n::add-mask::%s\n' "$BRINE_AUTH_PASSWORD" "$BRINE_API_TOKEN"
 engine_id=$(< /proc/sys/kernel/random/uuid)
@@ -63,3 +63,15 @@ for _ in {1..30}; do
 done
 curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null
 node scripts/released-pair-pilot.cjs
+kill "$agent_pid"
+wait "$agent_pid" || [[ $? == 143 ]]
+unset agent_pid
+"${agent[@]}" > "$root/agent-restart.log" 2>&1 &
+agent_pid=$!
+for _ in {1..30}; do
+  kill -0 "$agent_pid" || { echo 'Native Dill agent exited during restart' >&2; exit 1; }
+  if curl -ksS --max-time 1 "https://$PILOT_AGENT_ADDR/" >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+curl -ksS --max-time 1 "https://$PILOT_AGENT_ADDR/" >/dev/null
+node scripts/released-pair-pilot.cjs --after-restart

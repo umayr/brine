@@ -23,41 +23,86 @@ function docker(...args) {
   return execFileSync('docker', ['--context', 'default', ...args], { encoding: 'utf8' }).trim();
 }
 
+const afterRestart = process.argv[2] === '--after-restart';
+const checkpoint = process.env.PILOT_CHECKPOINT;
+
 async function run() {
+  if (!afterRestart) await createWorkspace();
+  const browser = await chromium.launch();
+  try {
+    await exercise(await browser.newPage());
+  } finally {
+    await browser.close();
+  }
+}
+
+async function createWorkspace() {
   const created = await fetch(`${base}/api/stacks/`, {
     method: 'POST', headers: { ...api, 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, pkl_content: project('pilot-v1') }),
   });
   assert.ok(created.ok, `create fixture workspace: HTTP ${created.status}`);
-  const browser = await chromium.launch();
-  try {
-    const page = await browser.newPage();
+}
+
+async function exercise(page) {
+  {
     page.setDefaultTimeout(25_000);
     await page.goto(`${base}/remote`);
     await page.locator('#user').fill('admin');
     await page.locator('#password').fill(process.env.BRINE_AUTH_PASSWORD);
     await page.locator('form[action="/login"] button').click();
-    await page.getByLabel('Target ID').fill('released-pilot');
-    await page.getByLabel('Private IP and port').fill(process.env.PILOT_AGENT_ADDR);
-    await page.getByLabel('Pairing bundle').fill(fs.readFileSync(process.env.PILOT_PAIRING, 'utf8'));
-    await page.getByRole('button', { name: 'Pair HTTPS target' }).click();
+    if (!afterRestart) {
+      await page.getByLabel('Target ID').fill('released-pilot');
+      await page.getByLabel('Private IP and port').fill(process.env.PILOT_AGENT_ADDR);
+      await page.getByLabel('Pairing bundle').fill(fs.readFileSync(process.env.PILOT_PAIRING, 'utf8'));
+      await page.getByRole('button', { name: 'Pair HTTPS target' }).click();
+    }
     const deploy = page.getByRole('link', { name: 'Deploy a project' });
     await deploy.waitFor();
     const deployURL = new URL(await deploy.getAttribute('href'), base).href;
-    console.log('Authenticated Chromium paired released native Dill agent');
+    if (!afterRestart) console.log('Authenticated Chromium paired released native Dill agent');
 
-    async function confirm(label) {
+    async function confirm(label, interrupt = false) {
       const link = page.getByRole('link', { name: 'Open status link' });
       const statusURL = new URL(await link.getAttribute('href'), base).href;
       await page.locator('form[action="/remote/deployment/create"] input[type=checkbox]').check();
-      await page.getByRole('button', { name: label }).click();
-      await page.getByText(/State succeeded · Effects complete/).waitFor();
-      await page.goto(statusURL);
-      await page.getByText(/State succeeded · Effects complete/).waitFor();
-      console.log(`${label}: succeeded and exact request status verified by GET`);
+      const button = page.getByRole('button', { name: label });
+      if (interrupt) {
+        const path = '**/remote/deployment/create';
+        let submissions = 0;
+        await page.route(path, async route => {
+          submissions++;
+          try {
+            // Let the one server request complete; hide its response from Chromium.
+            await route.fetch({ maxRetries: 0 });
+          } finally {
+            await route.abort('connectionclosed');
+          }
+        });
+        await Promise.all([
+          page.waitForEvent('requestfailed', request => request.method() === 'POST' && request.url().endsWith('/remote/deployment/create')),
+          button.click({ noWaitAfter: true }),
+        ]);
+        assert.equal(submissions, 1);
+        await page.unroute(path);
+      } else {
+        await button.click();
+        await page.getByText(/State succeeded · Effects complete/).waitFor();
+      }
+      const receipt = await status(statusURL);
+      console.log(`${label}: exact request status verified by GET${interrupt ? ' after browser-response loss' : ''}`);
+      return { statusURL, receipt };
     }
 
-    async function review(label) {
+    async function status(url) {
+      const response = await page.goto(url);
+      assert.equal(response.request().method(), 'GET');
+      const result = page.getByText(/State succeeded · Effects complete/);
+      await result.waitFor();
+      return result.textContent();
+    }
+
+    async function review(label, interrupt) {
       await page.goto(deployURL);
       await page.getByLabel('Brine project name').fill(name);
       await page.getByRole('button', { name: 'Review project files' }).click();
@@ -65,22 +110,32 @@ async function run() {
       await page.getByLabel('Send these exact files and request a preview').check();
       await page.getByRole('button', { name: 'Stage and preview' }).click();
       await page.getByRole('heading', { name: `Deployment preview for ${name}` }).waitFor();
-      await confirm(label);
+      return confirm(label, interrupt);
     }
 
-    await review('Create stack');
-    const first = docker('inspect', '--format', '{{.Id}}', `${name}_web`);
-    const network = docker('network', 'inspect', '--format', '{{.Id}}', name);
-    const updated = await fetch(`${base}/api/stacks/${name}/`, {
-      method: 'PUT', headers: { ...api, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pkl_content: project('pilot-v2') }),
-    });
-    assert.ok(updated.ok, `update fixture workspace: HTTP ${updated.status}`);
-    await review('Update stack');
-    assert.notEqual(docker('inspect', '--format', '{{.Id}}', `${name}_web`), first);
-    assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
-    assert.match(docker('logs', `${name}_web`), /pilot-v2/);
+    if (!afterRestart) {
+      await review('Create stack');
+      const first = docker('inspect', '--format', '{{.Id}}', `${name}_web`);
+      const network = docker('network', 'inspect', '--format', '{{.Id}}', name);
+      const updated = await fetch(`${base}/api/stacks/${name}/`, {
+        method: 'PUT', headers: { ...api, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pkl_content: project('pilot-v2') }),
+      });
+      assert.ok(updated.ok, `update fixture workspace: HTTP ${updated.status}`);
+      const outcome = await review('Update stack', true);
+      const container = docker('inspect', '--format', '{{.Id}}', `${name}_web`);
+      assert.notEqual(container, first);
+      assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
+      assert.match(docker('logs', `${name}_web`), /pilot-v2/);
+      fs.writeFileSync(checkpoint, JSON.stringify({ ...outcome, container, network }), { mode: 0o600 });
+      return;
+    }
 
+    const { statusURL, receipt, container, network } = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
+    assert.equal(await status(statusURL), receipt);
+    assert.equal(docker('inspect', '--format', '{{.Id}}', `${name}_web`), container);
+    assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
+    console.log('Same durable outcome and Docker identities after native Dill restart; status lookup used GET');
     await page.goto(deployURL);
     await page.getByLabel('Managed stack name').fill(name);
     await page.getByRole('button', { name: 'Preview removal' }).click();
@@ -88,8 +143,6 @@ async function run() {
     assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Manual lifecycle passed: update replaced the container; removal retained network identity');
-  } finally {
-    await browser.close();
   }
 }
 
