@@ -588,6 +588,12 @@ async function runAction(action, name, method, body, contentType) {
         const refresh = document.getElementById('stack-containers-refresh');
         if (refresh) htmx.trigger(refresh, 'click');
       }
+    } else if (action === 'up' && !stream.status.error && !stream.status.done) {
+      log.textContent += '\nDeploy outcome unknown. Inspect resources before retrying.\n';
+      title.textContent = 'Deploy outcome unknown';
+      status.textContent = 'unknown';
+      status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
+      showToast('Deploy outcome unknown; inspect resources before retrying', 'error');
     } else if (stream.status.error || !stream.status.done) {
       title.textContent = `${action} failed after ${elapsed}s`;
       status.textContent = 'failed';
@@ -615,6 +621,12 @@ async function runAction(action, name, method, body, contentType) {
       status.textContent = 'unknown';
       status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
       showToast(`${action} unknown`, 'error');
+    } else if (action === 'up') {
+      log.textContent += '\nDeploy outcome unknown. Inspect resources before retrying.\n';
+      title.textContent = 'Deploy outcome unknown';
+      status.textContent = 'unknown';
+      status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
+      showToast('Deploy outcome unknown; inspect resources before retrying', 'error');
     } else {
       log.textContent += '\n[brine:error] ' + err.message + '\n';
       title.textContent = `${action} failed`;
