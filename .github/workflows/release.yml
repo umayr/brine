@@ -66,17 +66,32 @@ jobs:
           DIGEST: ${{ steps.existing.outputs.digest || steps.candidate.outputs.digest }}
         run: |
           [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          image="$IMAGE@$DIGEST"
+          # Resolve each platform from the exact candidate index. Pulling the
+          # index itself twice can collide in Docker's local image store.
+          index=$(docker buildx imagetools inspect --raw "$IMAGE@$DIGEST")
           dill_version=$(awk -F= '$1 == "ARG DILL_VERSION" {print $2}' Dockerfile)
           pkl_version=$(awk -F= '$1 == "ARG PKL_VERSION" {print $2}' Dockerfile)
           test -n "$dill_version" && test -n "$pkl_version"
-          for platform in linux/amd64 linux/arm64; do
-            container=$(docker create --platform "$platform" "$image" --version)
-            revision=$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container")
-            docker rm "$container" >/dev/null
+          for arch in amd64 arm64; do
+            platform="linux/$arch"
+            echo "Resolving $platform from $DIGEST"
+            child=$(jq -er --arg arch "$arch" '
+              [.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)]
+              | if length == 1 then .[0].digest else error("expected exactly one platform manifest") end
+              | select(test("^sha256:[0-9a-f]{64}$"))
+            ' <<< "$index")
+            image="$IMAGE@$child"
+            echo "Pulling $platform at $child"
+            docker pull --platform "$platform" "$image"
+            echo "Checking $platform image architecture and source revision"
+            test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")" = "$platform"
+            revision=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image")
             test "$revision" = "$(git rev-parse HEAD)"
+            echo "Checking $platform Brine $VERSION"
             test "$(docker run --rm --platform "$platform" "$image" --version)" = "$VERSION"
+            echo "Checking $platform Dill v$dill_version"
             test "$(docker run --rm --platform "$platform" --entrypoint dill "$image" version)" = "v$dill_version"
+            echo "Checking $platform Pkl $pkl_version"
             output=$(docker run --rm --platform "$platform" --entrypoint pkl "$image" --version)
             [[ "$output" == "Pkl $pkl_version "* ]]
           done
