@@ -23,6 +23,7 @@ import (
 
 	"github.com/umayr/brine/internal/agentclient"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/dillserve"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
@@ -75,8 +76,14 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal("invalid fixture")
 	}
 	plan := bytes.ReplaceAll(golden.Stdout, []byte("sha256:"+strings.Repeat("1", 64)), []byte(fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(socket)))))
+	var previewResult struct {
+		Selection string `json:"selectionDigest"`
+	}
+	if json.Unmarshal(plan, &previewResult) != nil || previewResult.Selection == "" {
+		t.Fatal("fixture missing reviewed selection")
+	}
 	var calls atomic.Int32
-	var manifest atomic.Value
+	var manifest, catalogDigest atomic.Value
 	var differentManifest atomic.Bool
 	var catalogReads, previewCalls atomic.Int32
 	var operationID atomic.Value
@@ -141,7 +148,15 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				Entrypoint string `json:"entrypoint"`
 				Files      []file `json:"files"`
 			}{"dill.snapshot.manifest.v1", req.Entrypoint, files})
-			manifest.Store(fmt.Sprintf(`{"stage_id":%q,"manifest":%s,"manifest_sha256":"%x"}`, stage, raw, sha256.Sum256(raw)))
+			digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+			catalog := fmt.Sprintf(`{"stage_id":%q,"manifest":%s,"manifest_sha256":%q}`, stage, raw, digest)
+			if differentManifest.Load() {
+				if _, err := dillserve.ParseCatalog(r.Context(), stage, []byte(catalog)); err != nil {
+					t.Errorf("mismatched fixture must still be a valid catalog: %v", err)
+				}
+			}
+			manifest.Store(catalog)
+			catalogDigest.Store(digest)
 			w.WriteHeader(201)
 			fmt.Fprintf(w, `{"status":"staged","stage_id":%q}`, stage)
 		case "/v1/snapshots/" + stage:
@@ -149,6 +164,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			fmt.Fprint(w, manifest.Load().(string))
 		case "/v1/deploy/preview":
 			previewCalls.Add(1)
+			var f map[string]string
+			if json.NewDecoder(r.Body).Decode(&f) != nil || f["stageId"] != stage || f["stack"] != "synthetic" || f["manifestSha256"] != catalogDigest.Load() {
+				t.Error("preview not bound to staged catalog")
+			}
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			if enabled.Load() {
 				w.Header().Set("X-Dill-Create-Enabled", "1")
@@ -159,6 +178,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			var f map[string]string
 			if json.NewDecoder(r.Body).Decode(&f) != nil || f["stageId"] != stage || f["confirm"] != "create" || f["stack"] != "synthetic" {
 				t.Error("invalid create request")
+			}
+			if !partial.Load() && (f["manifestSha256"] != catalogDigest.Load() || f["selectionDigest"] != previewResult.Selection) {
+				t.Error("apply not bound to staged catalog and reviewed selection")
 			}
 			if calls.Load() == 2 {
 				persisted, err := store.NewFSStore(data)
