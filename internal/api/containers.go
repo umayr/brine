@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/engine"
+	"github.com/umayr/brine/internal/target"
 )
 
 type containerHandler struct {
@@ -52,7 +53,11 @@ func (h *containerHandler) start(w http.ResponseWriter, r *http.Request) {
 func (h *containerHandler) stop(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.agent.Engine().StopContainer(r.Context(), id); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		msg := "Container stop failed; check the container state before retrying"
+		if errors.Is(err, target.ErrNegotiationUnavailable) {
+			msg = target.ErrNegotiationUnavailable.Error()
+		}
+		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
