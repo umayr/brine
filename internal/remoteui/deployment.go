@@ -50,7 +50,7 @@ type deploymentReview struct {
 	Expiry                                                           time.Time
 }
 
-const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect."
+const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect. Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result."
 
 type deploymentPage struct {
 	CSRF, Host, Stack, ID, Error string

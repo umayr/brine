@@ -26,6 +26,8 @@ test('a disconnected deployment can be looked up again without resubmitting', as
     await page.goto(statusURL);
     await expect(page.getByRole('alert')).toContainText('Status unavailable');
     await expect(page.getByRole('alert')).toContainText('does not mean the deployment had no effect');
+    await expect(page.getByRole('alert')).toContainText('Check the original target and its journal');
+    await expect(page.getByRole('alert')).toContainText('do not retry based on this result');
     const requestID = page.getByRole('textbox', { name: 'Request ID' });
     await expect(requestID).toHaveValue(id);
     await expect(requestID).not.toBeEditable();
