@@ -38,6 +38,25 @@ test('a disconnected deployment can be looked up again without resubmitting', as
     await expect(page.getByRole('alert')).toContainText('do not retry');
     await expect(requestID).toHaveValue(id);
     expect(requests).toEqual([['GET', statusURL], ['GET', statusURL]]);
+
+    await page.unroute('http://remote.test/**');
+    await page.route('http://remote.test/**', (route) => {
+      const req = route.request();
+      requests.push([req.method(), req.url()]);
+      return route.fulfill({ contentType: 'text/html', path: path.join(dir, 'partial.html') });
+    });
+    await page.goto(statusURL);
+    await expect(page.getByRole('alert')).toContainText('The operation failed after partially changing the target.');
+    await expect(page.getByRole('alert')).toContainText('Inspect the target and the recorded Dill operation');
+    await expect(page.getByRole('alert')).toContainText('do not retry');
+    await expect(requestID).toHaveValue(id);
+    await expect(page.locator('main')).toContainText(`op_${id}`);
+    await expect(page.locator('main')).toContainText('Target: demo');
+    await expect(page.getByRole('link', { name: 'Refresh status' })).toHaveAttribute('href', `/remote/deployment?host=demo&id=${id}`);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
+    await page.getByRole('link', { name: 'Refresh status' }).click();
+    await expect(page.getByRole('alert')).toContainText('partially changing the target');
+    expect(requests).toEqual(Array(4).fill(['GET', statusURL]));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

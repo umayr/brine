@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/umayr/brine/internal/agentclient"
 	"github.com/umayr/brine/internal/auth"
@@ -26,6 +27,27 @@ import (
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 )
+
+func TestPartialFailureAlertOnlyForPartialFailure(t *testing.T) {
+	for _, tc := range []struct {
+		state, effects string
+		alert          bool
+	}{
+		{"failed", "partial", true}, {"succeeded", "complete", false},
+		{"running", "unknown", false}, {"failed", "none", false}, {"unknown", "unknown", false},
+	} {
+		t.Run(tc.state+"-"+tc.effects, func(t *testing.T) {
+			var body bytes.Buffer
+			err := deploymentView.Execute(&body, deploymentPage{Status: &agentclient.DeploymentStatus{State: tc.state, Effects: tc.effects}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(body.String(), "The operation failed after partially changing the target.") != tc.alert {
+				t.Fatalf("unexpected partial alert: %s", body.String())
+			}
+		})
+	}
+}
 
 func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	data := t.TempDir()
@@ -57,6 +79,8 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var manifest atomic.Value
 	var operationID atomic.Value
 	var fenceCalls, fenceState atomic.Int32
+	var partial atomic.Bool
+	var statusGETs atomic.Int32
 	journal, stranded, unknown := strings.Repeat("d", 32), strings.Repeat("e", 32), strings.Repeat("f", 32)
 	enabled := atomic.Bool{}
 	enabled.Store(true)
@@ -142,6 +166,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				}
 			}
 			operationID.Store(f["requestId"])
+			if partial.Load() {
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"failed","effects":"partial","operationId":%q}`, f["requestId"], "op_"+f["requestId"])
+				return
+			}
 			// Simulate an ambiguous response; the durable status is discoverable separately.
 			w.WriteHeader(502)
 		case "/v1/deploy/fence":
@@ -180,7 +208,15 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				http.NotFound(w, r)
 				return
 			}
-			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"succeeded","effects":"complete","operationId":%q}`, id, "op_"+id)
+			if r.Method != http.MethodGet {
+				t.Errorf("status lookup used %s", r.Method)
+			}
+			statusGETs.Add(1)
+			if partial.Load() {
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"failed","effects":"partial","operationId":%q}`, id, "op_"+id)
+			} else {
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"succeeded","effects":"complete","operationId":%q}`, id, "op_"+id)
+			}
 		}
 	}))
 	defer agent.Close()
@@ -229,6 +265,26 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		return m[1]
 	}
 	csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
+	// Exercise the immediate result and a later GET against the same validated status.
+	partial.Store(true)
+	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+	partialPath := deployPath + "?host=demo&id=" + partialID
+	for _, w := range []*httptest.ResponseRecorder{
+		invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {partialID}, "confirm": {"create"}}),
+		invoke("GET", partialPath, nil),
+	} {
+		for _, want := range []string{`role="alert">The operation failed after partially changing the target.`, "Inspect the target and the recorded Dill operation", "do not retry", `value="` + partialID + `"`, `op_` + partialID, "Target: <bdi>demo</bdi>", `href="` + deployPath + `?host=demo&amp;id=` + partialID + `">Refresh status`, "Stack synthetic · State failed · Effects partial"} {
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+				t.Errorf("partial status missing %q (HTTP %d)", want, w.Code)
+			}
+		}
+	}
+	if calls.Load() != 1 || statusGETs.Load() != 1 || fenceCalls.Load() != 0 {
+		t.Fatal("partial status lookup resubmitted or did not use GET")
+	}
+	partial.Store(false)
+	calls.Store(0)
 	params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
 	w := invoke("POST", deployPath+"/review", params)
 	review := field(w, "id")

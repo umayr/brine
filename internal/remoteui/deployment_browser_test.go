@@ -18,6 +18,9 @@ func TestDeploymentStatusBrowserFixture(t *testing.T) {
 	const id = "1a23456789abcdef0123456789abcdef"
 	for name, page := range map[string]deploymentPage{
 		"unavailable": {Host: "demo", ID: id, Error: deploymentStatusUnavailable},
+		"partial": {Host: "demo", ID: id, Status: &agentclient.DeploymentStatus{
+			RequestID: id, Stack: "synthetic", State: "failed", Effects: "partial", OperationID: "op_" + id,
+		}},
 		"unknown": {Host: "demo", ID: id, Status: &agentclient.DeploymentStatus{
 			RequestID: id, Stack: "synthetic", State: "unknown", Effects: "unknown",
 		}},
