@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -84,7 +85,11 @@ func (h *recipeHandler) updateMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	recipe, err := h.store.UpdateMeta(slug, body.Name, body.Category, body.Description)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		if errors.Is(err, store.ErrRecipeNotFound) {
+			writeError(w, http.StatusNotFound, "Recipe not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Recipe metadata update unavailable; check local recipe storage")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, recipe)

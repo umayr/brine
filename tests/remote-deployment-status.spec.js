@@ -59,6 +59,24 @@ test('a disconnected deployment can be looked up again without resubmitting', as
     await page.getByRole('link', { name: 'Refresh status' }).click();
     await expect(page.getByRole('alert')).toContainText('partially changing the target');
     expect(requests).toEqual(Array(4).fill(['GET', statusURL]));
+
+    await page.unroute('http://remote.test/**');
+    await page.route('http://remote.test/**', route => {
+      const req = route.request();
+      requests.push([req.method(), req.url()]);
+      return route.fulfill({ contentType: 'text/html', path: path.join(dir, 'unverified.html') });
+    });
+    await page.goto(statusURL);
+    await expect(page.getByRole('alert')).toContainText('Unverified status reply');
+    await expect(page.getByRole('alert')).toContainText('cannot establish that the request was never admitted or had no effect');
+    await expect(page.getByRole('alert')).toContainText('Check the original target and its journal');
+    await expect(page.getByRole('alert')).toContainText('do not retry based on this result');
+    await expect(requestID).toHaveValue(id);
+    await expect(page.locator('main')).not.toContainText(/State not-admitted|Effects none|unverified-stack/);
+    await expect(page.locator('form[method="post"]')).toHaveCount(0);
+    await page.getByRole('link', { name: 'Refresh status' }).click();
+    await expect(page.getByRole('alert')).toContainText('Unverified status reply');
+    expect(requests).toEqual(Array(6).fill(['GET', statusURL]));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
