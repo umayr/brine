@@ -40,6 +40,68 @@ for (const kind of ['containers', 'images']) {
   });
 }
 
+for (const kind of ['containers', 'images']) {
+  test(`${kind}: only show inventory controls when rows are available`, async ({ page }) => {
+    let release;
+    const initial = new Promise(resolve => { release = resolve; });
+    let response = 'error';
+    let requests = 0;
+    const colspan = kind === 'containers' ? 7 : 5;
+    await page.route(`**/web/${kind}`, async route => {
+      if (++requests === 1) await initial;
+      if (response === 'error') return route.fulfill({ status: 503 });
+      if (response === 'empty') return route.fulfill({ contentType: 'text/html', body: `<tr><td colspan="${colspan}">No rows available.</td></tr>` });
+      return route.continue();
+    });
+    await page.setViewportSize({ width: 320, height: 850 });
+    await page.goto(`${base}/${kind}`);
+    const body = page.locator(`#${kind}-body`);
+    const controls = page.locator(`[data-inventory-controls="${kind}-body"]`);
+    const footer = page.locator('[data-inventory-result]');
+    await expect(body.getByRole('status')).toContainText(`Loading ${kind}`);
+    await expect(controls).toBeHidden();
+    await expect(footer).toBeHidden();
+    release();
+    await expect(body.getByRole('alert')).toContainText('Inventory is unavailable');
+    await expect(controls).toBeHidden();
+    await expect(footer).toBeHidden();
+    response = 'rows';
+    await body.getByRole('button', { name: 'Retry' }).click();
+    await expect(controls).toBeVisible();
+    await expect(footer).toBeVisible();
+    const search = controls.getByRole('searchbox');
+    const filter = controls.getByLabel('Filter');
+    const selectedFilter = kind === 'containers' ? 'running' : 'tagged';
+    await filter.selectOption(selectedFilter);
+    await search.fill('grafana');
+    await expect(search).toBeFocused();
+    await expect(footer).toContainText('of 1');
+
+    response = 'empty';
+    await page.evaluate(k => htmx.ajax('GET', `/web/${k}`, { target: `#${k}-body`, swap: 'innerHTML' }), kind);
+    await expect(body).toContainText('No rows available.');
+    await expect(controls).toBeHidden();
+    await expect(footer).toBeHidden();
+    const title = kind === 'containers' ? 'Containers' : 'Images';
+    await expect(page.getByRole('heading', { name: title, exact: true })).toBeFocused();
+
+    response = 'rows';
+    await page.evaluate(k => htmx.ajax('GET', `/web/${k}`, { target: `#${k}-body`, swap: 'innerHTML' }), kind);
+    await expect(search).toBeVisible();
+    await expect(search).toHaveValue('grafana');
+    await expect(filter).toHaveValue(selectedFilter);
+    await expect(footer).toContainText('of 1');
+
+    const next = footer.getByRole('button', { name: 'Next', exact: true });
+    await next.focus();
+    await expect(next).toBeFocused();
+    response = 'empty';
+    await page.evaluate(k => htmx.ajax('GET', `/web/${k}`, { target: `#${k}-body`, swap: 'innerHTML' }), kind);
+    await expect(footer).toBeHidden();
+    await expect(page.getByRole('heading', { name: title, exact: true })).toBeFocused();
+  });
+}
+
 test('inventory row and action heights, outlined states, and separate stack columns', async ({ page }) => {
   await page.goto(`${base}/containers`);
   const rows = page.locator('#containers-body [data-inventory-row]');
