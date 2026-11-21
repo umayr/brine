@@ -32,7 +32,7 @@
 
   <div id="image-action-uncertain" class="ui-notice ui-notice-warning" role="alert" hidden>
     <div>Image removal could not be confirmed. Inventory may be stale; refresh and inspect before retrying.
-      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Refresh images</button>
+      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML" hx-sync="#images-body:replace">Refresh images</button>
     </div>
   </div>
 
@@ -60,6 +60,7 @@
           hx-get="/web/images"
           hx-trigger="load, refresh-images"
           hx-swap="innerHTML"
+          hx-sync="#images-body:replace"
           hx-on::send-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
           hx-on::response-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
         >
@@ -78,7 +79,7 @@
     <nav aria-label="Image pagination"><button type="button" class="ui-button ui-button-outline" data-inventory-prev>Previous</button><button type="button" class="ui-button ui-button-outline" data-inventory-next>Next</button></nav>
   </div>
   <template id="images-loading"><tr><td colspan="5" class="text-center py-8 text-dim"><span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span> <span role="status">Loading images…</span></td></tr></template>
-  <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Retry</button></td></tr></template>
+  <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML" hx-sync="#images-body:replace">Retry</button></td></tr></template>
 
 </div>
 {{end}}

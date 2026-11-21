@@ -150,6 +150,48 @@ test('HTTP inventory error offers retry', async ({ page }) => {
   await expect(page.locator('#images-body')).toContainText('grafana/grafana');
 });
 
+for (const control of ['Retry', 'Refresh images']) {
+  test(`${control} supersedes an older in-flight image inventory request`, async ({ page }) => {
+    let requests = 0;
+    let release;
+    let markStarted;
+    const pending = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { markStarted = resolve; });
+    await page.route('**/web/images', async route => {
+      const request = ++requests;
+      if (request === 1 && control === 'Retry') return route.fulfill({ status: 503 });
+      if (request === 2) {
+        markStarted();
+        await pending;
+        return route.fulfill({ status: 503 }).catch(() => {});
+      }
+      return route.continue();
+    });
+    if (control === 'Refresh images') await page.route('**/api/images/**', route => route.abort());
+    await page.goto(new URL('/images', baseURL).href);
+    const body = page.locator('#images-body');
+    if (control === 'Refresh images') {
+      await body.getByRole('button', { name: 'Remove', exact: true }).first().click();
+      await page.getByRole('dialog', { name: 'Remove image' }).getByRole('button', { name: 'Confirm' }).click();
+    }
+    const refresh = page.getByRole('button', { name: control, exact: true });
+    await expect(refresh).toBeVisible();
+    await body.evaluate(el => {
+      el.addEventListener('htmx:beforeRequest', event => {
+        event.detail.xhr.addEventListener('abort', () => { el.dataset.priorRequestAborted = 'true'; }, { once: true });
+      }, { once: true });
+      htmx.trigger(el, 'refresh-images');
+    });
+    await started;
+    await refresh.click();
+    await expect(body).toHaveAttribute('data-prior-request-aborted', 'true');
+    release();
+    await expect(body).toContainText('grafana/grafana');
+    await expect(body).not.toContainText('Inventory is unavailable');
+    expect(requests).toBe(3);
+  });
+}
+
 test('engine inventory error offers retry', async ({ page }) => {
   let requests = 0;
   await page.route('**/web/images', route => {
