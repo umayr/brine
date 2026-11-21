@@ -93,14 +93,14 @@ for (const [outcome, response, expected] of [
   });
 }
 
-test('restart clears the previous plan even when it fails', async ({ page }) => {
+test('restart clears the previous plan when its outcome cannot be confirmed', async ({ page }) => {
   await page.route('**/web/stacks/observability/plan', route => route.fulfill({ body: '<div>Previous plan</div>', contentType: 'text/html' }));
   await page.route('**/api/stacks/observability/restart', route => route.fulfill({ status: 500, body: 'restart failed' }));
   await page.goto(new URL('/stacks/observability', baseURL).href);
   await page.locator('#plan-button').click();
   await expect(page.locator('#plan-result')).toHaveText('Previous plan');
   await page.getByRole('button', { name: 'Restart', exact: true }).click();
-  await expect(page.locator('#action-status')).toHaveText('failed');
+  await expect(page.locator('#action-status')).toHaveText('unknown');
   await expect(page.locator('#plan-result')).toBeEmpty();
 });
 
