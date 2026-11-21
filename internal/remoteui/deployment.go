@@ -52,6 +52,15 @@ type deploymentReview struct {
 
 const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect. Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result."
 
+func (p *deploymentPage) showGenericStatus(status agentclient.DeploymentStatus) {
+	if status.State == "not-admitted" {
+		// The generic lookup is not bound to the original journal or stack.
+		p.Error = "Unverified status reply. This lookup cannot establish that the request was never admitted or had no effect. Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result."
+		return
+	}
+	p.Status = &status
+}
+
 type deploymentPage struct {
 	CSRF, Host, Stack, ID, Error string
 	Review                       *projectreview.Preview
@@ -205,7 +214,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			var status agentclient.DeploymentStatus
 			status, err = c.DeploymentStatus(ctx, epoch, p.ID)
 			if err == nil {
-				p.Status = &status
+				p.showGenericStatus(status)
 			}
 		}
 		if err != nil {

@@ -16,7 +16,10 @@ func TestDeploymentStatusBrowserFixture(t *testing.T) {
 		t.Skip("browser fixture only")
 	}
 	const id = "1a23456789abcdef0123456789abcdef"
+	unverified := deploymentPage{Host: "demo", ID: id}
+	unverified.showGenericStatus(agentclient.DeploymentStatus{RequestID: id, Stack: "unverified-stack", State: "not-admitted", Effects: "none"})
 	for name, page := range map[string]deploymentPage{
+		"unverified":  unverified,
 		"unavailable": {Host: "demo", ID: id, Error: deploymentStatusUnavailable},
 		"partial": {Host: "demo", ID: id, Status: &agentclient.DeploymentStatus{
 			RequestID: id, Stack: "synthetic", State: "failed", Effects: "partial", OperationID: "op_" + id,
