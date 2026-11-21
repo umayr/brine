@@ -150,23 +150,36 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 
 const maxStackActionOptionsBytes = 4096
 
-// decodeStackActionOptions accepts an omitted body or exactly one JSON object.
-// Do not use partially decoded options, even if the first value was valid.
-func decodeStackActionOptions[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
-	var zero T
-	var options *T
+// decodeStackActionOption accepts an omitted body, an empty object, or an
+// object with exactly one canonical Boolean option. Unknown or repeated keys
+// must not silently fall back to default options for a destructive action.
+func decodeStackActionOption(w http.ResponseWriter, r *http.Request, option string) (enabled, valid bool) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStackActionOptionsBytes))
-	if err := dec.Decode(&options); err != nil {
-		return zero, err == io.EOF
+	tok, err := dec.Token()
+	if err == io.EOF {
+		return false, true
 	}
-	if options == nil || dec.Decode(new(json.RawMessage)) != io.EOF {
-		return zero, false
+	if err != nil || tok != json.Delim('{') {
+		return false, false
 	}
-	return *options, true
-}
 
-type deleteStackRequest struct {
-	RemoveContainers bool `json:"remove_containers"`
+	tok, err = dec.Token()
+	if key, ok := tok.(string); err == nil && ok && key == option {
+		value, valueErr := dec.Token()
+		flag, ok := value.(bool)
+		if valueErr != nil || !ok {
+			return false, false
+		}
+		enabled = flag
+		tok, err = dec.Token()
+	}
+	if err != nil || tok != json.Delim('}') {
+		return false, false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return false, false
+	}
+	return enabled, true
 }
 
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +187,7 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "qualified stack deletion is deferred: preserve source and operation recovery context; use explicit Down and inspect its receipt")
 		return
 	}
-	req, ok := decodeStackActionOptions[deleteStackRequest](w, r)
+	removeContainers, ok := decodeStackActionOption(w, r, "remove_containers")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -187,7 +200,7 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.RemoveContainers {
+	if removeContainers {
 		ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 		defer cancel()
 		var out bytes.Buffer
@@ -273,15 +286,11 @@ func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type teardownRequest struct {
-	Force bool `json:"force"`
-}
-
 func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
-	req, ok := decodeStackActionOptions[teardownRequest](w, r)
+	force, ok := decodeStackActionOption(w, r, "force")
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -305,7 +314,7 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, req.Force, fw))
+	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, force, fw))
 }
 
 func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
