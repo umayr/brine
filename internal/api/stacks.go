@@ -73,16 +73,20 @@ func (h *stackHandler) list(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, metadata)
 }
 
+func writeStackLookupError(w http.ResponseWriter, name string, err error) {
+	if errors.Is(err, store.ErrStackNotFound) || store.ValidateStackName(name) != nil {
+		writeError(w, http.StatusNotFound, "stack not found")
+		return
+	}
+	writeError(w, http.StatusInternalServerError, "stack metadata unavailable; check local stack storage")
+}
+
 func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		if errors.Is(err, store.ErrStackNotFound) || store.ValidateStackName(name) != nil {
-			writeError(w, http.StatusNotFound, "stack not found")
-		} else {
-			writeError(w, http.StatusInternalServerError, "stack metadata unavailable; check local stack storage")
-		}
+		writeStackLookupError(w, name, err)
 		return
 	}
 	pkl, err := h.store.ReadPkl(name)
@@ -231,7 +235,7 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeStackLookupError(w, name, err)
 		return
 	}
 	if checkEngine && !h.ensureRuntimeEngine(w, stack) {
@@ -325,7 +329,7 @@ func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeStackLookupError(w, name, err)
 		return
 	}
 	if !h.ensureRuntimeEngine(w, stack) {
@@ -347,7 +351,7 @@ func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
 	defer h.lockStack(name)()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		writeError(w, http.StatusNotFound, err.Error())
+		writeStackLookupError(w, name, err)
 		return
 	}
 	if err := h.agent.Dill().Validate(r.Context(), stack.PklPath); err != nil {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/store"
 )
@@ -41,7 +42,13 @@ func TestStackReadDistinguishesMissingFromUnavailableMetadata(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(stack.PklPath), "meta.json"), meta, 0600); err != nil {
 		t.Fatal(err)
 	}
+	const token = "synthetic-api-token"
+	a, err := auth.New(auth.Config{User: "test", Password: "synthetic-password", APIToken: token})
+	if err != nil {
+		t.Fatal(err)
+	}
 	r := chi.NewRouter()
+	r.Use(a.Middleware)
 	Mount(r, nil, st, nil, nil, "docker", httpx.Timeouts{}, 0)
 	for _, tc := range []struct {
 		name, body string
@@ -51,13 +58,31 @@ func TestStackReadDistinguishesMissingFromUnavailableMetadata(t *testing.T) {
 		{"invalid.name", `{"error":"stack not found"}`, http.StatusNotFound},
 		{"unavailable", `{"error":"stack metadata unavailable; check local stack storage"}`, http.StatusInternalServerError},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/stacks/"+tc.name, nil))
-			if w.Code != tc.status || strings.TrimSpace(w.Body.String()) != tc.body {
-				t.Errorf("GET status = %d, want %d; response must contain only the expected safe diagnostic", w.Code, tc.status)
-			}
-		})
+		for _, route := range []struct{ method, suffix string }{
+			{http.MethodGet, ""},
+			{http.MethodPost, "/up"},
+			{http.MethodPost, "/down"},
+			{http.MethodGet, "/plan"},
+			{http.MethodGet, "/validate"},
+		} {
+			t.Run(tc.name+route.suffix, func(t *testing.T) {
+				path := "/api/stacks/" + tc.name + route.suffix
+				req := httptest.NewRequest(route.method, path, nil)
+				req.Header.Set("Accept", "application/json")
+				w := httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				if w.Code != http.StatusUnauthorized {
+					t.Fatalf("unauthenticated status = %d, want 401", w.Code)
+				}
+				req = httptest.NewRequest(route.method, path, nil)
+				req.Header.Set("Authorization", "Bearer "+token)
+				w = httptest.NewRecorder()
+				r.ServeHTTP(w, req)
+				if w.Code != tc.status || strings.TrimSpace(w.Body.String()) != tc.body {
+					t.Errorf("status = %d, want %d; response must contain only the expected safe diagnostic", w.Code, tc.status)
+				}
+			})
+		}
 	}
 }
 
