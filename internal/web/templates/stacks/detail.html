@@ -369,8 +369,13 @@
         </summary>
         <form
           hx-put="/web/stacks/{{.Stack.Name}}/git"
-          hx-target="#git-result"
+          hx-target="#git-settings-result"
           hx-swap="innerHTML"
+          hx-sync="this:drop"
+          hx-disabled-elt="#git-settings-save"
+          hx-on::before-request="document.getElementById('git-settings-result').textContent = 'Saving Git settings…'"
+          hx-on::send-error="reportGitSettingsUnconfirmed()"
+          hx-on::response-error="reportGitSettingsUnconfirmed()"
           class="mt-4 grid grid-cols-2 gap-4"
         >
           <div class="ui-field">
@@ -402,8 +407,9 @@
             </label>
           </div>
           <div class="col-span-2">
-            <button type="submit" class="ui-button ui-button-sm ui-button-primary">Save settings</button>
+            <button id="git-settings-save" type="submit" class="ui-button ui-button-sm ui-button-primary">Save settings</button>
           </div>
+          <div id="git-settings-result" class="col-span-2" role="status"></div>
         </form>
       </details>
     </div>
@@ -486,6 +492,10 @@
 </dialog>
 
 <script>
+function reportGitSettingsUnconfirmed() {
+  document.getElementById('git-settings-result').textContent = 'Git settings save could not be confirmed. Check the saved settings in another tab before retrying.';
+}
+
 async function deleteStack(name, removeContainers) {
   const button = document.getElementById('stack-delete-button');
   if (button.disabled) return;
