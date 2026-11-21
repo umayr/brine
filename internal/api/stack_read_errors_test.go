@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/store"
 )
@@ -83,6 +85,29 @@ func TestStackReadDistinguishesMissingFromUnavailableMetadata(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestStackEngineCheckRedactsConfigurationReadFailure(t *testing.T) {
+	for _, route := range []struct{ method, suffix string }{
+		{http.MethodPost, "/up"},
+		{http.MethodGet, "/plan"},
+	} {
+		t.Run(route.suffix, func(t *testing.T) {
+			runner := dill.New("/must-not-run")
+			runner.CheckSource = func(string) error {
+				t.Error("Dill reached despite configuration read failure")
+				return errors.New("synthetic source guard")
+			}
+			r := chi.NewRouter()
+			Mount(r, agent.NewLocalAgent(nil, runner), brokenStackStore{}, nil, nil, "docker", httpx.Timeouts{}, time.Second)
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(route.method, "/api/stacks/demo"+route.suffix, nil))
+			const safeBody = `{"error":"unable to read stack configuration"}`
+			if w.Code != http.StatusInternalServerError || w.Header().Get("Content-Type") != "application/json" || strings.TrimSpace(w.Body.String()) != safeBody {
+				t.Errorf("response = %d %q, want 500 %s", w.Code, w.Body.String(), safeBody)
+			}
+		})
 	}
 }
 
