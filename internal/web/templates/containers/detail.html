@@ -22,13 +22,13 @@
       </div>
       <div>
         <div class="field-label mb-1">State</div>
-        <div id="container-state">
+        <div id="container-state" role="status">
           {{template "container-state-badge" .Container}}
         </div>
       </div>
       <div>
         <div class="field-label mb-1">Status</div>
-        <div class="font-mono text-xs text-muted">{{.Container.Status}}</div>
+        <div id="container-status" class="font-mono text-xs text-muted">{{.Container.Status}}</div>
       </div>
       {{if .Container.Stack}}
       <div>
@@ -219,6 +219,11 @@ document.body.addEventListener('htmx:beforeRequest', event => {
   xhr.addEventListener('loadend', () => {
     if (xhr.status === 0 || xhr.status >= 400) document.getElementById('container-detail-uncertain').hidden = false;
   }, { once: true });
+});
+document.getElementById('container-state').addEventListener('htmx:afterSwap', event => {
+  if (event.detail.target === event.currentTarget && event.detail.requestConfig?.elt.matches('[data-detail-action]')) {
+    document.getElementById('container-detail-uncertain').hidden = true;
+  }
 });
 </script>
 {{end}}

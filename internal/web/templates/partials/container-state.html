@@ -7,3 +7,4 @@
 {{else}}
 <span class="ui-status ui-status-sm {{if or (eq .State "unknown") (eq .State "unreachable")}}ui-status-unknown{{else if or (eq .State "queued") (eq .State "pending")}}ui-status-queued{{else if eq .State "started"}}ui-status-running{{else}}ui-status-neutral{{end}} font-mono">{{.State}}</span>
 {{end}}
+<div id="container-status" hx-swap-oob="innerHTML">{{.Status}}</div>
