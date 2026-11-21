@@ -107,6 +107,9 @@ func (p *Pairing) Open(lifetime, request context.Context, address string) (*Clie
 	epoch, err := c.Session(request)
 	if err != nil {
 		_ = c.Close()
+		if errors.Is(err, ErrTLSPinMismatch) {
+			return nil, "", ErrTLSPinMismatch
+		}
 		return nil, "", ErrProtocol
 	}
 	return c, epoch, nil

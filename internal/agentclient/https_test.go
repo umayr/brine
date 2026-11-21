@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,12 +35,17 @@ func TestHTTPSAuthenticatesBeforeSendingToken(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = c.Session(context.Background()); err == nil {
-			t.Error("unexpected successful session")
+		_, err = c.Session(context.Background())
+		wantMismatch := pin != hex.EncodeToString(sum[:])
+		if !errors.Is(err, ErrProtocol) || errors.Is(err, ErrTLSPinMismatch) != wantMismatch || err.Error() != ErrProtocol.Error() {
+			t.Error("session error classification or redaction changed")
+		}
+		if _, err := c.Session(context.Background()); err != ErrProtocol {
+			t.Error("session did not retire the failed client")
 		}
 		c.Close()
 		var want int32
-		if pin == hex.EncodeToString(sum[:]) {
+		if !wantMismatch {
 			want = 1
 		}
 		if got := received.Load(); got != want {

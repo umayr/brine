@@ -90,8 +90,8 @@ func TestPairingOpenRequiresPinAndSignedBinding(t *testing.T) {
 	}
 	addr := strings.TrimPrefix(s.URL, "https://")
 	bad, _ := ParsePairing([]byte(strings.Replace(bundle, hex.EncodeToString(sum[:]), strings.Repeat("0", 64), 1)))
-	if _, _, e = bad.Open(context.Background(), context.Background(), addr); e == nil || calls.Load() != 0 {
-		t.Fatal("pin failure sent credential")
+	if c, epoch, err := bad.Open(context.Background(), context.Background(), addr); c != nil || epoch != "" || err != ErrTLSPinMismatch || err.Error() != ErrProtocol.Error() || calls.Load() != 0 {
+		t.Fatal("pin failure lost its classification or sent a request")
 	}
 	wrong.Store(true)
 	if _, _, e = p.Open(context.Background(), context.Background(), addr); e == nil {
