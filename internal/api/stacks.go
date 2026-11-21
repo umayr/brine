@@ -148,9 +148,35 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stack)
 }
 
+const maxStackActionOptionsBytes = 4096
+
+// decodeStackActionOptions accepts an omitted body or exactly one JSON object.
+// Do not use partially decoded options, even if the first value was valid.
+func decodeStackActionOptions[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
+	var zero T
+	var options *T
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStackActionOptionsBytes))
+	if err := dec.Decode(&options); err != nil {
+		return zero, err == io.EOF
+	}
+	if options == nil || dec.Decode(new(json.RawMessage)) != io.EOF {
+		return zero, false
+	}
+	return *options, true
+}
+
+type deleteStackRequest struct {
+	RemoveContainers bool `json:"remove_containers"`
+}
+
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() {
 		writeError(w, http.StatusConflict, "qualified stack deletion is deferred: preserve source and operation recovery context; use explicit Down and inspect its receipt")
+		return
+	}
+	req, ok := decodeStackActionOptions[deleteStackRequest](w, r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	name := chi.URLParam(r, "name")
@@ -160,10 +186,6 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	var req struct {
-		RemoveContainers bool `json:"remove_containers"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 
 	if req.RemoveContainers {
 		ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
@@ -259,10 +281,13 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
+	req, ok := decodeStackActionOptions[teardownRequest](w, r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
-	var req teardownRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
