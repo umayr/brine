@@ -9,7 +9,13 @@ A paired target is read-only by default. Install [Dill v0.8.0](https://github.co
 3. On a write-enabled target, confirm **Create stack** or **Update stack** separately. Creation cannot adopt existing resources. An update must match the exact managed container and network IDs; it can add services but cannot omit managed services. The engine must already have the selected images. Docker has no immutable volume ID, so updates that would attach an existing named volume are refused.
 4. For removal, enter the stack under **Preview removal** on the same target. The agent previews the last successfully deployed snapshot and requires the same managed identities. **Remove containers; keep data** retains the network, volumes, and snapshots. This is not a purge. The removal record prevents silently reusing the old names.
 
-Save the request status link before confirming. A lost response is not retried; refresh the same link to observe the recorded result. A missing request or unavailable target does not prove that nothing happened. Unknown or partial effects require independent inspection rather than another apply or removal. Use disposable native Linux Docker targets to qualify the feature before relying on it.
+### Check a manual deployment request
+
+Before confirming, save the URL from **Open status link** and the request ID for the original paired target. If the browser closes or the response is lost, open that saved link while signed in. The lookup asks Dill about that exact request; it does not resubmit it. Do not use a replacement pairing or a new journal to infer what happened to the original request. See the [Brine status handler](../internal/remoteui/deployment.go) and the [Dill deployment status contract](https://github.com/umayr/dill/blob/v0.8.0/docs/host-agent-https.md#optional-checked-deployment-removal-and-status).
+
+A missing result, including a `404` from the agent, an unavailable target, or a lost response does not prove there were no effects. If status is unavailable or Dill reports unknown or partial effects, inspect the original target and its journal before taking further action; do not submit another apply or removal to resolve the uncertainty. The explicit fence described below is for a pending Git request with its original journal, not for manual lookup or cancellation of an admitted deployment.
+
+The status link is not a deployment timeline. Even a recorded success describes that request, not current stack health or whether the original source and images are still available. Brine does not currently offer a reviewed redeploy from a previous status result or restore database or volume data. Use disposable native Linux Docker targets to qualify the feature before relying on it.
 
 ## Remote Git auto-deploy
 
@@ -25,4 +31,4 @@ Upgrade the Dill agent before deploying new Git commits: journal-bound submissio
 
 ## Verification
 
-`DILL_AGENT_HTTPS_BIN=/absolute/dill DILL_AGENT_HTTPS_SUBCOMMAND=1 go test ./internal/agentclient -run '^TestHTTPS'` exercises the combined agent over loopback against a synthetic Docker socket. Brine handler tests cover exact transfer, explicit confirmation, Git intent persistence, and status recovery. These checks do not replace a real-engine deployment test.
+`DILL_AGENT_HTTPS_BIN=/absolute/dill DILL_AGENT_HTTPS_SUBCOMMAND=1 go test ./internal/agentclient -run '^TestHTTPS'` exercises the combined agent over loopback against a synthetic Docker socket. The [Brine handler test](../internal/remoteui/deployment_test.go) covers exact transfer, explicit confirmation, Git intent persistence, and status recovery. The [agent client test](../internal/agentclient/deployment_test.go) covers missing or mismatched journal evidence for journal-bound lookups. These checks do not replace a real-engine deployment test.
