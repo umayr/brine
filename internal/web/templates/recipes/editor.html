@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <div class="max-w-3xl mx-auto space-y-5">
   <div class="ui-panel p-6">
-    <form
+    <form id="recipe-form"
       {{if .Recipe}}
         hx-put="/web/recipes/{{.Recipe.Slug}}"
       {{else}}
@@ -31,6 +31,11 @@ document.addEventListener('DOMContentLoaded', () => {
       {{end}}
       hx-target="#recipe-result"
       hx-swap="innerHTML"
+      hx-sync="#recipe-form:drop"
+      hx-disabled-elt="#recipe-submit{{if .Recipe}}, #recipe-delete{{end}}"
+      hx-on::before-request="if (event.detail.elt === this) document.getElementById('recipe-result').textContent = 'Saving snippet…'"
+      hx-on::send-error="if (event.detail.elt === this) reportSnippetSaveUnconfirmed()"
+      hx-on::response-error="if (event.detail.elt === this) reportSnippetSaveUnconfirmed()"
       class="space-y-5"
     >
       <div class="grid grid-cols-2 gap-4">
@@ -75,11 +80,11 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
 
       <div class="flex items-center gap-3">
-        <button type="submit" class="ui-button ui-button-primary">
+        <button id="recipe-submit" type="submit" class="ui-button ui-button-primary">
           {{if .Recipe}}Save{{else}}Create snippet{{end}}
         </button>
         {{if .Recipe}}
-        <button type="button" class="ui-button ui-button-ghost ui-button-sm text-error"
+        <button id="recipe-delete" type="button" class="ui-button ui-button-ghost ui-button-sm text-error"
           hx-delete="/web/recipes/{{.Recipe.Slug}}"
           hx-target="body"
           onclick="return confirm('Delete snippet {{.Recipe.Name}}?')"
@@ -91,8 +96,13 @@ document.addEventListener('DOMContentLoaded', () => {
         <a href="/recipes" class="ui-button ui-button-ghost ml-auto">Cancel</a>
       </div>
 
-      <div id="recipe-result"></div>
+      <div id="recipe-result" role="status"></div>
     </form>
   </div>
 </div>
+<script>
+function reportSnippetSaveUnconfirmed() {
+  document.getElementById('recipe-result').textContent = 'Snippet save could not be confirmed. Check the snippet list or reopen the saved snippet in another tab before retrying.';
+}
+</script>
 {{end}}

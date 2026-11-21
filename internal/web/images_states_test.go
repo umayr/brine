@@ -53,7 +53,7 @@ func TestImageInventoryStates(t *testing.T) {
 		want []string
 	}{
 		{"image-rows", []engine.ImageInfo{}, []string{"No images found.", "configured engine returned no images"}},
-		{"image-list-error", "engine <offline>", []string{"Inventory is unavailable", "engine &lt;offline&gt;", "Retry", "colspan=\"5\""}},
+		{"image-list-error", "engine <offline>", []string{"Inventory is unavailable", "engine &lt;offline&gt;", "Retry", "colspan=\"5\"", `hx-sync="#images-body:replace"`}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out bytes.Buffer

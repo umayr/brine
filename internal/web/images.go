@@ -2,8 +2,10 @@ package web
 
 import (
 	"bufio"
-	"fmt"
+	"encoding/json"
+	"io"
 	"net/http"
+	"strings"
 )
 
 func (h *Handler) imageList(w http.ResponseWriter, r *http.Request) {
@@ -23,41 +25,72 @@ func (h *Handler) imageRows(w http.ResponseWriter, r *http.Request) {
 	h.renderPartial(w, r, "image-rows", images)
 }
 
-// imagePull streams pull output as SSE.
+// imagePull sends one notice to the HTMX form after reading the engine response.
+// The separate API endpoint retains its existing streaming response.
 func (h *Handler) imagePull(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		h.renderAlert(w, "error", "Invalid form")
+		h.renderAlert(w, "error", "Invalid image pull form. Check the reference and try again.")
 		return
 	}
-	ref := r.FormValue("ref")
+	ref := strings.TrimSpace(r.FormValue("ref"))
 	if ref == "" {
-		h.renderAlert(w, "error", "Image reference is required")
+		h.renderAlert(w, "error", "Image reference is required.")
 		return
 	}
 
 	rc, err := h.agent.Engine().PullImage(r.Context(), ref)
 	if err != nil {
-		h.renderAlert(w, "error", err.Error())
+		if r.Context().Err() != nil {
+			h.renderAlert(w, "warning", imagePullUnconfirmed)
+			return
+		}
+		h.renderAlert(w, "error", "Could not start reading image pull progress. Check the image reference and local engine; inspect image inventory before retrying.")
 		return
 	}
 	defer rc.Close()
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("X-Accel-Buffering", "no")
+	reportedError, completeProgress := readImagePullProgress(rc)
+	switch {
+	case reportedError:
+		h.renderAlert(w, "error", "The engine reported an image pull error. Check the image reference and local engine before retrying.")
+	case completeProgress && r.Context().Err() == nil:
+		h.renderAlert(w, "info", "Engine finished reporting pull progress without an error. Refresh image inventory to verify the image.")
+	default:
+		h.renderAlert(w, "warning", imagePullUnconfirmed)
+	}
+}
 
-	flusher, canFlush := w.(http.Flusher)
-	scanner := bufio.NewScanner(rc)
+const imagePullUnconfirmed = "Image pull could not be confirmed. Refresh image inventory and check the local engine before retrying."
+
+// Docker-compatible pulls report progress as newline-delimited JSON records.
+// Unknown records make completion uncertain; later reported errors still count.
+// Clean progress EOF is not evidence that the image is in local inventory.
+func readImagePullProgress(r io.Reader) (reportedError, completeProgress bool) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var seenProgress, unrecognized bool
 	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Fprintf(w, "data: <div class=\"log-line\">%s</div>\n\n", escapeHTML(line))
-		if canFlush {
-			flusher.Flush()
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var record struct {
+			Status      string
+			Error       string
+			ErrorDetail struct{ Message string }
+		}
+		if json.Unmarshal([]byte(line), &record) != nil {
+			unrecognized = true
+			continue
+		}
+		if record.Error != "" || record.ErrorDetail.Message != "" {
+			return true, false
+		}
+		if record.Status != "" {
+			seenProgress = true
+		} else {
+			unrecognized = true
 		}
 	}
-	fmt.Fprintf(w, "event: done\ndata: <div class=\"log-line text-success\">— pull complete —</div>\n\n")
-	if canFlush {
-		flusher.Flush()
-	}
+	return false, seenProgress && !unrecognized && scanner.Err() == nil
 }

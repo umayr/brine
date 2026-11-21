@@ -12,7 +12,6 @@ for (const view of document.querySelectorAll('[data-inventory-view]')) {
   const primaryStates = ['running', 'exited', 'paused'];
   const engineOrder = new Map();
   let page = 1;
-  controls.hidden = footer.hidden = false;
   function setPageButtons(previous, following) {
     prev.setAttribute('aria-disabled', String(!previous));
     next.setAttribute('aria-disabled', String(!following));
@@ -25,10 +24,17 @@ for (const view of document.querySelectorAll('[data-inventory-view]')) {
       if (!engineOrder.has(row.id)) engineOrder.set(row.id, engineOrder.size);
     });
     if (!rows.length) {
+      const focus = document.activeElement;
+      if (controls.contains(focus) || footer.contains(focus)) {
+        const fallback = body.querySelector('button[hx-get]') || view.querySelector('h1');
+        fallback.focus();
+      }
+      controls.hidden = footer.hidden = true;
       summary.textContent = '';
       setPageButtons(false, false);
       return;
     }
+    controls.hidden = footer.hidden = false;
 
     const query = search.value.trim().toLowerCase();
     const mode = sort.value;
