@@ -63,6 +63,12 @@ func Open(ctx context.Context, r targetregistry.Record, cfg Config) (*Session, e
 		},
 	})
 }
+
+type httpsPinMismatchError struct{}
+
+func (httpsPinMismatchError) Error() string { return "remoteagent: target unavailable" }
+func (httpsPinMismatchError) Unwrap() error { return agentclient.ErrTLSPinMismatch }
+
 func open(ctx context.Context, r targetregistry.Record, cfg Config, d dependencies) (*Session, error) {
 	if ctx == nil {
 		return nil, errors.New("remoteagent: nil context")
@@ -85,6 +91,9 @@ func open(ctx context.Context, r targetregistry.Record, cfg Config, d dependenci
 		if err != nil || epoch == "" {
 			if c != nil {
 				_ = c.Close()
+			}
+			if errors.Is(err, agentclient.ErrTLSPinMismatch) {
+				return nil, httpsPinMismatchError{}
 			}
 			return nil, errors.New("remoteagent: target unavailable")
 		}
