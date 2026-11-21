@@ -15,6 +15,13 @@
         hx-post="/web/images/pull"
         hx-target="#pull-output"
         hx-swap="innerHTML"
+        hx-sync="this:drop"
+        hx-request='{"timeout":60000}'
+        hx-disabled-elt="#pull-submit, #pull-ref"
+        hx-on::before-request="document.getElementById('pull-output').textContent = 'Pulling image…'"
+        hx-on::send-error="reportImagePullUnconfirmed()"
+        hx-on::response-error="reportImagePullUnconfirmed()"
+        hx-on::timeout="reportImagePullUnconfirmed()"
       >
         <div class="ui-field">
           <label class="ui-label" for="pull-ref"><span class="ui-label-text">Image reference</span></label>
@@ -22,10 +29,10 @@
         </div>
         <div class="ui-dialog-actions">
           <button class="ui-button ui-button-ghost" type="button" onclick="document.getElementById('pull-modal').close()">Cancel</button>
-          <button type="submit" class="ui-button ui-button-primary">Pull</button>
+          <button id="pull-submit" type="submit" class="ui-button ui-button-primary">Pull</button>
         </div>
       </form>
-      <div id="pull-output" class="mt-3 font-mono text-xs max-h-40 overflow-y-auto"></div>
+      <div id="pull-output" class="mt-3 font-mono text-xs max-h-40 overflow-y-auto" role="status"></div>
     </div>
     <form method="dialog" class="ui-dialog-backdrop"><button tabindex="-1" aria-label="Close dialog">close</button></form>
   </dialog>
@@ -81,4 +88,9 @@
   <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Retry</button></td></tr></template>
 
 </div>
+<script>
+function reportImagePullUnconfirmed() {
+  document.getElementById('pull-output').textContent = 'Image pull could not be confirmed. Refresh image inventory and check the local engine before retrying.';
+}
+</script>
 {{end}}
