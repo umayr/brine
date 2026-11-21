@@ -109,6 +109,9 @@ type Recipe struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// ErrRecipeNotFound indicates that no recipe metadata was found for a slug.
+var ErrRecipeNotFound = errors.New("recipe not found")
+
 // RecipeStore manages the recipe library.
 type RecipeStore interface {
 	// List returns all recipes.
@@ -126,7 +129,8 @@ type RecipeStore interface {
 	// Update rewrites the body of an existing recipe.
 	Update(slug, body string) (*Recipe, error)
 
-	// UpdateMeta changes the metadata fields of an existing recipe.
+	// UpdateMeta changes the metadata fields of an existing recipe. An absent
+	// recipe returns ErrRecipeNotFound or wraps it.
 	UpdateMeta(slug, name, category, description string) (*Recipe, error)
 
 	// Delete removes a recipe.
