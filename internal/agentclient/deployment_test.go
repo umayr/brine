@@ -21,25 +21,55 @@ import (
 
 func TestJournalDeploymentStatusRequiresMatchingEvidence(t *testing.T) {
 	id, journal := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	const stack = "synthetic"
+	notAdmitted := DeploymentStatus{RequestID: id, Stack: stack, State: "not-admitted", Effects: "none"}
+	unknown := DeploymentStatus{RequestID: id, Stack: stack, State: "unknown", Effects: "unknown"}
+	partial := DeploymentStatus{RequestID: id, Stack: stack, State: "failed", Effects: "partial", OperationID: "op_" + strings.Repeat("e", 32)}
+	encode := func(status DeploymentStatus) string {
+		t.Helper()
+		b, err := json.Marshal(status)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	body := encode(notAdmitted)
 	for _, tc := range []struct {
-		name, responseJournal, responseID, responseStack string
-		status                                           int
-		duplicate, wantOK                                bool
+		name, responseJournal, body string
+		status                      int
+		duplicate, unbound          bool
+		want                        DeploymentStatus
 	}{
-		{name: "matching", responseJournal: journal, responseID: id, responseStack: "synthetic", status: http.StatusOK, wantOK: true},
-		{name: "unavailable", responseJournal: journal, status: http.StatusServiceUnavailable},
-		{name: "missing journal", responseID: id, responseStack: "synthetic", status: http.StatusOK},
-		{name: "foreign journal", responseJournal: strings.Repeat("c", 32), responseID: id, responseStack: "synthetic", status: http.StatusOK},
-		{name: "duplicate journal", responseJournal: journal, responseID: id, responseStack: "synthetic", status: http.StatusOK, duplicate: true},
-		{name: "different request", responseJournal: journal, responseID: strings.Repeat("d", 32), responseStack: "synthetic", status: http.StatusOK},
-		{name: "different stack", responseJournal: journal, responseID: id, responseStack: "other", status: http.StatusOK},
+		{name: "matching not admitted", responseJournal: journal, body: body, status: http.StatusOK, want: notAdmitted},
+		{name: "missing journal", body: body, status: http.StatusOK},
+		{name: "foreign journal", responseJournal: strings.Repeat("c", 32), body: body, status: http.StatusOK},
+		{name: "duplicate journal", responseJournal: journal, body: body, status: http.StatusOK, duplicate: true},
+		{name: "different request", responseJournal: journal, body: strings.Replace(body, id, strings.Repeat("d", 32), 1), status: http.StatusOK},
+		{name: "different stack", responseJournal: journal, body: strings.Replace(body, stack, "other", 1), status: http.StatusOK},
+		{name: "not found", responseJournal: journal, body: body, status: http.StatusNotFound},
+		{name: "unauthenticated", responseJournal: journal, body: body, status: http.StatusUnauthorized},
+		{name: "forbidden", responseJournal: journal, body: body, status: http.StatusForbidden},
+		{name: "unavailable", responseJournal: journal, body: body, status: http.StatusServiceUnavailable},
+		{name: "malformed", responseJournal: journal, body: body[:len(body)-1], status: http.StatusOK},
+		{name: "unknown effects", responseJournal: journal, body: encode(unknown), status: http.StatusOK, want: unknown},
+		{name: "unknown effects missing journal", body: encode(unknown), status: http.StatusOK},
+		{name: "partial effects", responseJournal: journal, body: encode(partial), status: http.StatusOK, want: partial},
+		{name: "partial effects foreign journal", responseJournal: strings.Repeat("c", 32), body: encode(partial), status: http.StatusOK},
+		{name: "partial effects duplicate journal", responseJournal: journal, body: encode(partial), status: http.StatusOK, duplicate: true},
+		// The generic lookup decodes this reply without checking a journal.
+		// This does not establish a tombstone on the original journal.
+		{name: "generic lookup decodes not admitted without journal evidence", body: body, status: http.StatusOK, unbound: true, want: notAdmitted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
 			c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
-				if r.Method != http.MethodGet || r.URL.Path != "/v1/deploy/operations/"+id || r.Header.Get(journalHeader) != journal {
-					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				wantJournal := journal
+				if tc.unbound {
+					wantJournal = ""
+				}
+				if r.Method != http.MethodGet || r.URL.RequestURI() != "/v1/deploy/operations/"+id || r.Header.Get(journalHeader) != wantJournal || r.Body != http.NoBody {
+					t.Errorf("expected a bodyless GET with the exact request and journal: %s %s", r.Method, r.URL.RequestURI())
 				}
 				if tc.responseJournal != "" {
 					w.Header().Add(journalHeader, tc.responseJournal)
@@ -49,22 +79,56 @@ func TestJournalDeploymentStatusRequiresMatchingEvidence(t *testing.T) {
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.status)
-				fmt.Fprintf(w, `{"requestId":%q,"stack":%q,"state":"not-admitted","effects":"none"}`, tc.responseID, tc.responseStack)
+				fmt.Fprint(w, tc.body)
 			})
 			c.bearer = "synthetic"
 			c.epochCtx = context.Background()
-			got, err := c.JournalDeploymentStatus(context.Background(), testEpoch, id, "synthetic", journal)
-			if tc.wantOK {
-				if err != nil || got.RequestID != id || got.State != "not-admitted" {
-					t.Fatalf("matching evidence: status=%+v err=%v", got, err)
-				}
-			} else if err != ErrProtocol || got != (DeploymentStatus{}) {
-				t.Fatalf("unverified evidence accepted: status=%+v err=%v", got, err)
+			var got DeploymentStatus
+			var err error
+			if tc.unbound {
+				got, err = c.DeploymentStatus(context.Background(), testEpoch, id)
+			} else {
+				got, err = c.JournalDeploymentStatus(context.Background(), testEpoch, id, stack, journal)
+			}
+			var wantErr error
+			if tc.want == (DeploymentStatus{}) {
+				wantErr = ErrProtocol
+			}
+			if got != tc.want || err != wantErr {
+				t.Fatalf("lookup: status=%+v err=%v; want status=%+v err=%v", got, err, tc.want, wantErr)
 			}
 			if calls.Load() != 1 {
 				t.Fatalf("got %d requests; want exactly one lookup and no submission", calls.Load())
 			}
 		})
+	}
+}
+
+type deploymentLookupTransport func(*http.Request) (*http.Response, error)
+
+func (f deploymentLookupTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestJournalDeploymentStatusTransportTimeout(t *testing.T) {
+	id, journal := strings.Repeat("a", 32), strings.Repeat("b", 32)
+	c := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("timeout fixture unexpectedly contacted the test server")
+	})
+	c.bearer = "synthetic"
+	c.epochCtx = context.Background()
+	calls := 0
+	// Inject the transport error directly so the check never depends on timers.
+	c.http.Transport = deploymentLookupTransport(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/deploy/operations/"+id || r.Header.Get(journalHeader) != journal {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		return nil, context.DeadlineExceeded
+	})
+	got, err := c.JournalDeploymentStatus(context.Background(), testEpoch, id, "synthetic", journal)
+	if got != (DeploymentStatus{}) || err != ErrProtocol || calls != 1 {
+		t.Fatalf("timeout lookup: status=%+v err=%v calls=%d; want empty status, ErrProtocol and one GET", got, err, calls)
 	}
 }
 
