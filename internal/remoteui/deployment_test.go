@@ -82,6 +82,20 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	if json.Unmarshal(plan, &previewResult) != nil || previewResult.Selection == "" {
 		t.Fatal("fixture missing reviewed selection")
 	}
+	removeFixture, err := os.ReadFile("../dill/testdata/preflight-v1/preview-down-absent.json")
+	if err != nil || json.Unmarshal(removeFixture, &golden) != nil {
+		t.Fatal("invalid synthetic removal preview fixture")
+	}
+	removePlan := bytes.ReplaceAll(golden.Stdout, []byte("sha256:"+strings.Repeat("1", 64)), []byte(fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(socket)))))
+	var removeSelection struct {
+		Selection string `json:"selectionDigest"`
+	}
+	if json.Unmarshal(removePlan, &removeSelection) != nil || removeSelection.Selection == "" {
+		t.Fatal("removal fixture missing selection digest")
+	}
+	prior := strings.Repeat("c", 32)
+	var removePreviews, removeCalls, removeGETs atomic.Int32
+	var removalRequest atomic.Value
 	var calls atomic.Int32
 	var manifest, catalogDigest atomic.Value
 	var differentManifest atomic.Bool
@@ -210,6 +224,30 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			}
 			// Simulate an ambiguous response; the durable status is discoverable separately.
 			w.WriteHeader(502)
+		case "/v1/deploy/remove-preview":
+			removePreviews.Add(1)
+			var f map[string]string
+			if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&f) != nil || len(f) != 1 || f["stack"] != "synthetic" {
+				t.Error("unexpected remove preview request")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("X-Dill-Deployment-Mode", "remove")
+			w.Header().Set("X-Dill-Prior-Request", prior)
+			_, _ = w.Write(removePlan)
+		case "/v1/deploy/remove":
+			removeCalls.Add(1)
+			var f map[string]string
+			if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&f) != nil || len(f) != 5 ||
+				f["stack"] != "synthetic" || f["selectionDigest"] != removeSelection.Selection ||
+				f["priorRequestId"] != prior || f["confirm"] != "remove" || f["requestId"] == "" {
+				t.Error("remove did not preserve the preview binding")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			removalRequest.Store(f["requestId"])
+			// An ambiguous 502: only this synthetic provider records seeing the request.
+			w.WriteHeader(http.StatusBadGateway)
 		case "/v1/deploy/fence":
 			fenceCalls.Add(1)
 			var f map[string]string
@@ -237,6 +275,16 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		case "/v1/deploy/operations/" + unknown:
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, unknown)
 		default:
+			if id, _ := removalRequest.Load().(string); id != "" && r.URL.Path == "/v1/deploy/operations/"+id {
+				if r.Method != http.MethodGet || r.ContentLength != 0 || r.Header.Get("X-Dill-Journal-Id") != "" {
+					t.Error("expected a bodyless generic status GET after lost response")
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				removeGETs.Add(1)
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, id)
+				return
+			}
 			if r.Header.Get("X-Dill-Journal-Id") != "" {
 				w.Header().Set("X-Dill-Journal-Id", journal)
 			}
@@ -420,6 +468,38 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		}
 		assertStatusControls(w, tc.id, tc.host)
 	}
+	t.Run("remove review binds prior request and permits only one submission", func(t *testing.T) {
+		w := invoke(http.MethodPost, deployPath+"/remove-preview", url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}})
+		id := field(w, "id")
+		for _, want := range []string{`name="confirm" value="remove" required`, "Remove containers; keep data", "Save the status link before confirming"} {
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("removal preview missing %q: HTTP %d", want, w.Code)
+			}
+		}
+		if strings.Contains(w.Body.String(), "Create stack") || removePreviews.Load() != 1 || removeCalls.Load() != 0 {
+			t.Fatal("preview sent a mutation or offered the wrong action")
+		}
+		confirm := url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"create"}}
+		if w := invoke(http.MethodPost, deployPath+"/create", confirm); w.Code != http.StatusConflict || removeCalls.Load() != 0 {
+			t.Fatalf("wrong confirmation admitted: HTTP %d", w.Code)
+		}
+		confirm.Set("confirm", "remove")
+		confirm.Set("priorRequestId", "not-the-reviewed-prior-request")
+		w = invoke(http.MethodPost, deployPath+"/create", confirm)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "No retry was sent") || removeCalls.Load() != 1 || removalRequest.Load() != id {
+			t.Fatalf("ambiguous removal result not tied to the original request: HTTP %d", w.Code)
+		}
+		assertStatusControls(w, id, "demo")
+		if w := invoke(http.MethodPost, deployPath+"/create", confirm); w.Code != http.StatusConflict || removeCalls.Load() != 1 {
+			t.Fatalf("repeat removal confirmation was not rejected: HTTP %d", w.Code)
+		}
+		w = invoke(http.MethodGet, deployPath+"?host=demo&id="+id, nil)
+		assertStatusControls(w, id, "demo")
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Outcome unknown") || removeGETs.Load() != 1 ||
+			removeCalls.Load() != 1 || calls.Load() != 1 || fenceCalls.Load() != 0 || strings.Contains(w.Body.String(), `<form`) {
+			t.Fatalf("removal lookup was not read-only and uncertain: HTTP %d", w.Code)
+		}
+	})
 	t.Run("git persists and reconciles the same request after restart", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git unavailable")
