@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// ErrTLSPinMismatch classifies a mismatched enrolled TLS leaf pin without
+// exposing TLS, endpoint, or credential details. It also matches ErrProtocol.
+var ErrTLSPinMismatch error = tlsPinMismatchError{}
+
+type tlsPinMismatchError struct{}
+
+func (tlsPinMismatchError) Error() string { return ErrProtocol.Error() }
+func (tlsPinMismatchError) Unwrap() error { return ErrProtocol }
+
 // ValidHTTPSAddress accepts only explicit private or loopback IP literals with ports.
 func ValidHTTPSAddress(address string) bool {
 	addr, err := netip.ParseAddrPort(address)
@@ -42,7 +51,10 @@ func NewHTTPS(lifetime context.Context, address, pin, token string, b Binding) (
 			leaf := s.PeerCertificates[0]
 			got := sha256.Sum256(leaf.Raw)
 			now := time.Now()
-			if subtle.ConstantTimeCompare(got[:], want) != 1 || now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+			if subtle.ConstantTimeCompare(got[:], want) != 1 {
+				return ErrTLSPinMismatch
+			}
+			if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
 				return ErrProtocol
 			}
 			return nil

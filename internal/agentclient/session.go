@@ -301,6 +301,9 @@ func (c *Client) Session(ctx context.Context) (string, error) {
 	resp, e := c.do(req)
 	if e != nil {
 		c.fail()
+		if errors.Is(e, ErrTLSPinMismatch) {
+			return "", ErrTLSPinMismatch
+		}
 		return "", ErrProtocol
 	}
 	defer resp.Body.Close()
