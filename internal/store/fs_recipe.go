@@ -221,9 +221,20 @@ func (s *FSRecipeStore) Update(slug, body string) (*Recipe, error) {
 }
 
 func (s *FSRecipeStore) UpdateMeta(slug, name, category, description string) (*Recipe, error) {
+	if validateRecipeSlug(slug) != nil {
+		return nil, ErrRecipeNotFound
+	}
 	m, err := s.readMeta(slug)
+	if os.IsNotExist(err) {
+		return nil, ErrRecipeNotFound
+	}
 	if err != nil {
-		return nil, fmt.Errorf("recipe %q not found", slug)
+		return nil, err
+	}
+	// The response includes the body; do not change metadata if it cannot be read.
+	body, err := os.ReadFile(s.bodyPath(slug))
+	if err != nil {
+		return nil, fmt.Errorf("read recipe body: %w", err)
 	}
 	m.Name = name
 	m.Category = category
@@ -232,7 +243,6 @@ func (s *FSRecipeStore) UpdateMeta(slug, name, category, description string) (*R
 	if err := s.writeMeta(m); err != nil {
 		return nil, fmt.Errorf("write recipe meta: %w", err)
 	}
-	body, _ := os.ReadFile(s.bodyPath(slug))
 	return &Recipe{
 		Slug:        m.Slug,
 		Name:        m.Name,

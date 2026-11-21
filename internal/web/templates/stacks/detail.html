@@ -89,7 +89,7 @@
         <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
         Teardown
       </button>
-      <button class="ui-button ui-button-sm ui-button-danger gap-1.5" data-stack-action
+      <button id="stack-delete-button" class="ui-button ui-button-sm ui-button-danger gap-1.5" data-stack-action
         onclick="confirmStackName('Delete stack', 'Remove {{.Stack.Name}} from Brine? Its containers will be stopped and removed.', '{{.Stack.Name}}', () => deleteStack('{{.Stack.Name}}', true))"
         {{if .QualifiedOperations}}disabled title="Qualified stack deletion is deferred; preserve source and operation recovery context. Use explicit Down and inspect its receipt."{{end}}
       >
@@ -98,6 +98,8 @@
       </button>
     </div>
   </div>
+
+  <p id="stack-delete-result" role="status"></p>
 
   {{if .EngineAlignment.HasWarning}}
   <div class="ui-notice ui-notice-warning rounded-panel shadow-sm items-start">
@@ -367,8 +369,13 @@
         </summary>
         <form
           hx-put="/web/stacks/{{.Stack.Name}}/git"
-          hx-target="#git-result"
+          hx-target="#git-settings-result"
           hx-swap="innerHTML"
+          hx-sync="this:drop"
+          hx-disabled-elt="#git-settings-save"
+          hx-on::before-request="document.getElementById('git-settings-result').textContent = 'Saving Git settings…'"
+          hx-on::send-error="reportGitSettingsUnconfirmed()"
+          hx-on::response-error="reportGitSettingsUnconfirmed()"
           class="mt-4 grid grid-cols-2 gap-4"
         >
           <div class="ui-field">
@@ -400,8 +407,9 @@
             </label>
           </div>
           <div class="col-span-2">
-            <button type="submit" class="ui-button ui-button-sm ui-button-primary">Save settings</button>
+            <button id="git-settings-save" type="submit" class="ui-button ui-button-sm ui-button-primary">Save settings</button>
           </div>
+          <div id="git-settings-result" class="col-span-2" role="status"></div>
         </form>
       </details>
     </div>
@@ -484,20 +492,39 @@
 </dialog>
 
 <script>
+function reportGitSettingsUnconfirmed() {
+  document.getElementById('git-settings-result').textContent = 'Git settings save could not be confirmed. Check the saved settings in another tab before retrying.';
+}
+
 async function deleteStack(name, removeContainers) {
-  const res = await fetch(`/api/stacks/${name}`, {
-    method: 'DELETE',
-    headers: brineHeaders({'Content-Type': 'application/json'}),
-    body: JSON.stringify({ remove_containers: !!removeContainers }),
-  });
-  if (res.ok) {
-    window.location.href = '/stacks';
-    return;
+  const button = document.getElementById('stack-delete-button');
+  if (button.disabled) return;
+  const result = document.getElementById('stack-delete-result');
+  const enabled = document.querySelectorAll('[data-stack-action]:enabled');
+  const restoreFocus = document.activeElement === button;
+  enabled.forEach(control => { control.disabled = true; });
+  result.textContent = 'Deleting stack…';
+  let deleted = false;
+  try {
+    const res = await fetch(`/api/stacks/${name}`, {
+      method: 'DELETE',
+      headers: brineHeaders({'Content-Type': 'application/json'}),
+      body: JSON.stringify({ remove_containers: !!removeContainers }),
+    });
+    if (res.status === 204 && !res.redirected) {
+      deleted = true;
+      window.location.href = '/stacks';
+      return;
+    }
+  } catch {
+    // A lost response does not tell us whether Down or deletion ran.
+  } finally {
+    if (!deleted) {
+      result.textContent = 'Delete could not be confirmed. Check stack inventory and inspect containers before retrying.';
+      enabled.forEach(control => { control.disabled = false; });
+      if (restoreFocus && document.activeElement === document.body) button.focus();
+    }
   }
-  const text = await res.text();
-  let msg = text;
-  try { msg = JSON.parse(text).error || text; } catch {}
-  showToast('Delete failed: ' + msg.slice(0, 300), 'error');
 }
 
 function confirmStackName(title, message, name, onConfirm) {
@@ -525,11 +552,22 @@ async function runAction(action, name, method, body, contentType) {
   const status = document.getElementById('action-status');
   const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
-  const qualified = output.dataset?.qualifiedOperations === 'true' && ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
+  const lifecycle = ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
+  const qualified = output.dataset?.qualifiedOperations === 'true' && lifecycle;
   let operationStream;
   if (qualified && output.dataset.operationHistory === 'true') BrineUI.operationLookup(document, output.parentNode);
 
-  if (['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action)) {
+  function showUnknownLifecycle() {
+    const label = action === 'up' ? 'Deploy' : action.charAt(0).toUpperCase() + action.slice(1);
+    const message = `${label} outcome unknown`;
+    log.textContent += `\n${message}. Inspect resources before retrying.\n`;
+    title.textContent = message;
+    status.textContent = 'unknown';
+    status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
+    showToast(`${message}; inspect resources before retrying`, 'error');
+  }
+
+  if (lifecycle) {
     // Lifecycle actions can invalidate a plan even if they fail partway through.
     // Cancel any in-flight plan so its response cannot restore stale results.
     htmx.trigger(document.getElementById('plan-button'), 'htmx:abort');
@@ -585,12 +623,8 @@ async function runAction(action, name, method, body, contentType) {
         const refresh = document.getElementById('stack-containers-refresh');
         if (refresh) htmx.trigger(refresh, 'click');
       }
-    } else if (action === 'up' && !stream.status.error && !stream.status.done) {
-      log.textContent += '\nDeploy outcome unknown. Inspect resources before retrying.\n';
-      title.textContent = 'Deploy outcome unknown';
-      status.textContent = 'unknown';
-      status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
-      showToast('Deploy outcome unknown; inspect resources before retrying', 'error');
+    } else if (lifecycle && !stream.status.error && !stream.status.done) {
+      showUnknownLifecycle();
     } else if (stream.status.error || !stream.status.done) {
       title.textContent = `${action} failed after ${elapsed}s`;
       status.textContent = 'failed';
@@ -618,12 +652,8 @@ async function runAction(action, name, method, body, contentType) {
       status.textContent = 'unknown';
       status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
       showToast(`${action} unknown`, 'error');
-    } else if (action === 'up') {
-      log.textContent += '\nDeploy outcome unknown. Inspect resources before retrying.\n';
-      title.textContent = 'Deploy outcome unknown';
-      status.textContent = 'unknown';
-      status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
-      showToast('Deploy outcome unknown; inspect resources before retrying', 'error');
+    } else if (lifecycle && !operationStream?.status.error) {
+      showUnknownLifecycle();
     } else {
       log.textContent += '\n[brine:error] ' + err.message + '\n';
       title.textContent = `${action} failed`;

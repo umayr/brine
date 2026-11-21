@@ -81,7 +81,7 @@ func (h *Handler) recipeUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if name != "" {
 		if _, err := h.recipes.UpdateMeta(slug, name, category, description); err != nil {
-			h.renderAlert(w, "error", err.Error())
+			h.renderAlert(w, "error", "Recipe metadata update unavailable; check local recipe storage")
 			return
 		}
 	}

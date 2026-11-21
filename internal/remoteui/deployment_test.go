@@ -105,6 +105,8 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var partial atomic.Bool
 	var statusGETs atomic.Int32
 	journal, stranded, unknown := strings.Repeat("d", 32), strings.Repeat("e", 32), strings.Repeat("f", 32)
+	unbound := strings.Repeat("9", 32)
+	var unboundGETs atomic.Int32
 	enabled := atomic.Bool{}
 	enabled.Store(true)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -274,6 +276,16 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			http.NotFound(w, r)
 		case "/v1/deploy/operations/" + unknown:
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, unknown)
+		case "/v1/deploy/operations/" + unbound:
+			if r.Method != http.MethodGet || r.Header.Get("X-Dill-Journal-Id") != "" || r.ContentLength != 0 {
+				t.Error("generic status must be a bodyless, unbound GET")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			unboundGETs.Add(1)
+			// Even a reply header cannot bind a request to its original journal.
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			fmt.Fprintf(w, `{"requestId":%q,"stack":"unverified-stack","state":"not-admitted","effects":"none"}`, unbound)
 		default:
 			if id, _ := removalRequest.Load().(string); id != "" && r.URL.Path == "/v1/deploy/operations/"+id {
 				if r.Method != http.MethodGet || r.ContentLength != 0 || r.Header.Get("X-Dill-Journal-Id") != "" {
@@ -457,6 +469,16 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal("recorded unknown was not distinguished from unavailable status", w.Code)
 	} else {
 		assertStatusControls(w, unknown, "demo")
+	}
+	w = invoke("GET", deployPath+"?host=demo&id="+unbound, nil)
+	if body := w.Body.String(); w.Code != http.StatusOK || !strings.Contains(body, `role="alert">Unverified status reply.`) ||
+		!strings.Contains(body, "do not retry based on this result") || strings.Contains(body, "State not-admitted") ||
+		strings.Contains(body, "Effects none") || strings.Contains(body, "unverified-stack") {
+		t.Errorf("generic status was not rendered as unverified: HTTP %d", w.Code)
+	}
+	assertStatusControls(w, unbound, "demo")
+	if unboundGETs.Load() != 1 || calls.Load() != 1 || fenceCalls.Load() != 0 {
+		t.Fatal("unverified generic status did not use GET or sent a mutation")
 	}
 	for _, tc := range []struct {
 		host, id string
