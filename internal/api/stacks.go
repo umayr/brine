@@ -148,9 +148,48 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stack)
 }
 
+const maxStackActionOptionsBytes = 4096
+
+// decodeStackActionOption accepts an omitted body, an empty object, or an
+// object with exactly one canonical Boolean option. Unknown or repeated keys
+// must not silently fall back to default options for a destructive action.
+func decodeStackActionOption(w http.ResponseWriter, r *http.Request, option string) (enabled, valid bool) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStackActionOptionsBytes))
+	tok, err := dec.Token()
+	if err == io.EOF {
+		return false, true
+	}
+	if err != nil || tok != json.Delim('{') {
+		return false, false
+	}
+
+	tok, err = dec.Token()
+	if key, ok := tok.(string); err == nil && ok && key == option {
+		value, valueErr := dec.Token()
+		flag, ok := value.(bool)
+		if valueErr != nil || !ok {
+			return false, false
+		}
+		enabled = flag
+		tok, err = dec.Token()
+	}
+	if err != nil || tok != json.Delim('}') {
+		return false, false
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return false, false
+	}
+	return enabled, true
+}
+
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	if h.agent != nil && h.agent.Dill() != nil && h.agent.Dill().QualifiedOperationConfigured() {
 		writeError(w, http.StatusConflict, "qualified stack deletion is deferred: preserve source and operation recovery context; use explicit Down and inspect its receipt")
+		return
+	}
+	removeContainers, ok := decodeStackActionOption(w, r, "remove_containers")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	name := chi.URLParam(r, "name")
@@ -160,12 +199,8 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	var req struct {
-		RemoveContainers bool `json:"remove_containers"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	if req.RemoveContainers {
+	if removeContainers {
 		ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 		defer cancel()
 		var out bytes.Buffer
@@ -251,18 +286,17 @@ func (h *stackHandler) restart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type teardownRequest struct {
-	Force bool `json:"force"`
-}
-
 func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
+	force, ok := decodeStackActionOption(w, r, "force")
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	name := chi.URLParam(r, "name")
 	defer h.lockStack(name)()
-	var req teardownRequest
-	_ = json.NewDecoder(r.Body).Decode(&req)
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -280,7 +314,7 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, req.Force, fw))
+	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, force, fw))
 }
 
 func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
