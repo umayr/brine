@@ -432,7 +432,7 @@ All routes are under `/api` and require authentication (except `/api/health`).
 | `GET/POST` | `/api/recipes` | List or create snippets |
 | `GET/PUT/PATCH/DELETE` | `/api/recipes/{slug}` | Manage a snippet |
 
-For local stacks, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
+For local stacks, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Teardown accepts `{"force": true}` to force image removal. Where the action is available, each endpoint accepts an omitted or whitespace-only body, `{}`, or its one Boolean option. Invalid bodies (including unknown or duplicate keys) return `400` without changing the stack. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
 
 ## Development
 
