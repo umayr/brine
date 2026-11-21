@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/umayr/brine/internal/agent"
@@ -155,35 +156,40 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 const maxStackActionOptionsBytes = 4096
 
 // decodeStackActionOption accepts an omitted body, an empty object, or an
-// object with exactly one canonical Boolean option. Unknown or repeated keys
-// must not silently fall back to default options for a destructive action.
-func decodeStackActionOption(w http.ResponseWriter, r *http.Request, option string) (enabled, valid bool) {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxStackActionOptionsBytes))
+// object with exactly one canonical option of the expected scalar type.
+// Unknown or repeated keys must not silently fall back to default options.
+func decodeStackActionOption[T bool | string](w http.ResponseWriter, r *http.Request, option string, limit int64) (T, bool) {
+	var zero, result T
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+	if err != nil || !utf8.Valid(body) {
+		return zero, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
 	tok, err := dec.Token()
 	if err == io.EOF {
-		return false, true
+		return zero, true
 	}
 	if err != nil || tok != json.Delim('{') {
-		return false, false
+		return zero, false
 	}
 
 	tok, err = dec.Token()
 	if key, ok := tok.(string); err == nil && ok && key == option {
 		value, valueErr := dec.Token()
-		flag, ok := value.(bool)
+		optionValue, ok := value.(T)
 		if valueErr != nil || !ok {
-			return false, false
+			return zero, false
 		}
-		enabled = flag
+		result = optionValue
 		tok, err = dec.Token()
 	}
 	if err != nil || tok != json.Delim('}') {
-		return false, false
+		return zero, false
 	}
 	if _, err := dec.Token(); err != io.EOF {
-		return false, false
+		return zero, false
 	}
-	return enabled, true
+	return result, true
 }
 
 func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +197,7 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "qualified stack deletion is deferred: preserve source and operation recovery context; use explicit Down and inspect its receipt")
 		return
 	}
-	removeContainers, ok := decodeStackActionOption(w, r, "remove_containers")
+	removeContainers, ok := decodeStackActionOption[bool](w, r, "remove_containers", maxStackActionOptionsBytes)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -294,7 +300,7 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	if !h.qualifiedActionAllowed(w, r) {
 		return
 	}
-	force, ok := decodeStackActionOption(w, r, "force")
+	force, ok := decodeStackActionOption[bool](w, r, "force", maxStackActionOptionsBytes)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -538,6 +544,8 @@ func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"changed": changed, "commit": commit})
 }
 
+const maxGitPushOptionsBytes = 64 * 1024
+
 // gitPush commits local changes and pushes to origin. Streams output.
 func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
@@ -555,12 +563,13 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "stack is read-only")
 		return
 	}
-	var body struct {
-		Message string `json:"message"`
+	message, ok := decodeStackActionOption[string](w, r, "message", maxGitPushOptionsBytes)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
 	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	if body.Message == "" {
-		body.Message = "chore: update stack via brine"
+	if message == "" {
+		message = "chore: update stack via brine"
 	}
 
 	repoDir, err := h.store.RepoDir(name)
@@ -574,7 +583,7 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	if err := h.git.Push(ctx, repoDir, body.Message, fw); err != nil {
+	if err := h.git.Push(ctx, repoDir, message, fw); err != nil {
 		writeActionStatus(fw, "git push", err)
 		return
 	}
