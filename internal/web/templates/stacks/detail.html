@@ -554,17 +554,32 @@ async function runAction(action, name, method, body, contentType) {
   const started = Date.now();
   const lifecycle = ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
   const qualified = output.dataset?.qualifiedOperations === 'true' && lifecycle;
+  const gitPush = action === 'git/push';
   let operationStream;
   if (qualified && output.dataset.operationHistory === 'true') BrineUI.operationLookup(document, output.parentNode);
 
-  function showUnknownLifecycle() {
-    const label = action === 'up' ? 'Deploy' : action.charAt(0).toUpperCase() + action.slice(1);
+  function showUnknownAction() {
+    const label = gitPush ? 'Git push' : action === 'up' ? 'Deploy' : action.charAt(0).toUpperCase() + action.slice(1);
     const message = `${label} outcome unknown`;
-    log.textContent += `\n${message}. Inspect resources before retrying.\n`;
+    const guidance = gitPush ? 'Inspect the local repository and remote branch before retrying' : 'Inspect resources before retrying';
+    log.textContent += `\n${message}. ${guidance}.\n`;
     title.textContent = message;
     status.textContent = 'unknown';
     status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
-    showToast(`${message}; inspect resources before retrying`, 'error');
+    showToast(`${message}. ${guidance}.`, 'error');
+  }
+
+  function showCompletedAction() {
+    const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+    title.textContent = `${action} complete in ${elapsed}s`;
+    status.textContent = 'complete';
+    status.className = 'ui-status ui-status-success ui-status-sm font-mono mr-1';
+    showToast(`${action} complete`, 'success');
+    const refresh = document.getElementById('stack-containers-refresh');
+    if (refresh) htmx.trigger(refresh, 'click');
+    if (action === 'teardown') {
+      htmx.trigger(document.getElementById('stack-containers'), 'refresh');
+    }
   }
 
   if (lifecycle) {
@@ -623,23 +638,15 @@ async function runAction(action, name, method, body, contentType) {
         const refresh = document.getElementById('stack-containers-refresh');
         if (refresh) htmx.trigger(refresh, 'click');
       }
-    } else if (lifecycle && !stream.status.error && !stream.status.done) {
-      showUnknownLifecycle();
+    } else if ((lifecycle || gitPush) && !stream.status.error && !stream.status.done) {
+      showUnknownAction();
     } else if (stream.status.error || !stream.status.done) {
       title.textContent = `${action} failed after ${elapsed}s`;
       status.textContent = 'failed';
       status.className = 'ui-status ui-status-error ui-status-sm font-mono mr-1';
       showToast(`${action} failed`, 'error');
     } else {
-      title.textContent = `${action} complete in ${elapsed}s`;
-      status.textContent = 'complete';
-      status.className = 'ui-status ui-status-success ui-status-sm font-mono mr-1';
-      showToast(`${action} complete`, 'success');
-      const refresh = document.getElementById('stack-containers-refresh');
-      if (refresh) htmx.trigger(refresh, 'click');
-      if (action === 'teardown') {
-        htmx.trigger(document.getElementById('stack-containers'), 'refresh');
-      }
+      showCompletedAction();
     }
   } catch (err) {
     if (qualified) {
@@ -652,8 +659,10 @@ async function runAction(action, name, method, body, contentType) {
       status.textContent = 'unknown';
       status.className = 'ui-status ui-status-unknown ui-status-sm font-mono mr-1';
       showToast(`${action} unknown`, 'error');
-    } else if (lifecycle && !operationStream?.status.error) {
-      showUnknownLifecycle();
+    } else if (gitPush && operationStream?.status.done && !operationStream.status.error) {
+      showCompletedAction();
+    } else if ((lifecycle || gitPush) && !operationStream?.status.error) {
+      showUnknownAction();
     } else {
       log.textContent += '\n[brine:error] ' + err.message + '\n';
       title.textContent = `${action} failed`;
