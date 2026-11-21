@@ -628,6 +628,10 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", "git pull: "+err.Error())
 		return
 	}
+	if commit == "" {
+		h.renderAlert(w, "warning", "Git pull completed, but the current revision is unavailable. Inspect the working tree and revision before deploying.")
+		return
+	}
 	if changed {
 		h.renderAlert(w, "success", fmt.Sprintf("Pulled — now at %s", commit))
 	} else {

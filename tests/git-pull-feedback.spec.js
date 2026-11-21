@@ -63,6 +63,25 @@ test('Git pull shows progress, prevents repeat while in flight, then displays th
   await expect(pull).toBeEnabled();
 });
 
+test('completed Git pull can report an unavailable revision without replay', async ({ page }) => {
+  let posts = 0;
+  await page.route('**/web/stacks/media/git/pull', route => {
+    expect(route.request().method()).toBe('POST');
+    posts++;
+    return route.fulfill({ contentType: 'text/html', body: '<div class="ui-notice ui-notice-warning">Git pull completed, but the current revision is unavailable. Inspect the working tree and revision before deploying.</div>' });
+  });
+  await page.goto(new URL('/stacks/media', base).href);
+  const pull = page.getByRole('button', { name: 'Pull latest' });
+  await pull.focus();
+  await page.keyboard.press('Enter');
+  const result = page.getByRole('status').and(page.locator('#git-result'));
+  await expect(result).toContainText('Git pull completed, but the current revision is unavailable.');
+  await expect(result).toContainText('Inspect the working tree and revision before deploying.');
+  await expect(result).not.toContainText(/failed|retry|now at/i);
+  await expect(pull).toBeEnabled();
+  expect(posts).toBe(1);
+});
+
 test('Git settings have labelled inputs', async ({ page }) => {
   await page.goto(new URL('/stacks/media', base).href);
   const disclosure = page.locator('#git-source-panel summary');
