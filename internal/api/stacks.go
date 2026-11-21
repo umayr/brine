@@ -608,7 +608,7 @@ func (h *stackHandler) engine() string {
 func (h *stackHandler) ensureRuntimeEngine(w http.ResponseWriter, stack *store.Stack) bool {
 	content, err := h.store.ReadPkl(stack.Name)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, "unable to read stack configuration")
 		return false
 	}
 	declared := pkl.DeclaredEngine(content)
