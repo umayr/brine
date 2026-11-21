@@ -54,17 +54,25 @@ func TestContainerActionFailuresAreUnconfirmedAndRedacted(t *testing.T) {
 }
 
 func TestContainerActionRendersRequestedView(t *testing.T) {
-	eng := containerActionEngine{container: &engine.ContainerInfo{ID: "abc", Name: "example", State: "running"}}
+	eng := containerActionEngine{container: &engine.ContainerInfo{ID: "abc", Name: "example", State: "running", Status: "Up <1 second"}}
 	h := &Handler{agent: agent.NewLocalAgent(eng, nil)}
-	for _, tc := range []struct{ query, want, unwanted string }{
-		{"?view=state", "running</span>", "<tr"},
-		{"", "<tr", "container-state-badge"},
+	for _, tc := range []struct {
+		query, unwanted string
+		want            []string
+	}{
+		{"?view=state", "<tr", []string{"running</span>", `id="container-status" hx-swap-oob="innerHTML">Up &lt;1 second`}},
+		{"", "hx-swap-oob", []string{"<tr", "Up &lt;1 second"}},
 	} {
 		w := httptest.NewRecorder()
 		h.containerStart(w, httptest.NewRequest(http.MethodPost, "/"+tc.query, nil))
 		body := w.Body.String()
-		if w.Code != http.StatusOK || !strings.Contains(body, tc.want) || strings.Contains(body, tc.unwanted) {
+		if w.Code != http.StatusOK || strings.Contains(body, tc.unwanted) {
 			t.Fatalf("view %q: status %d, body %q", tc.query, w.Code, body)
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(body, want) {
+				t.Errorf("view %q: missing %q in %q", tc.query, want, body)
+			}
 		}
 	}
 }

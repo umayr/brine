@@ -5,7 +5,7 @@
 
 {{define "content"}}
 <div class="index-page space-y-4" data-inventory-view>
-  <div class="index-heading"><div><span class="section-code">03 / RUNTIME</span><h1 id="image-inventory-title">Images</h1><p>Images available to the configured container engine.</p></div><button class="ui-button ui-button-primary" onclick="document.getElementById('pull-modal').showModal()">Pull image</button></div>
+  <div class="index-heading"><div><span class="section-code">03 / RUNTIME</span><h1 id="image-inventory-title" tabindex="-1">Images</h1><p>Images available to the configured container engine.</p></div><button class="ui-button ui-button-primary" onclick="document.getElementById('pull-modal').showModal()">Pull image</button></div>
 
   <!-- Pull modal -->
   <dialog id="pull-modal" class="ui-dialog" aria-labelledby="pull-modal-title">
@@ -15,6 +15,13 @@
         hx-post="/web/images/pull"
         hx-target="#pull-output"
         hx-swap="innerHTML"
+        hx-sync="this:drop"
+        hx-request='{"timeout":60000}'
+        hx-disabled-elt="#pull-submit, #pull-ref"
+        hx-on::before-request="document.getElementById('pull-output').textContent = 'Pulling image…'"
+        hx-on::send-error="reportImagePullUnconfirmed()"
+        hx-on::response-error="reportImagePullUnconfirmed()"
+        hx-on::timeout="reportImagePullUnconfirmed()"
       >
         <div class="ui-field">
           <label class="ui-label" for="pull-ref"><span class="ui-label-text">Image reference</span></label>
@@ -22,17 +29,17 @@
         </div>
         <div class="ui-dialog-actions">
           <button class="ui-button ui-button-ghost" type="button" onclick="document.getElementById('pull-modal').close()">Cancel</button>
-          <button type="submit" class="ui-button ui-button-primary">Pull</button>
+          <button id="pull-submit" type="submit" class="ui-button ui-button-primary">Pull</button>
         </div>
       </form>
-      <div id="pull-output" class="mt-3 font-mono text-xs max-h-40 overflow-y-auto"></div>
+      <div id="pull-output" class="mt-3 font-mono text-xs max-h-40 overflow-y-auto" role="status"></div>
     </div>
     <form method="dialog" class="ui-dialog-backdrop"><button tabindex="-1" aria-label="Close dialog">close</button></form>
   </dialog>
 
   <div id="image-action-uncertain" class="ui-notice ui-notice-warning" role="alert" hidden>
     <div>Image removal could not be confirmed. Inventory may be stale; refresh and inspect before retrying.
-      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Refresh images</button>
+      <button class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML" hx-sync="#images-body:replace">Refresh images</button>
     </div>
   </div>
 
@@ -60,6 +67,7 @@
           hx-get="/web/images"
           hx-trigger="load, refresh-images"
           hx-swap="innerHTML"
+          hx-sync="#images-body:replace"
           hx-on::send-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
           hx-on::response-error="this.innerHTML = document.getElementById('images-request-error').innerHTML; htmx.process(this.querySelector('button'))"
         >
@@ -78,7 +86,12 @@
     <nav aria-label="Image pagination"><button type="button" class="ui-button ui-button-outline" data-inventory-prev>Previous</button><button type="button" class="ui-button ui-button-outline" data-inventory-next>Next</button></nav>
   </div>
   <template id="images-loading"><tr><td colspan="5" class="text-center py-8 text-dim"><span class="ui-spinner ui-spinner-sm" aria-hidden="true"></span> <span role="status">Loading images…</span></td></tr></template>
-  <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML">Retry</button></td></tr></template>
+  <template id="images-request-error"><tr><td colspan="5" class="py-8 text-center"><div role="alert" class="text-error">Images could not be loaded. Inventory is unavailable.</div><button class="ui-button ui-button-ghost ui-button-sm mt-2" hx-get="/web/images" hx-target="#images-body" hx-swap="innerHTML" hx-sync="#images-body:replace">Retry</button></td></tr></template>
 
 </div>
+<script>
+function reportImagePullUnconfirmed() {
+  document.getElementById('pull-output').textContent = 'Image pull could not be confirmed. Refresh image inventory and check the local engine before retrying.';
+}
+</script>
 {{end}}
