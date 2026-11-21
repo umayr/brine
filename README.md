@@ -421,7 +421,7 @@ All routes are under `/api` and require authentication (except `/api/health`).
 | `POST` | `/api/stacks/{name}/entrypoint` | Change the entrypoint |
 | `GET/PATCH` | `/api/stacks/{name}/git` | Git settings |
 | `POST` | `/api/stacks/{name}/git/pull` | Pull |
-| `POST` | `/api/stacks/{name}/git/push` | Commit and push (non-read-only) |
+| `POST` | `/api/stacks/{name}/git/push` | Commit and push (non-read-only); optional `{"message":"…"}` |
 | `GET` | `/api/containers` | All engine containers |
 | `GET` | `/api/containers/{id}` | Inspect |
 | `POST` | `/api/containers/{id}/{start,stop,restart}` | Control |
@@ -431,6 +431,8 @@ All routes are under `/api` and require authentication (except `/api/health`).
 | `DELETE` | `/api/images/{id}` | Remove |
 | `GET/POST` | `/api/recipes` | List or create snippets |
 | `GET/PUT/PATCH/DELETE` | `/api/recipes/{slug}` | Manage a snippet |
+
+Git push uses `chore: update stack via brine` for an omitted, whitespace-only, or empty object body, or an empty `message`. Otherwise the body must contain exactly one string `message` and fit within 64 KiB. Invalid bodies return `400` before Git runs on an otherwise eligible stack.
 
 For local stacks, deleting a stack accepts `{"remove_containers": true}` to run `dill down` first. Teardown accepts `{"force": true}` to force image removal. Where the action is available, each endpoint accepts an omitted or whitespace-only body, `{}`, or its one Boolean option. Invalid bodies (including unknown or duplicate keys) return `400` without changing the stack. Configured qualified Alpha denies both deletion variants to preserve source/recovery context; use explicit Down and inspect its receipt instead.
 
