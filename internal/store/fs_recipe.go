@@ -18,25 +18,42 @@ type FSRecipeStore struct {
 	dataDir string
 }
 
-// NewFSRecipeStore creates an FSRecipeStore rooted at dataDir and seeds
-// built-in starter recipes if the recipes directory is new.
+// NewFSRecipeStore seeds only an absent library, publishing the complete result
+// without replacing a library created by another process.
 func NewFSRecipeStore(dataDir string) (*FSRecipeStore, error) {
-	recipesDir := filepath.Join(dataDir, "recipes")
-	isNew := false
-	if _, err := os.Stat(recipesDir); os.IsNotExist(err) {
-		isNew = true
-	}
+	return newFSRecipeStore(dataDir, (*FSRecipeStore).seed, publishRecipes)
+}
+
+func newFSRecipeStore(dataDir string, seed func(*FSRecipeStore) error, publish func(string, string) error) (*FSRecipeStore, error) {
 	if err := mkdirPrivate(dataDir); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	if err := mkdirPrivate(recipesDir); err != nil {
-		return nil, fmt.Errorf("create recipes dir: %w", err)
+	dest := filepath.Join(dataDir, "recipes")
+	if info, err := os.Lstat(dest); err == nil {
+		if !info.IsDir() {
+			return nil, fmt.Errorf("recipe library path is not a directory; inspect it before restarting")
+		}
+		return &FSRecipeStore{dataDir: dataDir}, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect recipe library: %w", err)
 	}
-	rs := &FSRecipeStore{dataDir: dataDir}
-	if isNew {
-		_ = rs.seed()
+	stage, err := os.MkdirTemp(dataDir, ".recipes-attempt-")
+	if err != nil {
+		return nil, fmt.Errorf("create private recipe staging directory: %w", err)
 	}
-	return rs, nil
+	if err := os.Mkdir(filepath.Join(stage, "recipes"), 0700); err != nil {
+		_ = os.RemoveAll(stage)
+		return nil, fmt.Errorf("stage recipe library: %w", err)
+	}
+	if err := seed(&FSRecipeStore{dataDir: stage}); err != nil {
+		_ = os.RemoveAll(stage)
+		return nil, fmt.Errorf("seed recipe library (restart to retry): %w", err)
+	}
+	if err := publish(filepath.Join(stage, "recipes"), dest); err != nil {
+		return nil, fmt.Errorf("publish recipe library without replacement (staging retained; inspect library before retry): %w", err)
+	}
+	_ = os.Remove(stage) // only the empty attempt-owned parent remains after success
+	return &FSRecipeStore{dataDir: dataDir}, nil
 }
 
 func (s *FSRecipeStore) recipeDir(slug string) string {
@@ -355,7 +372,9 @@ func (s *FSRecipeStore) seed() error {
 	}
 
 	for _, r := range starters {
-		_, _ = s.Create(r.name, r.category, r.description, r.body)
+		if _, err := s.Create(r.name, r.category, r.description, r.body); err != nil {
+			return fmt.Errorf("create starter recipe: %w", err)
+		}
 	}
 	return nil
 }
