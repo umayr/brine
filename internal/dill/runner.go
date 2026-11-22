@@ -60,6 +60,11 @@ func (r *Runner) LockStack(name string) func() {
 	return r.Coordinator.Lock(secretbindings.DeploymentID(name))
 }
 
+// LockStackContext waits for the same coordinator lock as LockStack.
+func (r *Runner) LockStackContext(ctx context.Context, name string) (func(), error) {
+	return r.Coordinator.LockContext(ctx, secretbindings.DeploymentID(name))
+}
+
 // lockPath serialises lifecycle operations on the same stack so that a
 // GitOps sync cannot run concurrently with a deploy triggered from the UI.
 func (r *Runner) lockPath(path string) func() {

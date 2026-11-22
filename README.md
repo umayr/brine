@@ -347,6 +347,15 @@ credentials instead of an insecure filesystem fallback.
 
 Stack and recipe paths are validated; directories are `0700` and files `0600`.
 
+Git stack creation uses the configured deploy timeout (five minutes when it is
+non-positive), rather than the ordinary request timeout. A request cancellation
+or deadline before publication stops registration and cleans that attempt's staging
+area; existing stack paths are never replaced. Once publication begins, cancellation
+cannot guarantee rollback. If the response is lost, check the stack name before
+retrying: creation may have succeeded. A process crash can leave a private staging
+directory requiring operator inspection. Git retains the service's existing
+execution environment and authority.
+
 File-backed authentication requires a canonical private data directory on Linux
 or macOS: owned by the server user, mode `0700`, beneath root/server-owned
 ancestors without group/other write permission. Credential files must be regular,

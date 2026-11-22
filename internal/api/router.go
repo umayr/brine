@@ -44,6 +44,9 @@ func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 			r.Post("/stacks/{name}/secret-bindings/confirm", sh.secretConfirm)
 		})
 
+		// Git creation supplies its own bounded request-cancellable deadline.
+		r.Post("/stacks/git", sh.createFromGit)
+
 		// Everything else is short-lived.
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.Timeout(timeouts.Default))
@@ -53,7 +56,6 @@ func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeSto
 			r.Route("/stacks", func(r chi.Router) {
 				r.Get("/", sh.list)
 				r.Post("/", sh.create)
-				r.Post("/git", sh.createFromGit)
 				r.Route("/{name}", func(r chi.Router) {
 					r.Get("/", sh.get)
 					r.Put("/", sh.update)
