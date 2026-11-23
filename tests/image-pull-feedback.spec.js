@@ -1,5 +1,58 @@
+const http = require('node:http');
 const { test, expect } = require('@playwright/test');
 const base = process.env.BRINE_FIXTURE_BASE_URL;
+
+async function startImagePullFixture(handler) {
+  const upstream = new URL(base);
+  if (!['127.0.0.1', '::1', 'localhost'].includes(upstream.hostname)) throw new Error('image pull fixture requires a loopback upstream');
+  const requests = [];
+  const sockets = new Set();
+  const server = http.createServer(async (request, response) => {
+    const target = new URL(request.url, upstream);
+    if (target.origin !== upstream.origin) {
+      response.writeHead(403).end();
+      return;
+    }
+    if (target.pathname === '/web/images/pull') {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      requests.push({ method: request.method, body });
+      await handler(request, response);
+      return;
+    }
+    if (!['GET', 'HEAD'].includes(request.method)) {
+      response.writeHead(405).end();
+      return;
+    }
+    const proxy = http.request(target, {
+      method: request.method,
+      headers: { ...request.headers, host: upstream.host },
+    }, upstreamResponse => {
+      response.writeHead(upstreamResponse.statusCode, upstreamResponse.headers);
+      upstreamResponse.pipe(response);
+    });
+    proxy.on('error', error => response.destroy(error));
+    request.pipe(proxy);
+  });
+  server.on('connection', socket => {
+    sockets.add(socket);
+    socket.on('close', () => sockets.delete(socket));
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const { port } = server.address();
+  return {
+    base: `http://127.0.0.1:${port}`,
+    requests: () => [...requests],
+    close: () => new Promise(resolve => {
+      server.close(resolve);
+      server.closeAllConnections?.();
+      for (const socket of sockets) socket.destroy();
+    }),
+  };
+}
 
 for (const [outcome, message] of [
   ['engine error', 'The engine reported an image pull error.'],
@@ -42,30 +95,23 @@ for (const [outcome, message] of [
 }
 
 test('a timed-out pull releases the dialog without resubmitting', async ({ page }) => {
-  let requests = 0;
-  let release;
-  const hold = new Promise(resolve => { release = resolve; });
-  await page.route('**/web/images/pull', async route => {
-    requests++;
-    await hold;
-    await route.abort().catch(() => {});
-  });
-  await page.goto(new URL('/images', base).href);
-  await page.getByRole('button', { name: 'Pull image', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Pull image' });
-  const form = dialog.locator('form[hx-post]');
-  await expect(form).toHaveAttribute('hx-request', '{"timeout":60000}');
-  await form.evaluate(el => el.setAttribute('hx-request', '{"timeout":500}'));
-  const ref = dialog.getByRole('textbox', { name: 'Image reference' });
-  const submit = dialog.getByRole('button', { name: 'Pull', exact: true });
-  await ref.fill('example:local');
-  await submit.click();
+  const fixture = await startImagePullFixture(() => {});
   try {
+    await page.goto(new URL('/images', fixture.base).href);
+    await page.getByRole('button', { name: 'Pull image', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Pull image' });
+    const form = dialog.locator('form[hx-post]');
+    await expect(form).toHaveAttribute('hx-request', '{"timeout":60000}');
+    await form.evaluate(el => el.setAttribute('hx-request', '{"timeout":500}'));
+    const ref = dialog.getByRole('textbox', { name: 'Image reference' });
+    const submit = dialog.getByRole('button', { name: 'Pull', exact: true });
+    await ref.fill('example:local');
+    await submit.click();
     await expect(dialog.getByRole('status')).toContainText('Image pull could not be confirmed');
     await expect(submit).toBeEnabled();
     await expect(ref).toBeEnabled();
-    expect(requests).toBe(1);
+    expect(fixture.requests()).toEqual([{ method: 'POST', body: 'ref=example%3Alocal' }]);
   } finally {
-    release();
+    await fixture.close();
   }
 });

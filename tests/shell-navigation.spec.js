@@ -1,27 +1,30 @@
 const { test, expect } = require('@playwright/test');
+const { focusNext } = require('./focus-traversal');
 const base = process.env.BRINE_FIXTURE_BASE_URL;
 test.skip(!base, 'Read-only fixture required');
 
-test('mobile Settings is discoverable through a named navigation landmark', async ({ page }) => {
+test('mobile Settings is discoverable through a named navigation landmark', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(base + '/settings');
   const more = page.locator('.desk-more summary');
-  await more.focus();
+  for (let i = 0; i < 7; i++) await focusNext(page, testInfo);
+  await expect(more).toBeFocused();
   await page.keyboard.press('Enter');
   const landmark = page.getByRole('navigation', { name: 'More navigation', exact: true });
   const settings = landmark.getByRole('link', { name: 'Settings', exact: true });
   await expect(settings).toBeVisible();
   await expect(settings).toHaveAttribute('aria-current', 'page');
   await expect(settings).toHaveAttribute('href', '/settings');
-  await landmark.getByRole('link', { name: 'Snippets' }).focus();
-  await page.keyboard.press('Tab');
+  await focusNext(page, testInfo);
+  await focusNext(page, testInfo);
+  await focusNext(page, testInfo);
   await expect(settings).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(more).toBeFocused();
   await expect(landmark).toBeHidden();
 });
 
-test('mobile navigation shows the current section on arrival without moving focus', async ({ page }) => {
+test('mobile navigation shows the current section on arrival without moving focus', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(base + '/images');
   const nav = page.getByRole('navigation', { name: 'Main navigation' });
@@ -34,7 +37,7 @@ test('mobile navigation shows the current section on arrival without moving focu
   }).toBe(true);
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
   await expect(page.locator('body')).toBeFocused();
-  await page.keyboard.press('Tab');
+  await focusNext(page, testInfo);
   await expect(page.getByRole('link', { name: 'Skip to main content' })).toBeFocused();
 });
 
@@ -42,7 +45,7 @@ for (const width of [390, 1440]) {
   test(`keyboard skip link reaches main content at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 850 });
     await page.goto(base + '/stacks');
-    await page.keyboard.press('Tab');
+    await focusNext(page, testInfo);
     const skip = page.getByRole('link', { name: 'Skip to main content' });
     await expect(skip).toBeFocused();
     const box = await skip.boundingBox();

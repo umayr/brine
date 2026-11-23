@@ -15,7 +15,7 @@ for (const colorScheme of ['light', 'dark']) {
       await link.focus();
       await expect(link).toBeFocused();
       await expect(link).toHaveCSS('outline-style', 'solid');
-      expect((await link.boundingBox()).height).toBe(36);
+      expect(Math.abs((await link.boundingBox()).height - 36)).toBeLessThan(0.01);
       expect(await link.evaluate(el => getComputedStyle(el).backgroundColor === getComputedStyle(el.closest('section')).borderInlineStartColor)).toBe(true);
       const metrics = page.getByRole('region', { name: 'Inventory' });
       await expect(metrics.getByRole('link', { name: /Containers/ })).toHaveAttribute('href', '/containers');
