@@ -589,18 +589,18 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 		PollInterval: pollInterval,
 	}
 
-	defer h.lockStack(name)()
-	repoDir, err := h.store.RepoDir(name)
-	if err != nil {
-		h.renderAlert(w, "error", "Repository directory unavailable")
-		return
+	ctx, cancel := gitpkg.CreateContext(r.Context(), h.deployTimeout)
+	defer cancel()
+	if h.agent != nil && h.agent.Dill() != nil {
+		unlock, err := h.agent.Dill().LockStackContext(ctx, name)
+		if err != nil {
+			h.renderAlert(w, "error", "Git stack creation failed; check the stack name before retrying")
+			return
+		}
+		defer unlock()
 	}
-	if err := h.git.Clone(r.Context(), gitURL, branch, repoDir); err != nil {
-		h.renderAlert(w, "error", "git clone failed: "+err.Error())
-		return
-	}
-	if _, err := h.store.CreateFromGit(name, src, entrypoint); err != nil {
-		h.renderAlert(w, "error", err.Error())
+	if _, err := gitpkg.CreateStack(ctx, h.store, h.git, name, src, entrypoint); err != nil {
+		h.renderAlert(w, "error", "Git stack creation failed; check the stack name before retrying")
 		return
 	}
 	w.Header().Set("HX-Redirect", "/stacks/"+name)

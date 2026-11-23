@@ -34,7 +34,7 @@ func (r *Runner) Clone(ctx context.Context, url, branch, destDir string) error {
 	// "--" terminates option parsing so a crafted URL cannot be interpreted
 	// as a git clone flag (e.g. --upload-pack).
 	args := []string{"clone", "--branch", branch, "--depth", "1", "--", url, destDir}
-	return r.run(ctx, "", args...)
+	return r.runClone(ctx, args...)
 }
 
 // Pull fetches from origin and fast-forwards the current branch.

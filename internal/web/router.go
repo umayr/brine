@@ -43,6 +43,9 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		r.Post("/web/stacks/{name}/git/pull", h.stackGitPull)
 	})
 
+	// Git creation supplies its own bounded request-cancellable deadline.
+	r.Post("/web/stacks/git", h.stackGitCreate)
+
 	// Everything else is short-lived.
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.Timeout(timeouts.Default))
@@ -73,7 +76,6 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			// Stack partials
 			r.Get("/stacks", h.stackInventory)
 			r.Post("/stacks", h.stackCreate)
-			r.Post("/stacks/git", h.stackGitCreate)
 			r.Put("/stacks/{name}", h.stackUpdate)
 			r.Post("/stacks/{name}/validate", h.stackValidate)
 			r.Post("/stacks/{name}/fmt", h.stackFmt)
