@@ -337,7 +337,8 @@ func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agent
 }
 
 func stageAndPreview(ctx context.Context, c *agentclient.Client, epoch, stack string, snap projectsnapshot.Snapshot) (string, string, *agentclient.DeploymentPreview, error) {
-	if err := projectsnapshot.ValidateProvisionalReceiver(ctx, snap); err != nil {
+	expected, err := dillserve.SnapshotManifestDigest(ctx, snap)
+	if err != nil {
 		return "", "", nil, err
 	}
 	type file struct {
@@ -367,10 +368,10 @@ func stageAndPreview(ctx context.Context, c *agentclient.Client, epoch, stack st
 		return "", "", nil, err
 	}
 	m, err := c.Snapshot(ctx, epoch, id)
-	if err != nil || !manifestMatches(m, snap) {
+	if err != nil || m.Digest() != expected || !manifestMatches(m, snap) {
 		return id, "", nil, agentclient.ErrProtocol
 	}
-	digest := fmt.Sprintf("%x", m.Digest())
+	digest := fmt.Sprintf("%x", expected)
 	plan, err := c.PreviewDeployment(ctx, epoch, id, digest, stack)
 	return id, digest, plan, err
 }

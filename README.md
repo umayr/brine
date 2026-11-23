@@ -345,7 +345,11 @@ credentials instead of an insecure filesystem fallback.
     meta.json
 ```
 
-Stack and recipe paths are validated; directories are `0700` and files `0600`.
+Stack and recipe paths are validated; newly created directories are `0700` and files `0600`.
+
+On first open of an absent recipe library, Brine stages starter recipes privately and publishes them together without replacing an existing library. Existing empty or partial libraries are not repaired, and deleted starters are not restored. Existing recipe directories are left unchanged, including their permissions; unlike earlier versions, startup no longer chmods them. Check their permissions independently; the data directory is still restricted to `0700`. A non-directory or symlink at the library path fails startup.
+
+A seed or publication error stops startup; restart retries if the library remains absent. Failed publication retains the private `.recipes-attempt-*` directory for inspection; inspect the library before retrying if publication was uncertain. Cleanup after success or a known pre-publication failure is best effort and may leave an attempt directory. Atomic publication requires Linux or macOS; on other platforms where Brine builds, an existing library remains usable, but creation fails closed.
 
 Git stack creation uses the configured deploy timeout (five minutes when it is
 non-positive), rather than the ordinary request timeout. A request cancellation
