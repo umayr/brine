@@ -42,8 +42,38 @@ func TestDiscoveryKAT(t *testing.T) {
 	}
 	sample := c
 	sample.Route = SampleRoute
-	if !NewSampleAttempt(sample, p, "target", "session", true).ctx.AttemptActive {
+	sample.RequestID = "00000000000000000000000000000002"
+	active := NewSampleAttempt(sample, p, "target", "session", true)
+	if !active.ctx.AttemptActive {
 		t.Fatal("matching signed discovery rejected")
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*Context)
+	}{
+		{"local-opt-out", func(c *Context) { c.OptIn = false }},
+		{"ACL-revoked", func(c *Context) { c.CallerAuthorized = false }},
+		{"session-unverified", func(c *Context) { c.SessionVerified = false }},
+		{"epoch-changed", func(c *Context) { c.Epoch = "changed" }},
+		{"binding-generation-changed", func(c *Context) { c.Generation++ }},
+		{"key-changed", func(c *Context) { c.PublicKey = make([]byte, 32) }},
+		{"engine-changed", func(c *Context) { c.EngineID = "different" }},
+		{"agent-changed", func(c *Context) { c.AgentID = "different" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := sample
+			tc.change(&changed)
+			if NewSampleAttempt(changed, p, "target", "session", true).ctx.AttemptActive {
+				t.Fatal("prior discovery allowed a new sample after scope/authority changed")
+			}
+		})
+	}
+	if NewSampleAttempt(sample, p, "target", "re-established-session", true).ctx.AttemptActive {
+		t.Fatal("prior discovery survived local session replacement")
+	}
+	active.Invalidate()
+	if active.ctx.AttemptActive {
+		t.Fatal("existing receipt slot survived caller invalidation")
 	}
 	for _, q := range []DiscoveryProof{{}, p} {
 		if NewSampleAttempt(sample, q, "foreign", "session", true).ctx.AttemptActive {
