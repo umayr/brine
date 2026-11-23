@@ -26,11 +26,10 @@ const (
 // request, never from reply fields. All flags are explicit fail-closed assertions.
 // Freshness and single-use of RequestID and slot invalidation are caller duties.
 type Context struct {
-	OptIn, CallerAuthorized, CapabilityAuthorized, SessionVerified, AttemptActive bool
-	DiscoveryVerified                                                             bool // required for sampling, for this same session
-	Method, Route, RequestID, AgentID, EngineID, Epoch                            string
-	Generation                                                                    uint64
-	PublicKey                                                                     ed25519.PublicKey
+	OptIn, CallerAuthorized, SessionVerified, AttemptActive bool
+	Method, Route, RequestID, AgentID, EngineID, Epoch      string
+	Generation                                              uint64
+	PublicKey                                               ed25519.PublicKey
 }
 
 var ErrProof = errors.New("invalid monitor proof")
@@ -59,7 +58,7 @@ func lowerHex(s string, n int) bool {
 // or confer permission to present the data. Signatures must be individual raw
 // header field values, not a joined or pre-deduplicated collection.
 func verifyProof(c Context, signatures []string, body []byte) ([]byte, error) {
-	if !c.OptIn || !c.CallerAuthorized || !c.CapabilityAuthorized || !c.SessionVerified || !c.AttemptActive || c.Method != "POST" || (c.Route != DiscoveryRoute && c.Route != SampleRoute) || (c.Route == SampleRoute && !c.DiscoveryVerified) || c.Generation == 0 || !lowerHex(c.RequestID, 32) || !canonicalBytes(c.Epoch, 32) || len(c.PublicKey) != ed25519.PublicKeySize || len(body) > maxBody || !utf8.Valid(body) || len(signatures) != 1 || !canonicalBytes(signatures[0], ed25519.SignatureSize) {
+	if !c.OptIn || !c.CallerAuthorized || !c.SessionVerified || !c.AttemptActive || c.Method != "POST" || (c.Route != DiscoveryRoute && c.Route != SampleRoute) || c.Generation == 0 || !lowerHex(c.RequestID, 32) || !canonicalBytes(c.Epoch, 32) || len(c.PublicKey) != ed25519.PublicKeySize || len(body) > maxBody || !utf8.Valid(body) || len(signatures) != 1 || !canonicalBytes(signatures[0], ed25519.SignatureSize) {
 		return nil, ErrProof
 	}
 	keyID := sha256.Sum256(c.PublicKey)

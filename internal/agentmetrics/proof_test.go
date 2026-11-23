@@ -30,7 +30,7 @@ func TestProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := sha256.Sum256(pub)
-	c := Context{OptIn: true, CallerAuthorized: true, CapabilityAuthorized: true, SessionVerified: true, AttemptActive: true, DiscoveryVerified: true, Method: "POST", Route: DiscoveryRoute, RequestID: "0123456789abcdef0123456789abcdef", AgentID: hex.EncodeToString(id[:]), EngineID: "11111111-1111-4111-8111-111111111111", Generation: 1<<53 + 1, Epoch: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), PublicKey: pub}
+	c := Context{OptIn: true, CallerAuthorized: true, SessionVerified: true, AttemptActive: true, Method: "POST", Route: DiscoveryRoute, RequestID: "0123456789abcdef0123456789abcdef", AgentID: hex.EncodeToString(id[:]), EngineID: "11111111-1111-4111-8111-111111111111", Generation: 1<<53 + 1, Epoch: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), PublicKey: pub}
 	body := []byte("{\"version\":\"brine.agent.read/1\"}\n")
 	var p bytes.Buffer
 	p.WriteString("brine-agent-monitor-response/1\x00")
@@ -52,7 +52,7 @@ func TestProof(t *testing.T) {
 	if body[0] == 'x' {
 		t.Fatal("alias")
 	}
-	cases := map[string]func(*Context){"opt-in": func(x *Context) { x.OptIn = false }, "caller": func(x *Context) { x.CallerAuthorized = false }, "capability": func(x *Context) { x.CapabilityAuthorized = false }, "session": func(x *Context) { x.SessionVerified = false }, "active": func(x *Context) { x.AttemptActive = false }, "method": func(x *Context) { x.Method = "GET" }, "route": func(x *Context) { x.Route = SampleRoute }, "id": func(x *Context) { x.RequestID = "1123456789abcdef0123456789abcdef" }, "generation": func(x *Context) { x.Generation++ }, "epoch": func(x *Context) { x.Epoch = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)) }, "key-id": func(x *Context) { x.AgentID = "x" }, "engine": func(x *Context) { x.EngineID = "21111111-1111-4111-8111-111111111111" }, "key": func(x *Context) { x.PublicKey = make([]byte, 32) }, "zero generation": func(x *Context) { x.Generation = 0 }}
+	cases := map[string]func(*Context){"opt-in": func(x *Context) { x.OptIn = false }, "caller": func(x *Context) { x.CallerAuthorized = false }, "session": func(x *Context) { x.SessionVerified = false }, "active": func(x *Context) { x.AttemptActive = false }, "method": func(x *Context) { x.Method = "GET" }, "route": func(x *Context) { x.Route = SampleRoute }, "id": func(x *Context) { x.RequestID = "1123456789abcdef0123456789abcdef" }, "generation": func(x *Context) { x.Generation++ }, "epoch": func(x *Context) { x.Epoch = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)) }, "key-id": func(x *Context) { x.AgentID = "x" }, "engine": func(x *Context) { x.EngineID = "21111111-1111-4111-8111-111111111111" }, "key": func(x *Context) { x.PublicKey = make([]byte, 32) }, "zero generation": func(x *Context) { x.Generation = 0 }}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
 			x := c

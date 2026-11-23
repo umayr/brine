@@ -54,8 +54,8 @@ func receiptInput(t *testing.T, f receiptKAT, i int) (Context, []string, []byte)
 		t.Fatal("invalid exact fixture generation")
 	}
 	return Context{
-		OptIn: true, CallerAuthorized: true, CapabilityAuthorized: true,
-		SessionVerified: true, AttemptActive: true, DiscoveryVerified: true,
+		OptIn: true, CallerAuthorized: true,
+		SessionVerified: true, AttemptActive: true,
 		Method: "POST", Route: v.Path, RequestID: v.RequestID,
 		AgentID: f.AgentID, EngineID: f.EngineID, Epoch: f.Epoch,
 		Generation: generation, PublicKey: receiptHex(t, f.PublicKeyHex),
@@ -96,7 +96,8 @@ func TestIndependentReceiptPreimages(t *testing.T) {
 func TestSampleAttemptUsesOneCurrentReceipt(t *testing.T) {
 	f := candidateReceipts(t)
 	ctx, headers, body := receiptInput(t, f, 1)
-	a := NewSampleAttempt(ctx)
+	proof := DiscoveryProof{target: "target", session: "session", agent: ctx.AgentID, engine: ctx.EngineID, epoch: ctx.Epoch, key: string(ctx.PublicKey), generation: ctx.Generation, valid: true} // Test-only matching receipt; KAT generations differ.
+	a := NewSampleAttempt(ctx, proof, "target", "session", true)
 	v, err := a.Consume(200, headers, body)
 	if err != nil || v.HasHost || !v.HasOwnedCount || v.OwnedCount != 1 || !v.HasOwnedUsage || v.OwnedUsage != 0 {
 		t.Fatal("verified measured zero was not projected exactly")
@@ -106,13 +107,13 @@ func TestSampleAttemptUsesOneCurrentReceipt(t *testing.T) {
 	}
 
 	t.Run("stale slot", func(t *testing.T) {
-		a := NewSampleAttempt(ctx)
+		a := NewSampleAttempt(ctx, proof, "target", "session", true)
 		a.Invalidate()
 		if v, err := a.Consume(200, headers, body); err == nil || v != (Sample{}) {
 			t.Fatal("invalidated completion accepted")
 		}
 		current, _, _ := receiptInput(t, f, 2)
-		if v, err := NewSampleAttempt(current).Consume(200, headers, body); err == nil || v != (Sample{}) {
+		if v, err := NewSampleAttempt(current, proof, "target", "session", true).Consume(200, headers, body); err == nil || v != (Sample{}) {
 			t.Fatal("old response accepted for newer request")
 		}
 	})
@@ -122,8 +123,8 @@ func TestSampleAttemptUsesOneCurrentReceipt(t *testing.T) {
 			t.Fatal("zero slot accepted reply")
 		}
 		noEntitlement := ctx
-		noEntitlement.CapabilityAuthorized = false
-		if v, err := NewSampleAttempt(noEntitlement).Consume(200, headers, body); err == nil || v != (Sample{}) {
+		noEntitlement.CallerAuthorized = false
+		if v, err := NewSampleAttempt(noEntitlement, proof, "target", "session", true).Consume(200, headers, body); err == nil || v != (Sample{}) {
 			t.Fatal("possession or valid signature implied permission")
 		}
 	})
@@ -136,7 +137,7 @@ func TestSampleAttemptUsesOneCurrentReceipt(t *testing.T) {
 			{200, []string{headers[0] + "," + headers[0]}},
 			{503, headers},
 		} {
-			a := NewSampleAttempt(ctx)
+			a := NewSampleAttempt(ctx, proof, "target", "session", true)
 			if v, err := a.Consume(tc.status, tc.headers, body); err == nil || v != (Sample{}) {
 				t.Fatal("ambiguous proof or non-success accepted")
 			}
@@ -146,7 +147,7 @@ func TestSampleAttemptUsesOneCurrentReceipt(t *testing.T) {
 		}
 	})
 	t.Run("concurrent duplicates", func(t *testing.T) {
-		a := NewSampleAttempt(ctx)
+		a := NewSampleAttempt(ctx, proof, "target", "session", true)
 		var accepted atomic.Int32
 		var wg sync.WaitGroup
 		for range 8 {

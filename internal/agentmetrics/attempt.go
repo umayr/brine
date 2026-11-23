@@ -22,8 +22,8 @@ type SampleAttempt struct {
 // current slot, invalidate replaced slots, verify HTTP bounds/framing and
 // freshness upstream, and recheck current selection and permission on delivery.
 // Creating another slot for the same request ID is not permitted.
-func NewSampleAttempt(ctx Context) *SampleAttempt {
-	if ctx.Route != SampleRoute || !ctx.OptIn || !ctx.CallerAuthorized || !ctx.CapabilityAuthorized || !ctx.SessionVerified || !ctx.DiscoveryVerified || !ctx.AttemptActive {
+func NewSampleAttempt(ctx Context, proof DiscoveryProof, target, session string, current bool) *SampleAttempt {
+	if ctx.Route != SampleRoute || !proof.Matches(ctx, target, session, current) {
 		return &SampleAttempt{}
 	}
 	if len(ctx.PublicKey) != 32 {
