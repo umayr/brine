@@ -3,12 +3,11 @@
 package git
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -26,15 +25,14 @@ func (r *Runner) runClone(ctx context.Context, args ...string) error {
 		return err
 	}
 	cmd.WaitDelay = time.Second
-	var stderr bytes.Buffer
+	// Clone diagnostics can include unbounded helper output or credentials.
 	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = err.Error()
+		if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+			err = errors.Join(ctxErr, err)
 		}
-		return fmt.Errorf("git clone: %s", msg)
+		return fmt.Errorf("git clone: %w", err)
 	}
 	return nil
 }
