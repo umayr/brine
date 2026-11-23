@@ -5,8 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/umayr/brine/internal/projectsnapshot"
 )
 
 // Manifest is a validated catalog manifest. Its fields are private so callers
@@ -40,6 +43,30 @@ type manifestWire struct {
 	Files      []manifestWireFile `json:"files"`
 }
 
+const manifestSchema = "dill.snapshot.manifest.v1"
+
+// SnapshotManifestDigest derives the existing catalog manifest commitment from
+// the reviewed bytes, independently of a receiver response. It is not proof of
+// staging, consent, or execution. The caller must not mutate s concurrently.
+func SnapshotManifestDigest(ctx context.Context, s projectsnapshot.Snapshot) ([sha256.Size]byte, error) {
+	if err := projectsnapshot.ValidateProvisionalReceiver(ctx, s); err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	w := manifestWire{Schema: manifestSchema, Entrypoint: s.Entrypoint, Files: make([]manifestWireFile, 0, len(s.Files))}
+	for _, f := range s.Files {
+		w.Files = append(w.Files, manifestWireFile{Path: f.Path, Length: int64(len(f.Content)), SHA256: hex.EncodeToString(f.SHA256[:])})
+	}
+	sort.Slice(w.Files, func(i, j int) bool { return w.Files[i].Path < w.Files[j].Path })
+	raw, err := json.Marshal(w)
+	if err != nil {
+		return [sha256.Size]byte{}, ErrUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	return sha256.Sum256(raw), nil
+}
+
 // validateManifest uses byte equality with Go's canonical compact encoding to
 // reject duplicate, missing, unknown, reordered and noncanonical fields.
 func validateManifest(ctx context.Context, raw []byte, digest [32]byte) (Manifest, error) {
@@ -48,7 +75,7 @@ func validateManifest(ctx context.Context, raw []byte, digest [32]byte) (Manifes
 		return out, ErrUnavailable
 	}
 	var w manifestWire
-	if json.Unmarshal(raw, &w) != nil || w.Schema != "dill.snapshot.manifest.v1" || len(w.Files) == 0 || len(w.Files) > 1000 {
+	if json.Unmarshal(raw, &w) != nil || w.Schema != manifestSchema || len(w.Files) == 0 || len(w.Files) > 1000 {
 		return out, ErrUnavailable
 	}
 	canonical, err := json.Marshal(w)
