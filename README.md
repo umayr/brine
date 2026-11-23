@@ -351,6 +351,15 @@ On first open of an absent recipe library, Brine stages starter recipes privatel
 
 A seed or publication error stops startup; restart retries if the library remains absent. Failed publication retains the private `.recipes-attempt-*` directory for inspection; inspect the library before retrying if publication was uncertain. Cleanup after success or a known pre-publication failure is best effort and may leave an attempt directory. Atomic publication requires Linux or macOS; on other platforms where Brine builds, an existing library remains usable, but creation fails closed.
 
+Git stack creation uses the configured deploy timeout (five minutes when it is
+non-positive), rather than the ordinary request timeout. A request cancellation
+or deadline before publication stops registration and cleans that attempt's staging
+area; existing stack paths are never replaced. Once publication begins, cancellation
+cannot guarantee rollback. If the response is lost, check the stack name before
+retrying: creation may have succeeded. A process crash can leave a private staging
+directory requiring operator inspection. Git retains the service's existing
+execution environment and authority.
+
 File-backed authentication requires a canonical private data directory on Linux
 or macOS: owned by the server user, mode `0700`, beneath root/server-owned
 ancestors without group/other write permission. Credential files must be regular,
