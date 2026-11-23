@@ -1,8 +1,9 @@
 const { test, expect } = require('@playwright/test');
+const { focusNext } = require('./focus-traversal');
 
 const base = process.env.BRINE_FIXTURE_BASE_URL;
 
-test('new stack files can be added, selected and removed with the keyboard', async ({ page }) => {
+test('new stack files can be added, selected and removed with the keyboard', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 850 });
   await page.goto(new URL('/stacks/new', base).href);
   const files = page.getByRole('group', { name: 'Stack files' });
@@ -39,7 +40,7 @@ test('new stack files can be added, selected and removed with the keyboard', asy
   const extra = files.getByRole('button', { name: 'extra.pkl', exact: true });
   await expect(extra).toBeFocused();
   await expect(extra).toHaveAttribute('aria-pressed', 'true');
-  await keyboard.press('Tab');
+  await focusNext(page, testInfo);
   const remove = files.getByRole('button', { name: 'Remove extra.pkl', exact: true });
   await expect(remove).toBeFocused();
   await keyboard.press('Space');
@@ -49,7 +50,7 @@ test('new stack files can be added, selected and removed with the keyboard', asy
   await expect(compose).toHaveAttribute('aria-pressed', 'true');
   await expect(files.getByRole('button', { name: 'Remove compose.pkl' })).toHaveCount(0);
 
-  await keyboard.press('Tab');
+  await focusNext(page, testInfo);
   await expect(keep).toBeFocused();
   await keyboard.press('Enter');
   await expect(keep).toHaveAttribute('aria-pressed', 'true');
