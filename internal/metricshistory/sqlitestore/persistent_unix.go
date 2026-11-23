@@ -28,7 +28,20 @@ type PersistentStore struct {
 
 // OpenPersistent explicitly opens a fixed-name store in an existing private
 // directory. create only creates a new store, never adopts an existing file.
-func OpenPersistent(dir string, create bool) (_ *PersistentStore, err error) {
+func OpenPersistent(dir string, create bool) (*PersistentStore, error) {
+	return openPersistent(dir, create, persistentFormat{
+		init:     []string{schema, "PRAGMA application_id = 1112690245", "PRAGMA user_version = 1"},
+		validate: validatePersistent,
+	})
+}
+
+type persistentFormat struct {
+	init     []string
+	validate func(*sql.DB) error
+}
+
+// The fixed name, ownership and no-adoption checks are shared across formats.
+func openPersistent(dir string, create bool, format persistentFormat) (_ *PersistentStore, err error) {
 	d, err := openHistoryDir(dir)
 	if err != nil {
 		return nil, err
@@ -72,7 +85,7 @@ func OpenPersistent(dir string, create bool) (_ *PersistentStore, err error) {
 		if e != nil {
 			return nil, e
 		}
-		e = validatePersistent(ro)
+		e = format.validate(ro)
 		ce := ro.Close()
 		if e != nil {
 			return nil, e
@@ -116,7 +129,7 @@ func OpenPersistent(dir string, create bool) (_ *PersistentStore, err error) {
 		if e != nil {
 			return nil, e
 		}
-		for _, s := range []string{schema, "PRAGMA application_id = 1112690245", "PRAGMA user_version = 1"} {
+		for _, s := range format.init {
 			if _, e = tx.Exec(s); e != nil {
 				tx.Rollback()
 				return nil, e
@@ -125,7 +138,7 @@ func OpenPersistent(dir string, create bool) (_ *PersistentStore, err error) {
 		if e = tx.Commit(); e != nil {
 			return nil, e
 		}
-	} else if err = validatePersistent(db); err != nil {
+	} else if err = format.validate(db); err != nil {
 		return nil, err
 	}
 	return &PersistentStore{store: &Store{db: db}, dir: d}, nil
