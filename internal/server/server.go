@@ -74,7 +74,7 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 }
 
 // Run starts HTTP and any configured remote Git worker until ctx is cancelled.
-func (s *Server) Run(ctx context.Context) error {
+func (s *Server) Run(ctx context.Context) (runErr error) {
 	defer s.web.CloseStaging()
 	defer func() {
 		if s.remoteDeploy != nil {
@@ -92,6 +92,12 @@ func (s *Server) Run(ctx context.Context) error {
 	if s.remoteCancel != nil {
 		defer s.remoteCancel()
 	}
+	history := beginOptionalMetricsHistory(ctx, s.cfg)
+	defer func() {
+		if err := history.stop(5 * time.Second); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}()
 	// Do not start background mutations until the configuration is validated.
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
@@ -120,6 +126,7 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-errCh:
 		return err
 	case <-ctx.Done():
+		history.cutoff()
 		// Cancel snapshot transfers before the HTTP shutdown grace period.
 		s.web.CloseStaging()
 		if s.remoteCancel != nil {
