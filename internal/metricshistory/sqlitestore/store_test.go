@@ -113,6 +113,72 @@ func TestBoundsAndSidecarPreservation(t *testing.T) {
 	}
 }
 
+func TestRejectExtraSchemaObjectPreservesBytes(t *testing.T) {
+	path := newClosedProof(t)
+	u := url.URL{Scheme: "file", Path: path}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, createErr := db.Exec("CREATE VIEW sqliteXreport AS SELECT 1")
+	closeErr := db.Close()
+	if createErr != nil || closeErr != nil {
+		t.Fatalf("construct foreign schema: %v; close: %v", createErr, closeErr)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireRejectedUnchanged(t, path, before)
+}
+
+func TestRejectHardlinkedDatabasePreservesBothPaths(t *testing.T) {
+	path := newClosedProof(t)
+	alias := filepath.Join(filepath.Dir(path), "alias.db")
+	if err := os.Link(path, alias); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{path, alias} {
+		requireRejectedUnchanged(t, name, before)
+	}
+}
+
+func newClosedProof(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "proof.db")
+	s, err := Open(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func requireRejectedUnchanged(t *testing.T, path string, before []byte) {
+	t.Helper()
+	if s, err := Open(path, false); err == nil {
+		_ = s.Close()
+		t.Errorf("accepted inadmissible database %q", path)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) {
+		t.Errorf("database changed after admission attempt: %v", err)
+	}
+	if err := noSidecars(path); err != nil {
+		t.Errorf("sidecar present after admission attempt: %v", err)
+	}
+}
+
 func TestForeignSQLiteUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {

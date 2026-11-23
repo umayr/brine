@@ -135,7 +135,8 @@ func owned(info os.FileInfo) bool {
 	return ok && uint64(st.Uid) == uint64(os.Geteuid())
 }
 func privateFile(info os.FileInfo) bool {
-	return info.Mode().IsRegular() && info.Mode().Perm()&0077 == 0 && owned(info)
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Nlink == 1 && info.Mode().IsRegular() && info.Mode().Perm()&0077 == 0 && owned(info)
 }
 func noSidecars(path string) error {
 	for _, suffix := range []string{"-journal", "-wal", "-shm"} {
@@ -168,13 +169,14 @@ func validate(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").Scan(&count); err != nil {
+	// The format has exactly one object, including SQLite-managed objects.
+	if err := db.QueryRow("SELECT count(*) FROM main.sqlite_schema").Scan(&count); err != nil {
 		return err
 	}
 	if id != appID || version != 1 || count != 1 {
 		return errors.New("incompatible database")
 	}
-	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='observations'").Scan(&actual); err != nil || actual != schema {
+	if err := db.QueryRow("SELECT sql FROM main.sqlite_schema WHERE type='table' AND name='observations' AND tbl_name='observations'").Scan(&actual); err != nil || actual != schema {
 		return errors.New("incompatible schema")
 	}
 	return nil
