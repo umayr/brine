@@ -5,9 +5,12 @@ package sqlitestore
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -186,21 +189,42 @@ func TestPersistentAbruptExit(t *testing.T) {
 	if d := os.Getenv("PERSISTENT_SYNTHETIC_CHILD"); d != "" {
 		s, e := OpenPersistent(d, true)
 		if e != nil {
-			os.Exit(2)
+			os.Exit(40)
 		}
 		if e = s.Append(context.Background(), Record{Receipt: time.Unix(1700000000, 0), Target: "synthetic", Gauge: "count"}); e != nil {
-			os.Exit(3)
+			os.Exit(41)
 		}
 		os.Exit(23)
 	}
 	d := persistentFixture(t)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestPersistentAbruptExit$")
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestPersistentAbruptExit$")
 	cmd.Env = append(os.Environ(), "PERSISTENT_SYNTHETIC_CHILD="+d)
-	out, err := cmd.CombinedOutput()
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(""), io.Discard, io.Discard
+	if err := cmd.Start(); err != nil {
+		fmt.Println("QUALPROBE TestPersistentAbruptExit CHILD_START_FAILED")
+		t.Fatal("synthetic child did not start")
+	}
+	fmt.Println("QUALPROBE TestPersistentAbruptExit CHILD_STARTED")
+	err := cmd.Wait()
 	var ex *exec.ExitError
 	if !errors.As(err, &ex) || ex.ExitCode() != 23 {
-		t.Fatalf("child %v %s", err, out)
+		phase := "CHILD_UNEXPECTED_EXIT"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			phase = "CHILD_TIMEOUT"
+		} else if ex != nil {
+			switch ex.ExitCode() {
+			case 40:
+				phase = "CHILD_SQLITE_OPEN_FAILED"
+			case 41:
+				phase = "CHILD_SQLITE_APPEND_FAILED"
+			}
+		}
+		fmt.Println("QUALPROBE TestPersistentAbruptExit", phase)
+		t.Fatal("synthetic child did not exit after an acknowledged commit")
 	}
+	fmt.Println("QUALPROBE TestPersistentAbruptExit CHILD_EXPECTED_EXIT")
 	s, err := OpenPersistent(d, false)
 	if err != nil {
 		t.Fatal(err)

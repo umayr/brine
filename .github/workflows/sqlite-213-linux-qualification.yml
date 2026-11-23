@@ -1,0 +1,60 @@
+name: 'Synthetic SQLite qualification for #213 (explicit stdio)'
+
+# Publication of the test-only branch does not trigger this workflow.
+on:
+  push:
+    tags: [verify-sqlite-213-linux-stdio-908372e]
+
+permissions:
+  contents: read
+
+jobs:
+  sqlite-qualification:
+    if: github.repository == 'umayr/brine' && github.event_name == 'push' && github.ref == 'refs/tags/verify-sqlite-213-linux-stdio-908372e'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    env:
+      REVIEWED_MERGE: 43ccd6a845d9bfb0f99ca7c5812f53097a1747ce
+      REVIEWED_TREE: 526877f78702784980732236b036b239f5dd36d8
+      REVIEWED_TEST_SHA256: 38259d558f914cf3dbcd65b24a4480d3a2272f140bc6b8f609de1516a1099e77
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: 'Verify exact #213 and four test-only paths'
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ $(git rev-parse HEAD) == "$GITHUB_SHA" && $(git show -s --format=%P HEAD) == "$REVIEWED_MERGE" ]]
+          [[ $(git rev-parse "$REVIEWED_MERGE^{tree}") == "$REVIEWED_TREE" ]]
+          diff -u <(printf '%s\n' .github/workflows/sqlite-213-linux-qualification.yml internal/metricshistory/sqlitestore/persistent_unix_test.go internal/metricshistory/sqlitestore/qualification_linux_test.go scripts/sqlite-213-linux-qualification.sh) <(git diff --name-only "$REVIEWED_MERGE" HEAD)
+          [[ $(go version) == 'go version go1.27.3 linux/amd64' ]]
+          sha256sum --check --strict <<'HASHES'
+          f9669f9e6e72607a1b9dc54f350cb57ade654c01bdc547c95609cae448f70d44  scripts/sqlite-213-linux-qualification.sh
+          54d3ee40f4209a600d519b88ab3ab510ab25cb73d648e9c153cc00444e768ad7  internal/metricshistory/sqlitestore/persistent_unix_test.go
+          dfed2a59bbac89dff5a332a2e0cf4d07b430e7531e58ea2fb7d34df8ec8e4f5e  internal/metricshistory/sqlitestore/qualification_linux_test.go
+          HASHES
+      - name: Build and verify the synthetic Linux test artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/brine-213-build.XXXXXXXX")
+          export GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org GONOPROXY= GONOSUMDB= GOPRIVATE= GOFLAGS=
+          go mod download
+          go mod verify
+          env GOPROXY=off GOSUMDB=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1 go test -trimpath -buildvcs=false -tags=sqlitequalification -c -o "$scratch/sqlitestore.test" ./internal/metricshistory/sqlitestore
+          sha=$(sha256sum "$scratch/sqlitestore.test" | awk '{print $1}')
+          printf 'linux/amd64 test binary SHA-256: %s\n' "$sha"
+          [[ "$sha" == "$REVIEWED_TEST_SHA256" ]]
+          printf 'VERIFY_BINARY=%s\n' "$scratch/sqlitestore.test" >> "$GITHUB_ENV"
+      - name: Run only the named synthetic cases in the isolated namespace
+        shell: bash
+        run: bash scripts/sqlite-213-linux-qualification.sh "$VERIFY_BINARY" "$REVIEWED_TEST_SHA256"
