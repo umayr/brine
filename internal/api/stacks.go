@@ -476,25 +476,19 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 		req.Git.Branch = "main"
 	}
 
-	repoDir, err := h.store.RepoDir(req.Name)
-	if err != nil {
-		// Stack doesn't exist yet — that's expected.
-		// Derive repoDir manually before the stack is registered.
-		writeError(w, http.StatusInternalServerError, "could not determine repo dir: "+err.Error())
-		return
+	ctx, cancel := gitpkg.CreateContext(r.Context(), h.deployTimeout)
+	defer cancel()
+	if h.agent != nil && h.agent.Dill() != nil {
+		unlock, err := h.agent.Dill().LockStackContext(ctx, req.Name)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, "Git stack creation failed; check the stack name before retrying")
+			return
+		}
+		defer unlock()
 	}
-
-	// Clone.
-	defer h.lockStack(req.Name)()
-	ctx := r.Context()
-	if err := h.git.Clone(ctx, req.Git.URL, req.Git.Branch, repoDir); err != nil {
-		writeError(w, http.StatusBadGateway, "git clone: "+err.Error())
-		return
-	}
-
-	stack, err := h.store.CreateFromGit(req.Name, &req.Git, req.Entrypoint)
+	stack, err := gitpkg.CreateStack(ctx, h.store, h.git, req.Name, &req.Git, req.Entrypoint)
 	if err != nil {
-		writeError(w, http.StatusConflict, err.Error())
+		writeError(w, http.StatusBadGateway, "Git stack creation failed; check the stack name before retrying")
 		return
 	}
 	writeJSON(w, http.StatusCreated, stack)

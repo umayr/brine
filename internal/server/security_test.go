@@ -150,3 +150,37 @@ func TestProtectedRoutesRejectUnauthenticated(t *testing.T) {
 		}
 	}
 }
+
+func TestGitCreationRoutesRequireAuthAndCSRF(t *testing.T) {
+	a, err := auth.New(auth.Config{User: "admin", Password: "synthetic-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(config.Default(), agent.NewLocalAgent(nil, dill.New("dill")), nil, nil, nil, a)
+	login := httptest.NewRequest("POST", "/login", strings.NewReader("user=admin&password=synthetic-password"))
+	login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	lw := httptest.NewRecorder()
+	s.router.ServeHTTP(lw, login)
+	cookies := lw.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("login failed")
+	}
+	for _, path := range []string{"/api/stacks/git", "/web/stacks/git"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("POST", path, nil)
+			req.Header.Set("Accept", "application/json")
+			w := httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated status %d", w.Code)
+			}
+			req = httptest.NewRequest("POST", path, nil)
+			req.AddCookie(cookies[0])
+			w = httptest.NewRecorder()
+			s.router.ServeHTTP(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("missing CSRF status %d", w.Code)
+			}
+		})
+	}
+}
