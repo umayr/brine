@@ -218,8 +218,9 @@ func (r Record) Verify(i Identity) error {
 }
 
 type disk struct {
-	Version int      `json:"version"`
-	Targets []Record `json:"targets"`
+	Version             int               `json:"version"`
+	Targets             []Record          `json:"targets"`
+	HistoryIncarnations map[string]string `json:"history_incarnations,omitempty"`
 }
 
 // Registry uses an operator-chosen private directory. All cooperating processes
@@ -370,9 +371,14 @@ func (r *Registry) locked(fn func() error) error { return r.lockedContext(contex
 // caller must close the lease only after the entire operation/stream completes.
 // The lease protects against cooperating writers, not direct filesystem edits.
 func (r *Registry) AcquireRead(ctx context.Context, id string) (Record, *ReadLease, error) {
+	target, _, lease, err := r.acquireTarget(ctx, id)
+	return target, lease, err
+}
+
+func (r *Registry) acquireTarget(ctx context.Context, id string) (Record, HistoryIncarnation, *ReadLease, error) {
 	f, err := r.lock(ctx, true)
 	if err != nil {
-		return Record{}, nil, err
+		return Record{}, HistoryIncarnation{}, nil, err
 	}
 	lease := &ReadLease{file: f, closeFile: r.closeFile}
 	d, err := r.load()
@@ -380,14 +386,15 @@ func (r *Registry) AcquireRead(ctx context.Context, id string) (Record, *ReadLea
 		err = ctx.Err()
 	}
 	if err != nil {
-		return Record{}, nil, errors.Join(err, lease.Close())
+		return Record{}, HistoryIncarnation{}, nil, errors.Join(err, lease.Close())
 	}
 	for _, t := range d.Targets {
 		if t.ID == id {
-			return t, lease, nil
+			incarnation, _ := parseHistoryIncarnation(d.HistoryIncarnations[id]) // nonempty entries have been checked by load
+			return t, incarnation, lease, nil
 		}
 	}
-	return Record{}, nil, errors.Join(ErrNotFound, lease.Close())
+	return Record{}, HistoryIncarnation{}, nil, errors.Join(ErrNotFound, lease.Close())
 }
 func (r *Registry) load() (disk, error) {
 	d := disk{Version: 2, Targets: []Record{}}
@@ -441,6 +448,9 @@ func (r *Registry) load() (disk, error) {
 		}
 		seen[t.ID] = true
 	}
+	if err := d.validateHistoryIncarnations(); err != nil {
+		return d, err
+	}
 	return d, nil
 }
 func rejectDuplicateKeys(b []byte) error {
@@ -457,7 +467,7 @@ func rejectDuplicateKeys(b []byte) error {
 		}
 		switch delim {
 		case '{':
-			if kind != "envelope" && kind != "record" {
+			if kind != "envelope" && kind != "record" && kind != "incarnations" {
 				return errors.New("unexpected object")
 			}
 			seen := map[string]bool{}
@@ -467,7 +477,7 @@ func rejectDuplicateKeys(b []byte) error {
 					return err
 				}
 				s, ok := k.(string)
-				allowed := kind == "envelope" && (s == "version" || s == "targets") || kind == "record" && (s == "https_address" || s == "https_pairing" || s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
+				allowed := kind == "envelope" && (s == "version" || s == "targets" || s == "history_incarnations") || kind == "incarnations" && token.MatchString(s) || kind == "record" && (s == "https_address" || s == "https_pairing" || s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
 				if !ok || !allowed || seen[s] {
 					return errors.New("noncanonical, unknown or duplicate JSON key")
 				}
@@ -475,6 +485,8 @@ func rejectDuplicateKeys(b []byte) error {
 				child := "scalar"
 				if kind == "envelope" && s == "targets" {
 					child = "targets"
+				} else if kind == "envelope" && s == "history_incarnations" {
+					child = "incarnations"
 				}
 				if err = walk(child); err != nil {
 					return err
@@ -627,6 +639,11 @@ func (r *Registry) AddContext(ctx context.Context, t Record, reviewed Record) er
 			return e
 		}
 		d.Targets = append(d.Targets, t)
+		if t.HTTPSAddress != "" {
+			if err := d.assignHistoryIncarnation(t.ID); err != nil {
+				return err
+			}
+		}
 		return r.save(ctx, d)
 	})
 }
@@ -645,6 +662,7 @@ func (r *Registry) ForgetHTTPS(ctx context.Context, id string) error {
 		for i, target := range d.Targets {
 			if target.ID == id && target.HTTPSAddress != "" {
 				d.Targets = append(d.Targets[:i], d.Targets[i+1:]...)
+				delete(d.HistoryIncarnations, id)
 				return r.save(ctx, d)
 			}
 		}
@@ -694,6 +712,9 @@ func (r *Registry) UpdateContext(ctx context.Context, old, next Record, reviewed
 					return e
 				}
 				d.Targets[i] = next
+				if next.HTTPSAddress == "" {
+					delete(d.HistoryIncarnations, v.ID)
+				}
 				return r.save(ctx, d)
 			}
 		}
