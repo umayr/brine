@@ -23,7 +23,10 @@ func fixture(t *testing.T, maxBytes int64, maxOps int) (Options, func()) {
 	t.Helper()
 	home := os.Getenv("HOME")
 	if !fixtureHome.MatchString(home) {
-		t.Fatal("archive tests require the CI-generated private HOME directly under /")
+		if os.Getenv("GITHUB_ACTIONS") != "" || os.Getenv("CI") != "" {
+			t.Fatal("archive tests require the CI-generated private HOME directly under /")
+		}
+		t.Skip("private Linux archive fixture unavailable; use bash scripts/ci-test-go.sh on a disposable Linux runner")
 	}
 	dir, err := openPrivateDirectory(home)
 	if err != nil {

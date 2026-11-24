@@ -129,5 +129,8 @@ The existing Ubuntu PR `Build and test` job runs `scripts/ci-test-go.sh`, which
 provisions and validates the synthetic `/brine-go-test-home.XXXXXXXX` before
 `go test -race ./...`. Archive tests require that generated HOME and recheck its
 private ancestry before creating their own randomized directory beneath it.
-They fail (do not skip or fall back) without it. Use the existing disposable CI
-runner or cross-compile only; never use an operator HOME or relax path checks.
+In CI (`GITHUB_ACTIONS` or `CI` set), an absent fixture is a hard failure. Plain
+local Linux test commands skip only these privileged fixtures when the generated
+HOME is absent. A matching but unsafe HOME is always a failure. To exercise the
+fixtures, run `bash scripts/ci-test-go.sh` on a disposable Linux runner; never use
+an operator HOME or relax path checks.
