@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/umayr/brine/internal/agentclient"
@@ -26,11 +27,12 @@ func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *
 		http.NotFound(w, r)
 		return
 	}
-	if !h.gitMu.TryLock() {
+	releaseAdmission, admitted := h.gitAdmission.try(p.Stack)
+	if !admitted {
 		http.Error(w, "An automated or manual deployment is in progress", 409)
 		return
 	}
-	defer h.gitMu.Unlock()
+	defer releaseAdmission()
 	stack, err := h.stacks.Get(p.Stack)
 	source := stack.RemoteGitSource()
 	if err != nil || source == "" {
@@ -144,23 +146,40 @@ func (h *Deployment) pollGit(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	var workers sync.WaitGroup
+	slots := make(chan struct{}, 4)
+	defer workers.Wait()
 	for _, s := range stacks {
 		if ctx.Err() != nil {
 			return
 		}
 		if s.RemoteGit != nil && (s.RemoteGit.Request != "" || (s.RemoteGit.Enabled && s.RemoteGit.Phase != "blocked")) {
-			h.pollGitStack(ctx, s.Name)
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			workers.Add(1)
+			go func(name string) {
+				defer workers.Done()
+				defer func() { <-slots }()
+				h.pollGitStack(ctx, name)
+			}(s.Name)
 		}
 	}
 }
 
 func (h *Deployment) pollGitStack(ctx context.Context, name string) {
-	if !h.gitMu.TryLock() {
+	if ctx.Err() != nil {
 		return
 	}
-	defer h.gitMu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
+	releaseAdmission, admitted := h.gitAdmission.acquire(ctx, name)
+	if !admitted {
+		return
+	}
+	defer releaseAdmission()
 	s, err := h.stacks.Get(name)
 	if err != nil || s == nil || s.RemoteGit == nil {
 		return
