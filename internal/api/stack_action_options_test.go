@@ -45,7 +45,7 @@ func TestStackActionsRejectInvalidOptionsWithoutMutation(t *testing.T) {
 				{"oversized trailing whitespace", "{}" + strings.Repeat(" ", maxStackActionOptionsBytes)},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					w := httptest.NewRecorder()
+					w := &deadlineRecorder{httptest.NewRecorder()}
 					router.ServeHTTP(w, httptest.NewRequest(action.method, action.path, strings.NewReader(tc.body)))
 					if w.Code != http.StatusBadRequest || strings.TrimSpace(w.Body.String()) != want {
 						t.Errorf("response = %d %q, want 400 %s", w.Code, w.Body.String(), want)
@@ -76,13 +76,13 @@ func TestStackActionsAcceptOptionalOptions(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			router, st, sourceChecks := newStackActionTestRouter(t)
-			w := httptest.NewRecorder()
+			w := &deadlineRecorder{httptest.NewRecorder()}
 			router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/stacks/demo/teardown", tc.body("force")))
 			if w.Code != http.StatusOK || *sourceChecks != 1 {
 				t.Errorf("teardown did not reach the synthetic source guard: status %d, source checks %d", w.Code, *sourceChecks)
 			}
 
-			w = httptest.NewRecorder()
+			w = &deadlineRecorder{httptest.NewRecorder()}
 			router.ServeHTTP(w, httptest.NewRequest(http.MethodDelete, "/api/stacks/demo", tc.body("remove_containers")))
 			if w.Code != http.StatusNoContent {
 				t.Errorf("delete status = %d, want 204", w.Code)

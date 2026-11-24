@@ -65,7 +65,7 @@ func TestStrictManualDeployRejectsOldBinaryWithImport(t *testing.T) {
 	route := chi.NewRouteContext()
 	route.URLParams.Add("name", "demo")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
-	w := httptest.NewRecorder()
+	w := &deadlineRecorder{httptest.NewRecorder()}
 	h.up(w, req)
 	if !strings.Contains(w.Body.String(), "strict secret functionality is disabled") {
 		t.Fatalf("missing disabled error: %s", w.Body.String())

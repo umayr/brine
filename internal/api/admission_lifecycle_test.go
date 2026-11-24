@@ -21,7 +21,7 @@ func TestAdmissionHonorsEarlierRequestDeadline(t *testing.T) {
 	defer cancel()
 	done := make(chan bool, 1)
 	go func() {
-		release, ok := h.admitStack(httptest.NewRecorder(), httptest.NewRequest("POST", "/", nil).WithContext(ctx), "demo")
+		release, ok := h.admitStack(&deadlineRecorder{httptest.NewRecorder()}, httptest.NewRequest("POST", "/", nil).WithContext(ctx), "demo")
 		if ok {
 			release()
 		}
@@ -52,7 +52,7 @@ func TestAdmittedLifecycleSurvivesRequestCancellation(t *testing.T) {
 	route.URLParams.Add("name", "demo")
 	r := httptest.NewRequest("POST", "/", nil).WithContext(context.WithValue(ctx, chi.RouteCtxKey, route))
 	called := false
-	h.lifecycle(httptest.NewRecorder(), r, "up", false, func(exec context.Context, _ string, _ io.Writer) error {
+	h.lifecycle(&deadlineRecorder{httptest.NewRecorder()}, r, "up", false, func(exec context.Context, _ string, _ io.Writer) error {
 		called = true
 		cancel()
 		if exec.Err() != nil {

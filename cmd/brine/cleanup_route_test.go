@@ -120,7 +120,7 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 				st.reads = 0
 				w := httptest.NewRecorder()
 				started := time.Now()
-				router.ServeHTTP(w, request(http.MethodPost, "/api/stacks/demo/"+action, nil))
+				router.ServeHTTP(&deadlineRecorder{w}, request(http.MethodPost, "/api/stacks/demo/"+action, nil))
 				if w.Code != 200 || !strings.Contains(w.Body.String(), "[brine:done] "+action+" complete") {
 					commands, _ := os.ReadFile(log)
 					t.Fatalf("%s route after %s: %d %s; completed fake commands: %q", action, time.Since(started), w.Code, w.Body.String(), commands)
@@ -152,7 +152,7 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 					method = http.MethodGet
 				}
 				w := httptest.NewRecorder()
-				router.ServeHTTP(w, request(method, "/api/stacks/demo/"+action, nil))
+				router.ServeHTTP(&deadlineRecorder{w}, request(method, "/api/stacks/demo/"+action, nil))
 				expected := http.StatusInternalServerError
 				if kind == "engine-mismatch" {
 					expected = http.StatusConflict
@@ -163,7 +163,7 @@ func TestCleanupRoutesWithUnavailableOrMismatchedRecipe(t *testing.T) {
 			}
 			before, _ := os.ReadFile(log)
 			w := httptest.NewRecorder()
-			router.ServeHTTP(w, request(http.MethodPost, "/api/stacks/demo/teardown", bytes.NewBufferString(`{}`)))
+			router.ServeHTTP(&deadlineRecorder{w}, request(http.MethodPost, "/api/stacks/demo/teardown", bytes.NewBufferString(`{}`)))
 			if kind == "engine-mismatch" {
 				if w.Code != http.StatusConflict {
 					t.Fatalf("teardown engine gate: %d %s", w.Code, w.Body.String())
