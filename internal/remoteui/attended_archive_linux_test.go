@@ -4,7 +4,10 @@ package remoteui
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,16 +97,85 @@ type linuxAttendedProvider struct {
 	probe *realAttendedArchiveProbe
 	t     *testing.T
 	calls int
+	wire  *agentclient.Client
 }
 
 func (*linuxAttendedProvider) Close() error { return nil }
-func (p *linuxAttendedProvider) ApplyJournalDeployment(ctx context.Context, _, _, _, stack, _, request, _, journal string) (agentclient.DeploymentStatus, error) {
+func (p *linuxAttendedProvider) ApplyJournalDeployment(ctx context.Context, epoch, stage, manifest, stack, selection, request, mode, journal string) (agentclient.DeploymentStatus, error) {
 	p.calls++
 	got, err := p.probe.Store.ReadEvidence(ctx, p.probe.ref)
 	if err != nil || got.State != snapshothistory.DeliveryUnknown || request != string(p.probe.ref.Intent.ProviderRequestID) || journal != string(p.probe.ref.Intent.OriginalJournal) {
 		p.t.Fatalf("provider called without matching durable uncertainty marker: %v", err)
 	}
+	if p.wire != nil {
+		return p.wire.ApplyJournalDeployment(ctx, epoch, stage, manifest, stack, selection, request, mode, journal)
+	}
 	return agentclient.DeploymentStatus{RequestID: request, Stack: stack, State: "succeeded", Effects: "complete", OperationID: "op_" + strings.Repeat("e", 32)}, nil
+}
+
+// lostReplyClient uses the real checked client against generated loopback TLS.
+// It counts the accepted request envelope, then terminates its connection
+// without response headers or body. No engine or provider state is involved.
+func lostReplyClient(t *testing.T, ctx context.Context, request, manifest string) (*agentclient.Client, string, *atomic.Int32) {
+	t.Helper()
+	priv := ed25519.NewKeyFromSeed([]byte(strings.Repeat("s", 32)))
+	pub := priv.Public().(ed25519.PublicKey)
+	const engine, socket, daemon = "11111111-1111-4111-8111-111111111111", "unix:///run/docker.sock", "synthetic"
+	token := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("t", 32)))
+	calls := new(atomic.Int32)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+token {
+			t.Error("unexpected method or credential in loopback fixture")
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/session":
+			var q struct{ Nonce string }
+			if json.NewDecoder(r.Body).Decode(&q) != nil {
+				t.Error("invalid generated challenge")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			p := agentclient.Proof{AgentID: fmt.Sprintf("%x", sha256.Sum256(pub)), AgentPublicKey: base64.RawURLEncoding.EncodeToString(pub), EngineID: engine, Generation: 1, EngineKind: "docker", EngineSocket: socket, DaemonID: daemon, Epoch: strings.Repeat("A", 43), Nonce: q.Nonce}
+			message, err := agentclient.SessionBytes(p)
+			if err != nil {
+				t.Error("invalid generated proof")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			p.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, message))
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"version": "brine.agent.read/1", "requestId": r.Header.Get("X-Request-Id"), "data": p})
+		case "/v1/deploy/journal-apply":
+			var body map[string]string
+			journal := r.Header.Values("X-Dill-Journal-Id")
+			if json.NewDecoder(r.Body).Decode(&body) != nil || len(journal) != 1 || journal[0] != attendedJournal ||
+				body["requestId"] != request || body["manifestSha256"] != manifest || body["stageId"] != attendedStage ||
+				body["stack"] != "synthetic" || body["selectionDigest"] != attendedSelection || body["confirm"] != "create" {
+				t.Error("wrong request envelope in lost-reply fixture")
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			calls.Add(1)
+			panic(http.ErrAbortHandler)
+		default:
+			t.Error("unexpected path in loopback fixture")
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+	c, err := agentclient.NewHTTPS(ctx, strings.TrimPrefix(server.URL, "https://"), fmt.Sprintf("%x", sha256.Sum256(server.Certificate().Raw)), token,
+		agentclient.Binding{AgentPublicKey: pub, EngineID: engine, Generation: 1, EngineKind: "docker", EngineSocket: socket, DaemonID: daemon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	epoch, err := c.Session(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, epoch, calls
 }
 
 func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
@@ -172,14 +245,16 @@ func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
 	}
 	markerBytes := usage(probeOpts.ArchiveDir)
 	for _, tc := range []struct {
-		name    string
-		cap     int64
-		want    snapshothistory.DeliveryState
-		calls   int
-		message string
+		name     string
+		cap      int64
+		want     snapshothistory.DeliveryState
+		calls    int
+		receipts int
+		message  string
 	}{
-		{"marker-capacity", intentBytes, snapshothistory.LocalIntentOnly, 0, "No operation was sent"},
-		{"receipt-capacity", markerBytes, snapshothistory.DeliveryUnknown, 1, "Live observation only"},
+		{"marker-capacity", intentBytes, snapshothistory.LocalIntentOnly, 0, 0, "No operation was sent"},
+		{"receipt-capacity", markerBytes, snapshothistory.DeliveryUnknown, 1, 1, "Live observation only"},
+		{"lost-provider-reply", 1 << 20, snapshothistory.DeliveryUnknown, 1, 0, "Operation not confirmed. No retry was sent"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			opts := newOptions(tc.name)
@@ -194,17 +269,25 @@ func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
 			defer s.Close()
 			probe := &realAttendedArchiveProbe{Store: s}
 			provider := &linuxAttendedProvider{t: t, probe: probe}
+			epoch := "synthetic"
+			var wireCalls *atomic.Int32
+			if tc.name == "lost-provider-reply" {
+				provider.wire, epoch, wireCalls = lostReplyClient(t, ctx, request, manifest)
+			}
 			history := &attendedHistory{archive: probe, open: func(context.Context, targetregistry.Record) (attendedConnection, error) {
-				return attendedConnection{client: provider, binding: binding, epoch: "synthetic"}, nil
+				return attendedConnection{client: provider, binding: binding, epoch: epoch}, nil
 			}}
 			h := &Deployment{history: history}
 			r := deploymentReview{Stack: "synthetic", Mode: "create", StageID: attendedStage, Manifest: manifest, Selection: attendedSelection, TargetDigest: binding.target, Expiry: time.Now().Add(time.Minute), Attended: &attendedReview{snapshot: snapshot, binding: binding, manifest: digest, journal: attendedJournal, requestID: request}}
 			w := httptest.NewRecorder()
 			h.submitAttended(ctx, w, deploymentPage{ID: attempt, Host: "synthetic"}, r, record)
-			if probe.commitCalls != 1 || probe.markerCalls != 1 || provider.calls != tc.calls || probe.receiptCalls != tc.calls || !strings.Contains(w.Body.String(), tc.message) || strings.Contains(w.Body.String(), "Verified terminal receipt saved") {
+			if probe.commitCalls != 1 || probe.markerCalls != 1 || provider.calls != tc.calls || probe.receiptCalls != tc.receipts || !strings.Contains(w.Body.String(), tc.message) || strings.Contains(w.Body.String(), "Verified terminal receipt saved") {
 				t.Fatalf("wrong gate: %d/%d/%d/%d HTTP %d", probe.commitCalls, probe.markerCalls, provider.calls, probe.receiptCalls, w.Code)
 			}
-			if tc.calls == 0 && !errors.Is(probe.markerErr, snapshothistory.ErrCapacity) || tc.calls == 1 && (!errors.Is(probe.receiptErr, snapshothistory.ErrCapacity) || !strings.Contains(w.Body.String(), "State succeeded")) {
+			if wireCalls != nil && wireCalls.Load() != 1 {
+				t.Fatalf("provider did not receive exactly one apply before losing its reply: %d", wireCalls.Load())
+			}
+			if tc.calls == 0 && !errors.Is(probe.markerErr, snapshothistory.ErrCapacity) || tc.receipts == 1 && (!errors.Is(probe.receiptErr, snapshothistory.ErrCapacity) || !strings.Contains(w.Body.String(), "State succeeded")) {
 				t.Fatal("expected exact real-store capacity boundary")
 			}
 			if err := s.Close(); err != nil {
@@ -248,7 +331,7 @@ func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
 			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			replay := httptest.NewRecorder()
 			fresh.Protected().ServeHTTP(replay, post)
-			if replay.Code != http.StatusConflict || !strings.Contains(replay.Body.String(), "Missing, expired, or already used confirmation") || provider.calls != tc.calls {
+			if replay.Code != http.StatusConflict || !strings.Contains(replay.Body.String(), "Missing, expired, or already used confirmation") || provider.calls != tc.calls || (wireCalls != nil && wireCalls.Load() != 1) {
 				t.Fatalf("reopen replay was not refused by handler: HTTP %d", replay.Code)
 			}
 		})
