@@ -171,6 +171,7 @@ func (r *Runner) command(ctx context.Context, args ...string) (*exec.Cmd, func()
 	home = absoluteHome
 	cleanup := func() { _ = os.RemoveAll(home) }
 	cmd := exec.CommandContext(ctx, r.executable(), args...)
+	configureProcessCancellation(cmd)
 	cmd.WaitDelay = time.Second
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C", "LC_ALL=C", "HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config"), "XDG_CACHE_HOME=" + filepath.Join(home, "cache")}
 	if r.PklBinary != "" {
