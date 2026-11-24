@@ -118,11 +118,42 @@ func (p *linuxAttendedProvider) ApplyJournalDeployment(ctx context.Context, epoc
 // without response headers or body. No engine or provider state is involved.
 func lostReplyClient(t *testing.T, ctx context.Context, request, manifest string) (*agentclient.Client, string, *atomic.Int32) {
 	t.Helper()
+	calls := new(atomic.Int32)
+	row := attendedWireTarget(t, func(w http.ResponseWriter, r *http.Request) {
+		if !validAttendedWireApply(r, request, manifest) {
+			t.Error("wrong request envelope in lost-reply fixture")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		calls.Add(1)
+		panic(http.ErrAbortHandler)
+	})
+	p, err := agentclient.ParsePairing([]byte(row.HTTPSPairing))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, epoch, err := p.Open(ctx, ctx, row.HTTPSAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+	return c, epoch, calls
+}
+
+func validAttendedWireApply(r *http.Request, request, manifest string) bool {
+	var body map[string]string
+	journal := r.Header.Values("X-Dill-Journal-Id")
+	return json.NewDecoder(r.Body).Decode(&body) == nil && len(journal) == 1 && journal[0] == attendedJournal &&
+		body["requestId"] == request && body["manifestSha256"] == manifest && body["stageId"] == attendedStage &&
+		body["stack"] == "synthetic" && body["selectionDigest"] == attendedSelection && body["confirm"] == "create"
+}
+
+func attendedWireTarget(t *testing.T, apply http.HandlerFunc) targetregistry.Record {
+	t.Helper()
 	priv := ed25519.NewKeyFromSeed([]byte(strings.Repeat("s", 32)))
 	pub := priv.Public().(ed25519.PublicKey)
 	const engine, socket, daemon = "11111111-1111-4111-8111-111111111111", "unix:///run/docker.sock", "synthetic"
 	token := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("t", 32)))
-	calls := new(atomic.Int32)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+token {
 			t.Error("unexpected method or credential in loopback fixture")
@@ -148,34 +179,16 @@ func lostReplyClient(t *testing.T, ctx context.Context, request, manifest string
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"version": "brine.agent.read/1", "requestId": r.Header.Get("X-Request-Id"), "data": p})
 		case "/v1/deploy/journal-apply":
-			var body map[string]string
-			journal := r.Header.Values("X-Dill-Journal-Id")
-			if json.NewDecoder(r.Body).Decode(&body) != nil || len(journal) != 1 || journal[0] != attendedJournal ||
-				body["requestId"] != request || body["manifestSha256"] != manifest || body["stageId"] != attendedStage ||
-				body["stack"] != "synthetic" || body["selectionDigest"] != attendedSelection || body["confirm"] != "create" {
-				t.Error("wrong request envelope in lost-reply fixture")
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			calls.Add(1)
-			panic(http.ErrAbortHandler)
+			apply(w, r)
 		default:
 			t.Error("unexpected path in loopback fixture")
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	t.Cleanup(server.Close)
-	c, err := agentclient.NewHTTPS(ctx, strings.TrimPrefix(server.URL, "https://"), fmt.Sprintf("%x", sha256.Sum256(server.Certificate().Raw)), token,
-		agentclient.Binding{AgentPublicKey: pub, EngineID: engine, Generation: 1, EngineKind: "docker", EngineSocket: socket, DaemonID: daemon})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-	epoch, err := c.Session(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return c, epoch, calls
+	pin := sha256.Sum256(server.Certificate().Raw)
+	bundle := fmt.Sprintf(`{"version":1,"certificateSha256":%q,"token":%q,"agentPublicKey":"%x","engineId":%q,"generation":1,"engineKind":"docker","engineSocket":%q,"daemonId":%q}`, fmt.Sprintf("%x", pin), token, pub, engine, socket, daemon)
+	return targetregistry.Record{ID: "synthetic", Revision: 1, HTTPSAddress: strings.TrimPrefix(server.URL, "https://"), HTTPSPairing: targetregistry.PairingSecret(bundle)}
 }
 
 func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
