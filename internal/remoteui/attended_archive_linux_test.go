@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/umayr/brine/internal/agentclient"
+	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/dillserve"
 	"github.com/umayr/brine/internal/projectsnapshot"
 	"github.com/umayr/brine/internal/snapshothistory"
@@ -219,14 +221,35 @@ func TestAttendedRealArchiveCapacityAndReopenNeverReplay(t *testing.T) {
 			// A stale confirmation against a fresh handler cannot resume a
 			// retained intent or unknown marker; there is no recovery sender.
 			history.archive = reopened
-			fresh := &Deployment{history: history, pending: make(map[string]deploymentReview)}
-			post := httptest.NewRequest(http.MethodPost, deployPath+"/create", strings.NewReader("id="+attempt+"&confirm=create"))
-			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			if post.FormValue("id") != attempt {
-				t.Fatal("bad replay fixture")
+			authenticator, err := auth.New(auth.Config{User: "admin", Password: "synthetic"})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if _, ok := fresh.take(post.FormValue("id"), "synthetic-session", post.FormValue("confirm")); ok || provider.calls != tc.calls {
-				t.Fatal("reopen replayed confirmation")
+			login := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader("user=admin&password=synthetic"))
+			login.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			loginResult := httptest.NewRecorder()
+			authenticator.HandleLogin(loginResult, login)
+			cookies := loginResult.Result().Cookies()
+			if len(cookies) != 1 {
+				t.Fatalf("fixture login HTTP %d", loginResult.Code)
+			}
+			fresh := &Deployment{auth: authenticator, history: history, pending: make(map[string]deploymentReview)}
+			get := httptest.NewRequest(http.MethodGet, deployPath+"?host=synthetic", nil)
+			get.AddCookie(cookies[0])
+			formPage := httptest.NewRecorder()
+			fresh.Protected().ServeHTTP(formPage, get)
+			csrf := regexp.MustCompile(`name="_csrf" value="([^"]+)"`).FindStringSubmatch(formPage.Body.String())
+			if len(csrf) != 2 {
+				t.Fatal("fresh authenticated handler did not return CSRF token")
+			}
+			form := url.Values{"id": {attempt}, "confirm": {"create"}, "_csrf": {csrf[1]}}
+			post := httptest.NewRequest(http.MethodPost, deployPath+"/create", strings.NewReader(form.Encode()))
+			post.AddCookie(cookies[0])
+			post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			replay := httptest.NewRecorder()
+			fresh.Protected().ServeHTTP(replay, post)
+			if replay.Code != http.StatusConflict || !strings.Contains(replay.Body.String(), "Missing, expired, or already used confirmation") || provider.calls != tc.calls {
+				t.Fatalf("reopen replay was not refused by handler: HTTP %d", replay.Code)
 			}
 		})
 	}
