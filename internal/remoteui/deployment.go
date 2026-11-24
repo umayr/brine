@@ -44,7 +44,7 @@ type Deployment struct {
 	history       *attendedHistory // nil for every production constructor
 	git           *git.Runner
 	gitStore      store.RemoteGitStore
-	gitMu         sync.Mutex
+	gitAdmission  deploymentAdmission
 }
 
 type deploymentReview struct {
@@ -165,11 +165,12 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.Host, p.Stack = review.Host, review.Stack
-		if !h.gitMu.TryLock() {
+		releaseAdmission, admitted := h.gitAdmission.try(p.Stack)
+		if !admitted {
 			http.Error(w, "Remote automation busy; review again", 409)
 			return
 		}
-		defer h.gitMu.Unlock()
+		defer releaseAdmission()
 		stack, stackErr := h.stacks.Get(p.Stack)
 		// A retained attended review cannot become a legacy confirmation
 		// when the history backend is no longer available.
