@@ -15,6 +15,8 @@ type captureBuffer struct {
 	overflow bool
 }
 
+func (b *captureBuffer) String() string { return b.buf.String() }
+
 func (b *captureBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	remaining := b.limit - b.buf.Len()

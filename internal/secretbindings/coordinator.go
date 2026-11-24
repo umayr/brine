@@ -9,12 +9,20 @@ import (
 // process. Callers must share the same instance and hold its lock across the
 // entire workspace, preview, or lifecycle operation. It is not a host lock.
 type Coordinator struct {
-	mu    sync.Mutex
-	locks map[string]chan struct{}
+	// CheckAdmission is configured before use. A durable quarantine reader may
+	// deny admission; errors must never be interpreted as missing state.
+	CheckAdmission func(deployment string) error
+	mu             sync.Mutex
+	locks          map[string]chan struct{}
 }
 
 func (c *Coordinator) Lock(deployment string) func() {
-	unlock, _ := c.LockContext(context.Background(), deployment)
+	unlock, err := c.LockContext(context.Background(), deployment)
+	if err != nil {
+		// Legacy callers cannot return an admission error. Never let them mutate
+		// after a denied admission; production callers must use LockContext.
+		panic(err)
+	}
 	return unlock
 }
 
@@ -38,6 +46,12 @@ func (c *Coordinator) LockContext(ctx context.Context, deployment string) (func(
 		if err := ctx.Err(); err != nil {
 			ch <- struct{}{}
 			return nil, err
+		}
+		if c.CheckAdmission != nil {
+			if err := c.CheckAdmission(deployment); err != nil {
+				ch <- struct{}{}
+				return nil, err
+			}
 		}
 		return func() { ch <- struct{}{} }, nil
 	}

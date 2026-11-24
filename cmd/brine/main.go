@@ -92,12 +92,17 @@ func run() error {
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", cfg.RequestTimeout, "timeout for ordinary HTTP handlers")
 	flag.DurationVar(&cfg.DeployTimeout, "deploy-timeout", cfg.DeployTimeout, "timeout for deploy/teardown/git commands")
 
+	quarantineAction := registerQuarantineFlags(flag.CommandLine, &cfg.DataDir, os.Stdout)
 	ver := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	if *ver {
 		fmt.Println(version)
 		return nil
+	}
+
+	if handled, err := quarantineAction(); handled {
+		return err
 	}
 
 	if *initRemoteRegistry {
@@ -171,6 +176,11 @@ func run() error {
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)
 	runner.CheckSource = stackSourceCheck(st)
+	quarantine, err := secretbindings.NewQuarantine(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("local process quarantine unavailable: %w", err)
+	}
+	runner.ConfigureQuarantine(quarantine)
 	variableStore, err := configvars.New(cfg.DataDir, st)
 	if err != nil {
 		return fmt.Errorf("init configuration variables: %w", err)

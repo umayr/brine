@@ -270,12 +270,21 @@ func (s *SecretRunner) plan(ctx context.Context, id, stack, config string, draft
 	return plan, data, proof, exit, nil
 }
 
+func (s *SecretRunner) lockAdmission(ctx context.Context, id string) (func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return s.Coordinator.LockContext(ctx, id)
+}
+
 // Preview runs a fresh plan for the private draft and retains its proof privately.
 func (s *SecretRunner) Preview(ctx context.Context, id, stack, config string) (*PlanResult, error) {
 	if !s.valid() {
 		return nil, ErrSecretUnavailable
 	}
-	unlock := s.Coordinator.Lock(id)
+	unlock, err := s.lockAdmission(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
 	plan, _, err := s.PreviewLocked(ctx, id, stack, config)
 	return plan, err
@@ -319,7 +328,10 @@ func (s *SecretRunner) ApplyActive(ctx context.Context, id, stack, config string
 	if !s.valid() {
 		return ErrSecretUnavailable
 	}
-	unlock := s.Coordinator.Lock(id)
+	unlock, err := s.lockAdmission(ctx, id)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	return s.applyActive(ctx, id, stack, config)
 }
@@ -353,7 +365,10 @@ func (s *SecretRunner) ConfirmAndApply(ctx context.Context, id, stack, config, t
 	if !s.valid() {
 		return ErrSecretUnavailable
 	}
-	unlock := s.Coordinator.Lock(id)
+	unlock, err := s.lockAdmission(ctx, id)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	return s.ConfirmAndApplyLocked(ctx, id, stack, config, token)
 }
@@ -400,7 +415,10 @@ func (s *SecretRunner) check(ctx context.Context, id, stack, config string, draf
 	if !s.valid() || !filepath.IsAbs(config) {
 		return ErrSecretUnavailable
 	}
-	unlock := s.Coordinator.Lock(id)
+	unlock, err := s.lockAdmission(ctx, id)
+	if err != nil {
+		return err
+	}
 	defer unlock()
 	return s.CheckLocked(ctx, id, stack, config, draft)
 }

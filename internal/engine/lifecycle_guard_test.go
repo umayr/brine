@@ -53,7 +53,7 @@ func TestLifecycleGuardWaitsForDeploymentBeforeClassification(t *testing.T) {
 	lock.Lock()
 	enabled := false
 	e := &guardEngine{info: &ContainerInfo{ID: "immutable-id", Stack: "demo", Labels: map[string]string{"dill.managed": "true", "dill.stack": "demo", "dill.service": "web"}}}
-	g := &LifecycleGuard{Engine: e, LockStack: func(string) func() { lock.Lock(); return lock.Unlock }, SecretEnabled: func(string) (bool, error) { return enabled, nil }}
+	g := &LifecycleGuard{Engine: e, LockStack: func(context.Context, string) (func(), error) { lock.Lock(); return lock.Unlock, nil }, SecretEnabled: func(string) (bool, error) { return enabled, nil }}
 	done := make(chan error, 1)
 	go func() { done <- g.StartContainer(context.Background(), "name") }()
 	select {
