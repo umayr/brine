@@ -15,16 +15,16 @@ import (
 
 func TestRestoreOperatorModeDeniesBeforeAuthorizationOrArchive(t *testing.T) {
 	checks := 0
-	h := &Deployment{registry: &targetregistry.Registry{}, history: &attendedHistory{operator: &operatorDeployAuthority{}, restoreGate: func(context.Context, string, projectreview.Current, snapshothistory.ObjectID) error {
+	h := &Deployment{registry: &targetregistry.Registry{}, history: &attendedHistory{archiveRead: newArchiveReadApprovals(), operator: &operatorDeployAuthority{}, restoreGate: func(context.Context, string, projectreview.Current, snapshothistory.ObjectID) error {
 		checks++
 		return nil
 	}}}
 	ctx := context.Background()
 	locator := snapshothistory.ObjectID{1}
-	if p, err := h.prepareRestoreReviewFromLocator(ctx, "session", "target", "stack", locator); p.ID != "" || !errors.Is(err, errRestoreReview) {
+	if p, err := h.prepareRestoreReviewFromLocator(ctx, archiveReadActor{operator: "synthetic", session: "session"}, "approval", "target", "stack", locator); p.ID != "" || !errors.Is(err, errRestoreReview) {
 		t.Fatal("operator mode reached locator restore")
 	}
-	if p, err := h.prepareRestoreReview(ctx, "session", projectreview.Current{}, attendedBinding{}, snapshothistory.OpenRequest{ObjectID: locator}); p.ID != "" || !errors.Is(err, errRestoreReview) || checks != 0 {
+	if p, err := h.prepareRestoreReviewUsing(ctx, "session", projectreview.Current{}, attendedBinding{}, snapshothistory.OpenRequest{ObjectID: locator}, nil, func(bool) bool { return true }); p.ID != "" || !errors.Is(err, errRestoreReview) || checks != 0 {
 		t.Fatal("operator mode reached bound restore or its gate")
 	}
 }

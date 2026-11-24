@@ -46,8 +46,9 @@ func (r leasedRestoreReader) ReadEvidence(ctx context.Context, ref snapshothisto
 // locator and target/stack selectors may originate in a request. An authenticated
 // caller supplies the session; the target lease and qualified connection derive
 // all current authority. A stale enrollment or changed grant revision cannot open.
-func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, session, host, stack string, locator snapshothistory.ObjectID) (preview projectreview.Preview, retErr error) {
-	if ctx == nil || ctx.Err() != nil || h.history == nil || h.history.restoreGate == nil || h.history.operator != nil || h.registry == nil || session == "" || stack == "" {
+func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, actor archiveReadActor, approval, host, stack string, locator snapshothistory.ObjectID) (preview projectreview.Preview, retErr error) {
+	session := actor.session
+	if ctx == nil || ctx.Err() != nil || h.history == nil || h.history.archiveRead == nil || h.history.restoreGate == nil || h.history.operator != nil || h.registry == nil || session == "" || stack == "" {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	resolver, ok := h.history.archive.(restoreBindingResolver)
@@ -66,7 +67,9 @@ func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, sessio
 	}
 	target := targetDigest(record)
 	current := projectreview.Current{Stack: stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: target, Socket: record.HTTPSAddress, Endpoint: host}}
-	if !h.history.authorizeRestore(ctx, session, current, locator) {
+	selection := newArchiveReadSelection(actor, locator, incarnation, current)
+	permit := func(consume bool) bool { return h.history.archiveRead.use(ctx, approval, selection, consume) }
+	if !permit(false) || !h.history.authorizeRestore(ctx, session, current, locator) {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	c, err := h.history.connection(ctx, record, target)
@@ -82,7 +85,7 @@ func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, sessio
 	}
 	q := snapshothistory.AttendedBindingSelector{Locator: locator, Scope: scope, Target: target, AuthorityRevision: c.binding.revision, Stack: stack}
 	prior, err := resolver.ResolveAttendedBinding(ctx, q, func(ctx context.Context, requested snapshothistory.AttendedBindingSelector) error {
-		if requested != q || !h.history.authorizeRestore(ctx, session, current, locator) {
+		if requested != q || !permit(false) || !h.history.authorizeRestore(ctx, session, current, locator) {
 			return errRestoreReview
 		}
 		return nil
@@ -90,7 +93,7 @@ func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, sessio
 	if err != nil {
 		return projectreview.Preview{}, errRestoreReview
 	}
-	return h.prepareRestoreReviewUsing(ctx, session, current, c.binding, prior, leasedRestoreReader{resolver})
+	return h.prepareRestoreReviewUsing(ctx, session, current, c.binding, prior, leasedRestoreReader{resolver}, permit)
 }
 
 // finishRestoreLease never returns a usable review if releasing the exact
@@ -105,32 +108,24 @@ func finishRestoreLease(reviews *projectreview.Store, session string, preview pr
 	return preview, original
 }
 
-// prepareRestoreReview is not a route. A future caller must supply an authenticated
-// interactive session and own the exact active target read lease. The qualified
-// gate must authorize the actor to open this exact historical object, and attest
-// that no conflicting current operation blocks a new review. Neither a successful
-// historical receipt nor the deployment grant is that local authorization.
-func (h *Deployment) prepareRestoreReview(ctx context.Context, session string, current projectreview.Current, binding attendedBinding, prior snapshothistory.OpenRequest) (projectreview.Preview, error) {
-	if h.history == nil || h.history.operator != nil {
-		return projectreview.Preview{}, errRestoreReview
-	}
-	reader, _ := h.history.archive.(restoreReader)
-	return h.prepareRestoreReviewUsing(ctx, session, current, binding, prior, reader)
-}
-
-func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session string, current projectreview.Current, binding attendedBinding, prior snapshothistory.OpenRequest, reader restoreReader) (projectreview.Preview, error) {
-	if ctx == nil || ctx.Err() != nil || h.history == nil || h.reviews == nil || session == "" || current.Target.Kind != projectreview.HTTPS || !binding.distinct || binding.grants&attendedGrants != attendedGrants {
+// prepareRestoreReviewUsing is private to the lease-bound locator flow. Read
+// approval and the independent unresolved-operation gate must both pass.
+func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session string, current projectreview.Current, binding attendedBinding, prior snapshothistory.OpenRequest, reader restoreReader, permit func(consume bool) bool) (projectreview.Preview, error) {
+	if ctx == nil || ctx.Err() != nil || h.history == nil || h.reviews == nil || h.history.operator != nil || session == "" || current.Target.Kind != projectreview.HTTPS || !binding.distinct || binding.grants&attendedGrants != attendedGrants {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	a := prior.Intent.Attended
 	if reader == nil || a == nil || prior.ObjectID == (snapshothistory.ObjectID{}) || a.Stack != current.Stack || a.Target != current.Target.Identity || a.Target != binding.target || a.AuthorityRevision != binding.revision || string(prior.Intent.ApprovedTargetScope) != binding.scope || !attendedHex(string(prior.Intent.AttemptID), 16) || !attendedHex(string(prior.Intent.ProviderRequestID), 16) || !attendedHex(string(prior.Intent.OriginalJournal), 16) || !attendedHex(a.AuthorityRevision, 32) {
 		return projectreview.Preview{}, errRestoreReview
 	}
-	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
+	if permit == nil || !permit(false) || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	evidence, err := reader.ReadEvidence(ctx, prior)
 	if err != nil || evidence.State != snapshothistory.VerifiedReceipt || evidence.Receipt == nil || evidence.Receipt.State != "succeeded" || evidence.Receipt.Effects != "complete" || evidence.Receipt.ContractVersion != binding.contractVersion {
+		return projectreview.Preview{}, errRestoreReview
+	}
+	if !permit(false) || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	saved, err := reader.Open(ctx, prior)
@@ -145,7 +140,15 @@ func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session stri
 	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
 		return projectreview.Preview{}, errRestoreReview
 	}
-	return h.reviews.Create(ctx, session, projectreview.Intent{Snapshot: saved.Snapshot, Current: current, PriorDeployment: p})
+	preview, err := h.reviews.Create(ctx, session, projectreview.Intent{Snapshot: saved.Snapshot, Current: current, PriorDeployment: p})
+	if err != nil {
+		return projectreview.Preview{}, err
+	}
+	if !permit(true) {
+		h.reviews.Discard(session, preview.ID)
+		return projectreview.Preview{}, errRestoreReview
+	}
+	return preview, nil
 }
 
 func restoreBindingMatches(prior *projectreview.PriorDeployment, binding attendedBinding, journal string) bool {
