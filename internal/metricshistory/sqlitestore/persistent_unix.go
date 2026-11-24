@@ -36,8 +36,9 @@ func OpenPersistent(dir string, create bool) (*PersistentStore, error) {
 }
 
 type persistentFormat struct {
-	init     []string
-	validate func(*sql.DB) error
+	init          []string
+	validate      func(*sql.DB) error
+	checkExisting func(string, os.FileInfo) error
 }
 
 // The fixed name, ownership and no-adoption checks are shared across formats.
@@ -81,6 +82,11 @@ func openPersistent(dir string, create bool, format persistentFormat) (_ *Persis
 			return nil, errors.New("unsafe database")
 		}
 		original = info
+		if format.checkExisting != nil {
+			if e := format.checkExisting(path, info); e != nil {
+				return nil, e
+			}
+		}
 		ro, e := sql.Open("sqlite", sqliteURL(path, true))
 		if e != nil {
 			return nil, e
