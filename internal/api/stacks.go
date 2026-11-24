@@ -117,7 +117,11 @@ func (h *stackHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name and pkl_content are required")
 		return
 	}
-	defer h.lockStack(req.Name)()
+	unlock, admitted := h.admitStack(w, r, req.Name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Create(req.Name, pkl.WithStackName(req.PklContent, req.Name))
 	if err != nil {
 		status := http.StatusBadRequest

@@ -36,7 +36,11 @@ func (h *Handler) projectPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	stack, err := h.store.Get(name)
