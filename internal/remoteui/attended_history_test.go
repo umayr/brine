@@ -187,6 +187,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		{"restore authorization denied", "update", "restore denied", "", 0, 0, 0},
 		{"restore rotation fenced", "update", "restore rotation", "", 0, 0, 0},
 		{"restore journal changed", "update", "restore journal", "Cannot retain an exact attended review", 0, 0, 0},
+		{"restore gate lost during stage", "update", "restore gate lost", "Archived configuration is not authorized", 0, 0, 0},
+		{"restore backend gone at confirm", "update", "restore backend gone", "Attended authority unavailable", 0, 0, 0},
 		{"restore revoked after preview", "update", "restore revoked", "Archived configuration is not authorized", 0, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -259,6 +261,9 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			binding := attendedBinding{target: targetDigest(row), scope: "synthetic-local-target-scope", contractVersion: "dill/0.9.0", revision: strings.Repeat("d", 64), grants: attendedGrants, distinct: tc.problem != "no proof"}
 			h.history = &attendedHistory{archive: &archive, open: func(context.Context, targetregistry.Record) (attendedConnection, error) {
+				if tc.problem == "restore gate lost" {
+					h.history.restoreGate = nil
+				}
 				return attendedConnection{client: provider, epoch: "fixture-epoch", binding: binding}, nil
 			}}
 			if tc.problem == "no journal" {
@@ -350,9 +355,9 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			form.Set("confirm", "transfer")
 			stage := invoke("POST", deployPath+"/stage", form)
-			if tc.problem == "no proof" || tc.problem == "no journal" || tc.problem == "restore journal" {
+			if tc.problem == "no proof" || tc.problem == "no journal" || tc.problem == "restore journal" || tc.problem == "restore gate lost" {
 				wantStages := 1
-				if tc.problem == "no proof" {
+				if tc.problem == "no proof" || tc.problem == "restore gate lost" {
 					wantStages = 0
 				}
 				if !strings.Contains(stage.Body.String(), tc.expect) || archive.commits != 0 || provider.applies != 0 || provider.stages != wantStages || strings.Contains(stage.Body.String(), `action="/remote/deployment/create"`) {
@@ -383,6 +388,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 				h.history = nil
 			case "restore revoked":
 				gateDenied = true
+			case "restore backend gone":
+				h.history = nil
 			default:
 				stacks.block = tc.problem
 			}

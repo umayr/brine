@@ -17,13 +17,23 @@ type restoreReader interface {
 	ReadEvidence(context.Context, snapshothistory.OpenRequest) (snapshothistory.Evidence, error)
 }
 
+// authorizeRestore checks backend availability at the point of use. A retained
+// review is not authority, even if it was issued by a previously available gate.
+func (h *attendedHistory) authorizeRestore(ctx context.Context, session string, current projectreview.Current, id snapshothistory.ObjectID) bool {
+	if h == nil || ctx == nil || ctx.Err() != nil {
+		return false
+	}
+	gate := h.restoreGate
+	return gate != nil && gate(ctx, session, current, id) == nil && ctx.Err() == nil
+}
+
 // prepareRestoreReview is not a route. A future caller must supply an authenticated
 // interactive session and own the exact active target read lease. The qualified
 // gate must authorize the actor to open this exact historical object, and attest
 // that no conflicting current operation blocks a new review. Neither a successful
 // historical receipt nor the deployment grant is that local authorization.
 func (h *Deployment) prepareRestoreReview(ctx context.Context, session string, current projectreview.Current, binding attendedBinding, prior snapshothistory.OpenRequest) (projectreview.Preview, error) {
-	if ctx == nil || ctx.Err() != nil || h.history == nil || h.history.restoreGate == nil || h.reviews == nil || session == "" || current.Target.Kind != projectreview.HTTPS || !binding.distinct || binding.grants&attendedGrants != attendedGrants {
+	if ctx == nil || ctx.Err() != nil || h.history == nil || h.reviews == nil || session == "" || current.Target.Kind != projectreview.HTTPS || !binding.distinct || binding.grants&attendedGrants != attendedGrants {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	reader, ok := h.history.archive.(restoreReader)
@@ -31,7 +41,7 @@ func (h *Deployment) prepareRestoreReview(ctx context.Context, session string, c
 	if !ok || a == nil || prior.ObjectID == (snapshothistory.ObjectID{}) || a.Stack != current.Stack || a.Target != current.Target.Identity || a.Target != binding.target || a.AuthorityRevision != binding.revision || string(prior.Intent.ApprovedTargetScope) != binding.scope || !attendedHex(string(prior.Intent.AttemptID), 16) || !attendedHex(string(prior.Intent.ProviderRequestID), 16) || !attendedHex(string(prior.Intent.OriginalJournal), 16) || !attendedHex(a.AuthorityRevision, 32) {
 		return projectreview.Preview{}, errRestoreReview
 	}
-	if h.history.restoreGate(ctx, session, current, prior.ObjectID) != nil || ctx.Err() != nil {
+	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	evidence, err := reader.ReadEvidence(ctx, prior)

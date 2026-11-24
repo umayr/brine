@@ -150,8 +150,8 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 	}
 	if a.prior != nil {
 		current := projectreview.Current{Stack: r.Stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: r.TargetDigest, Socket: record.HTTPSAddress, Endpoint: r.Host}}
-		if h.history.restoreGate == nil || !restoreBindingMatches(a.prior, c.binding, a.journal) || !freshRestoreIDs(a.prior, p.ID, a.requestID) ||
-			h.history.restoreGate(ctx, r.Session, current, a.prior.ObjectID) != nil {
+		if !restoreBindingMatches(a.prior, c.binding, a.journal) || !freshRestoreIDs(a.prior, p.ID, a.requestID) ||
+			!h.history.authorizeRestore(ctx, r.Session, current, a.prior.ObjectID) {
 			http.Error(w, "Archived configuration is not authorized for a new deployment; no operation sent", http.StatusConflict)
 			return
 		}
