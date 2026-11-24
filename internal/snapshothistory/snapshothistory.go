@@ -70,6 +70,7 @@ type AttendedIntent struct {
 	Mode              string `json:"mode"`
 	Stage             string `json:"stage"`
 	Selection         string `json:"selection"`
+	PriorObject       string `json:"priorObject,omitempty"`
 }
 
 // CommitRequest contains the exact reviewed snapshot and its independent

@@ -12,6 +12,7 @@ import (
 
 	"github.com/umayr/brine/internal/agentclient"
 	"github.com/umayr/brine/internal/dillserve"
+	"github.com/umayr/brine/internal/projectreview"
 	"github.com/umayr/brine/internal/projectsnapshot"
 	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/targetregistry"
@@ -33,8 +34,10 @@ const (
 // Open must verify a current, distinct deploy grant bound to the signed monitor
 // identity, endpoint, target and credential revision (not probe with a write).
 type attendedHistory struct {
-	archive attendedArchive
-	open    func(context.Context, targetregistry.Record) (attendedConnection, error)
+	archive     attendedArchive
+	operator    *operatorDeployAuthority
+	open        func(context.Context, targetregistry.Record) (attendedConnection, error)
+	restoreGate func(context.Context, string, projectreview.Current, snapshothistory.ObjectID) error
 }
 
 type attendedArchive interface {
@@ -78,13 +81,23 @@ type attendedReview struct {
 	journal   string
 	requestID string
 	timer     *time.Timer
+	prior     *projectreview.PriorDeployment
 }
 
-func (h *attendedHistory) connection(ctx context.Context, record targetregistry.Record, expected string) (attendedConnection, error) {
-	if h == nil || h.open == nil || h.archive == nil || ctx.Err() != nil {
+func (h *attendedHistory) connection(ctx context.Context, record targetregistry.Record, expected string, enrollment ...targetregistry.HistoryIncarnation) (attendedConnection, error) {
+	if h == nil || (h.open == nil && h.operator == nil) || h.archive == nil || ctx.Err() != nil {
 		return attendedConnection{}, errors.New("attended history unavailable")
 	}
-	c, err := h.open(ctx, record)
+	var c attendedConnection
+	var err error
+	if h.operator != nil {
+		if len(enrollment) != 1 {
+			return attendedConnection{}, errOperatorAuthority
+		}
+		c, err = h.operator.connect(ctx, record, enrollment[0])
+	} else {
+		c, err = h.open(ctx, record)
+	}
 	b := c.binding
 	if err != nil || c.client == nil || c.epoch == "" || ctx.Err() != nil || !b.distinct || b.grants&attendedGrants != attendedGrants ||
 		b.target != expected || !attendedHex(b.target, 32) || !attendedHex(b.revision, 32) || len(b.scope) == 0 || len(b.scope) > 512 || b.contractVersion == "" || len(b.contractVersion) > 64 {
@@ -128,14 +141,14 @@ func newAttendedReview(s projectsnapshot.Snapshot, binding attendedBinding, stag
 	return &a
 }
 
-func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, p deploymentPage, r deploymentReview, record targetregistry.Record) {
+func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, p deploymentPage, r deploymentReview, record targetregistry.Record, enrollment ...targetregistry.HistoryIncarnation) {
 	p.Attended = true
 	a := r.Attended
 	if a == nil || a.requestID == p.ID || !time.Now().Before(r.Expiry) {
 		http.Error(w, "Attended history review unavailable; no operation sent", http.StatusConflict)
 		return
 	}
-	c, err := h.history.connection(ctx, record, r.TargetDigest)
+	c, err := h.history.connection(ctx, record, r.TargetDigest, enrollment...)
 	if err != nil {
 		http.Error(w, "Attended authority unavailable; no operation sent", http.StatusConflict)
 		return
@@ -144,6 +157,18 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 	if c.binding != a.binding || !time.Now().Before(r.Expiry) {
 		http.Error(w, "Attended authority changed; no operation sent", http.StatusConflict)
 		return
+	}
+	if a.prior != nil {
+		if h.history.operator != nil {
+			http.Error(w, "Operator-configured authority is for new deployments only", http.StatusConflict)
+			return
+		}
+		current := projectreview.Current{Stack: r.Stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: r.TargetDigest, Socket: record.HTTPSAddress, Endpoint: r.Host}}
+		if !restoreBindingMatches(a.prior, c.binding, a.journal) || !freshRestoreIDs(a.prior, p.ID, a.requestID) ||
+			!h.history.authorizeRestore(ctx, r.Session, current, a.prior.ObjectID) {
+			http.Error(w, "Archived configuration is not authorized for a new deployment; no operation sent", http.StatusConflict)
+			return
+		}
 	}
 	var objectID snapshothistory.ObjectID
 	if _, err := rand.Read(objectID[:]); err != nil {
@@ -154,7 +179,14 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 		AttemptID: []byte(p.ID), ProviderRequestID: []byte(a.requestID), OriginalJournal: []byte(a.journal), ApprovedTargetScope: []byte(a.binding.scope),
 		Attended: &snapshothistory.AttendedIntent{Target: r.TargetDigest, AuthorityRevision: a.binding.revision, Stack: r.Stack, Mode: r.Mode, Stage: r.StageID, Selection: r.Selection},
 	}
-	if ctx.Err() != nil {
+	if a.prior != nil {
+		if objectID == a.prior.ObjectID {
+			http.Error(w, "New deployment identity unavailable; no operation sent", http.StatusServiceUnavailable)
+			return
+		}
+		intent.Attended.PriorObject = hex.EncodeToString(a.prior.ObjectID[:])
+	}
+	if ctx.Err() != nil || !time.Now().Before(r.Expiry) {
 		http.Error(w, "Attended request canceled; no operation sent", http.StatusConflict)
 		return
 	}

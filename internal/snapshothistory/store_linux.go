@@ -514,7 +514,7 @@ func validAttended(a *AttendedIntent) bool {
 	}
 	return canonicalHex(a.Target, 32) && canonicalHex(a.AuthorityRevision, 32) &&
 		len(a.Stack) > 0 && len(a.Stack) <= 128 && (a.Mode == "create" || a.Mode == "update") &&
-		canonicalHex(a.Stage, 16) && strings.HasPrefix(a.Selection, "sha256:") && canonicalHex(strings.TrimPrefix(a.Selection, "sha256:"), 32)
+		(a.PriorObject == "" || canonicalHex(a.PriorObject, 32)) && canonicalHex(a.Stage, 16) && strings.HasPrefix(a.Selection, "sha256:") && canonicalHex(strings.TrimPrefix(a.Selection, "sha256:"), 32)
 }
 
 func canonicalHex(s string, n int) bool {
@@ -549,6 +549,22 @@ func cloneSnapshot(in projectsnapshot.Snapshot) projectsnapshot.Snapshot {
 		out.Files[n] = projectsnapshot.File{Path: f.Path, Content: append([]byte(nil), f.Content...), SHA256: f.SHA256}
 	}
 	return out
+}
+
+func (s *store) resolveAttendedBinding(ctx context.Context, q AttendedBindingSelector) (OpenRequest, error) {
+	if ctx.Err() != nil || s.check() != nil {
+		return OpenRequest{}, ErrUnavailable
+	}
+	record, err := s.loadContext(ctx, q.Locator)
+	if err != nil || ctx.Err() != nil {
+		return OpenRequest{}, ErrUnavailable
+	}
+	a := record.Intent.Attended
+	if a == nil || a.Target != q.Target || a.AuthorityRevision != q.AuthorityRevision || a.Stack != q.Stack ||
+		subtle.ConstantTimeCompare(record.Intent.ApprovedTargetScope, []byte(q.Scope)) != 1 {
+		return OpenRequest{}, ErrUnavailable
+	}
+	return OpenRequest{ObjectID: record.ObjectID, Intent: record.Intent, ManifestDigest: record.ManifestDigest}, nil
 }
 
 func (s *store) open(ctx context.Context, r OpenRequest) (Record, error) {

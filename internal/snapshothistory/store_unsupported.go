@@ -27,4 +27,7 @@ func (*store) appendEvidence(context.Context, OpenRequest, string, time.Time, *T
 func (*store) readEvidence(context.Context, OpenRequest) (Evidence, error) {
 	return Evidence{}, ErrUnavailable
 }
+func (*store) resolveAttendedBinding(context.Context, AttendedBindingSelector) (OpenRequest, error) {
+	return OpenRequest{}, ErrUnavailable
+}
 func (*store) close() error { return nil }
