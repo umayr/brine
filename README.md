@@ -1,11 +1,6 @@
 # Brine
 
-> **Disabled features:** Alpha profiles, qualified operations, operation history options,
-> and strict secret workflows are disabled. Existing Alpha documentation below is
-> historical and does not describe currently available functionality. Brine retains
-> existing secret state and its downgrade/unknown-history safety gates; disabling
-> these features does not make previously or possibly secret-enabled stacks safe for
-> legacy operations. Do not delete state to bypass these protections.
+> Brine rejects retired local Alpha and strict-secret workflows. Never delete protected state or bypass downgrade checks to force a legacy deployment.
 
 See the [roadmap](ROADMAP.md) for Brine's control-plane boundaries, the shared
 Dill contracts, and phased cross-repository implementation tickets. Planned
@@ -27,8 +22,7 @@ it talks to the container engine directly for container and image views.
 - **Pkl editor**: CodeMirror with Pkl syntax highlighting, snippets, validate, and format.
 - **Plan before deploy**: field-level diff of desired vs live state.
 - **Multi-file stacks**: entrypoint selection and additional `.pkl` files.
-- **Git-backed stacks**: clone a repo/folder, pull, push (non-read-only), and optional
-  auto-deploy polling.
+- **Git-backed stacks**: clone a repo/folder, pull, and push from writable workspaces. Local auto-deploy is paused.
 - **Containers**: list, inspect, start/stop/restart, and stream logs over SSE.
 - **Images**: list, pull, and remove.
 - **Recipes**: reusable Pkl snippets available in the editor.
@@ -37,9 +31,6 @@ it talks to the container engine directly for container and image views.
 - **Auth**: single-admin login with sessions, CSRF protection, and a bearer token for API clients.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
-
-[S1 private request/receipt history](docs/alpha-operation-history.md) is historical;
-`--operation-state-dir` is disabled, and native app qualification was **NOT RUN**.
 
 ## Configuration variables
 
@@ -59,12 +50,10 @@ local logLevel = read?("env:BRINE_VAR_LOG_LEVEL") ?? "info"
 ```
 
 Variables are passed only to stack-scoped legacy Dill invocations; they are not
-added to Brine's own environment. Qualified Alpha and strict secret operations
-do not receive them and the variable editor is disabled in those modes. Saving
+added to Brine's own environment. Saving
 or deleting a variable does not redeploy: the next operation uses the current
 values. A change between plan and deploy can change the outcome; re-plan after
-any variable change. Background Git auto-deploy, when enabled for local stacks,
-uses current values. Global variables are visible to every legacy stack; they are
+any variable change. Global variables are visible to every legacy stack; they are
 not an isolation or authorization mechanism. Back up the private Brine data
 directory if these settings must be retained. One Brine process must own a data
 directory; cross-process variable writes are not coordinated.
@@ -73,11 +62,9 @@ directory; cross-process variable writes are not coordinated.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (v0.8.0) on `PATH`, or pass `--dill /path/to/dill`.
+- A `dill` binary (the image bundles v0.8.1) on `PATH`, or pass `--dill /path/to/dill`.
   Older binaries that cannot accept explicit stack/engine/socket flags are
   rejected for lifecycle and validation; Brine does not retry against defaults.
-- Alpha file-secret mode is disabled. Its historical
-  [qualification status](docs/alpha-secrets-status.md) records platform and testing limits.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
 - Docker or Podman with an accessible socket
 - `git` for Git-backed stacks
@@ -208,7 +195,6 @@ local processes and non-browser clients can still control it.
 | `--bind` | | `127.0.0.1` | Literal listen IP; no-auth requires loopback |
 | `--data-dir` | | `~/.brine` | Stack files, recipes, credentials |
 | `--engine` | | `docker` | `docker` or `podman` |
-| `--profile` | | `legacy` | Only `legacy` is supported; `alpha` is rejected. See the historical [target boundary](docs/alpha-target-contract.md). |
 | `--engine-socket` | | auto | Engine host/socket, e.g. `unix:///var/run/docker.sock` |
 | `--dill` | | `dill` | Operator-selected Dill binary for local execution |
 | `--staging-socket` | | unset | Opt-in absolute local dill-serve Unix socket; requires `--staging-identity` and authentication |
@@ -218,9 +204,6 @@ local processes and non-browser clients can still control it.
 | `--remote-forward-dir` | | unset | Existing private forwarding directory, only for SSH and SSH reveal |
 | `--remote-timeout` | | unset | Explicit positive remote connection timeout |
 | `--init-remote-registry` | | `false` | Initialize a new registry and exit; does not start or enable the server |
-| `--coordination-state-dir`, `--coordination-layout`, `--coordination-daemon-id` | | unset | Disabled; explicitly passing any of these flags is rejected, even with an empty value. |
-| `--operation-state-dir` | | unset | Disabled; explicitly passing this flag is rejected, even with an empty value. |
-| `--secret-target`, `--secret-policy`, `--secret-pkl` | | unset | Disabled; explicitly passing any of these flags is rejected, even with an empty value. |
 | `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
 | `--auth-password` | `BRINE_AUTH_PASSWORD` | generated | Admin password |
 | `--api-token` | `BRINE_API_TOKEN` | generated | Bearer token for API clients |
@@ -279,47 +262,9 @@ cancellation cannot recall an already-started POST and its outcome may be unknow
 If transfer outcome is unknown, do not retry: inspect the receiver before
 preparing another review.
 
-## Isolated Alpha operation (historical)
+## Trust boundary
 
-**Not available:** the normal server rejects the Alpha profile and all qualified
-operation, history and strict-secret options. The following describes the former
-contract and safety precautions, not instructions for starting the current server.
-
-The former opt-in [qualified operation consumer](docs/alpha-operation-consumer.md) targets
-exact Dill candidate `b3ecbaa29260f65d56cf55e54ccd8fedcdf496d2`, selected explicitly
-with `--dill`. Set all three coordination flags together only after independent
-native Linux Docker host/state provisioning. Authenticated manual stack
-up/start/restart/stop/down use the negotiated CLI contract without fallback; plan
-and saved-source validation are read-only. Updating the bundled Dill does not
-enable or qualify local Alpha. Teardown, rm, secrets, stdin, direct SDK writes, qualified stack
-deletion and **all Alpha background Git pull/auto-deploy remain disabled**.
-Current-action receipts preserve process failure separately from outcome/effects;
-there is no durable history or auto-acknowledgement. **Actual native app/browser
-canary has NOT RUN; qualification and #67 durable approval remain pending.**
-
-Use a dedicated local Docker target and a new private data directory (`mkdir -m 700`),
-not an existing Portainer/hl engine or state directory. Keep authentication and
-CSRF enabled; bind Brine to loopback. For LAN access, retain loopback upstream and
-use a correctly configured TLS reverse proxy with `--secure-cookies`, restricting
-proxy access to the operator. Engine socket access is effectively host-level control.
-
-Use only synthetic canaries, unique stack/container/volume names and unused ports;
-use disposable isolated data, one operator and one writer/controller. Do not touch
-existing Portainer/hl stacks, Watchtower/Autoheal labels, DNS/Caddy configuration,
-or production credentials. Record an expiry and explicitly clean up only the named
-Alpha resources and its private data after checking their identity. No SSO, RBAC,
-remote enrollment, production binding provider, vault or late-bound secret provider
-is provided.
-
-Brine gives both legacy and strict Dill subprocesses a minimal explicit environment
-(PATH/locale, isolated private HOME/XDG directories, and configured Pkl/policy paths),
-not the inherited service environment or its login/API credentials. This does not
-isolate Git subprocesses, which still inherit the service environment (see below).
-Dill/Pkl run with the server user's filesystem privileges; credentials and stack data
-are not a sandbox boundary. Errors, engine logs, streams and stored outcomes can
-contain deployment values; use synthetic secrets only and protect logs/state. Do not
-put login or API credentials in deployment data. Future mutation/history paths have
-not been security-qualified by this Alpha slice.
+Engine socket access grants host-level control. Keep authentication and CSRF enabled. Dill and Pkl run with the server user's filesystem permissions. Do not put credentials in project files or logs.
 
 ## Data directory
 

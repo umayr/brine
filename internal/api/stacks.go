@@ -249,8 +249,8 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	}
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
-	ctx, request, ok := h.beginOperation(ctx, w, r, stack, action)
-	if !ok {
+	if h.history != nil {
+		writeError(w, http.StatusServiceUnavailable, "Alpha operation history is disabled")
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -259,10 +259,6 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	}
 	w.WriteHeader(http.StatusOK)
 	fw := newFlushWriter(w)
-	defer historyDelivery(request, fw, r)
-	if request != nil {
-		fw.flush()
-	} // Publish stable lookup ID before discovery.
 	writeActionStatus(fw, action, run(ctx, stack.PklPath, fw))
 }
 
