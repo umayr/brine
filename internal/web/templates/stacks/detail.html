@@ -113,7 +113,7 @@
   <div class="ui-panel px-5 py-4 mb-4 text-sm" role="status">
     <div>Configured target: <span class="font-mono">{{.Target.Engine}} · {{.Target.Socket}}</span> ({{.Target.Profile}})</div>
     <div class="text-muted">{{.Target.Status}}.</div>
-    {{if .QualifiedOperations}}<div>Qualified operation client configured, not yet qualified by a received receipt. Manual deploy/start/restart/stop/down use the operator-selected Dill contract without fallback. Plan and saved-source validation are read-only. Teardown, secrets, stdin validation, background pull/auto-deploy and direct container/image writes remain disabled.</div><p>Partial, unknown or interrupted operations require offline <code>dill coordination inspect</code> and independent resource inspection. Exact operation acknowledgement is operator-only; Brine never retries, deletes journals or acknowledges automatically. See <code>docs/alpha-operation-consumer.md</code>.</p>{{else if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending explicit qualified operation configuration. Pinned stack stop/down cleanup remains available.</div>{{end}}
+    {{if .QualifiedOperations}}<div>Qualified operation client configured, not yet qualified by a received receipt. Manual deploy/start/restart/stop/down use the operator-selected Dill contract without fallback. Plan and saved-source validation are read-only. Teardown, secrets, stdin validation, background pull/auto-deploy and direct container/image writes remain disabled.</div><p>Partial, unknown or interrupted operations require offline <code>dill coordination inspect</code> and independent resource inspection. Exact operation acknowledgement is operator-only; Brine never retries, deletes journals or acknowledges automatically.</p>{{else if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending explicit qualified operation configuration. Pinned stack stop/down cleanup remains available.</div>{{end}}
   </div>
 
   <!-- Meta -->
@@ -205,30 +205,6 @@
     </div>
   </section>
 
-  {{if ne .Target.Profile "alpha"}}
-  <section id="secret-bindings" class="ui-panel p-5 space-y-3" data-stack="{{.Stack.Name}}" aria-labelledby="secret-bindings-title">
-    <h2 id="secret-bindings-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="secret-bindings-content">File secret references <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
-    <div id="secret-bindings-content" class="space-y-3">
-    <p class="text-sm text-muted">References only: never enter secret values or host paths. Provision source files and policy externally. Saving a draft does not rotate a running workload.</p>
-    <p id="secret-message" role="status" aria-live="polite" class="text-sm">Checking availability…</p>
-    <div id="secret-editor" hidden>
-      <div class="text-sm">Active references</div><pre id="secret-active" class="text-xs whitespace-pre-wrap"></pre>
-      <div class="text-sm font-semibold">Draft references</div>
-      <div id="secret-rows" class="space-y-2"></div>
-      <div class="flex flex-wrap gap-2">
-        <button type="button" id="secret-add" class="ui-button ui-button-ghost ui-button-sm">Add reference</button>
-        <button type="button" id="secret-save" class="ui-button ui-button-outline ui-button-sm">Save draft</button>
-        <button type="button" id="secret-status" class="ui-button ui-button-ghost ui-button-sm">Check draft availability</button>
-        <button type="button" id="secret-active-status" class="ui-button ui-button-ghost ui-button-sm">Check active availability</button>
-        <button type="button" id="secret-preview" class="ui-button ui-button-primary ui-button-sm">Preview draft</button>
-        <button type="button" id="secret-confirm" class="ui-button ui-button-danger ui-button-sm" disabled>Confirm and apply preview</button>
-      </div>
-      <pre id="secret-plan" class="text-xs whitespace-pre-wrap" aria-label="Secret reference plan"></pre>
-    </div>
-    </div>
-  </section>
-  <script src="/static/secret-bindings.js" defer></script>
-  {{end}}
 
   <!-- Action output terminal -->
   <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" data-operation-history="{{.OperationHistory}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">

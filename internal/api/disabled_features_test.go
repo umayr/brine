@@ -19,7 +19,7 @@ func TestDisabledHandlersAndRoutedAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &stackHandler{}
+
 	r := chi.NewRouter()
 	r.Use(a.Middleware)
 	Mount(r, nil, nil, nil, nil, "docker", httpx.Timeouts{}, time.Second)
@@ -27,11 +27,11 @@ func TestDisabledHandlersAndRoutedAPI(t *testing.T) {
 		name, method, path string
 		fn                 http.HandlerFunc
 	}{
-		{"get", "GET", "/api/stacks/demo/secret-bindings", h.secretBindingsGet},
-		{"put", "PUT", "/api/stacks/demo/secret-bindings", h.secretBindingsPut},
-		{"status", "POST", "/api/stacks/demo/secret-bindings/status", h.secretStatus},
-		{"preview", "POST", "/api/stacks/demo/secret-bindings/preview", h.secretPreview},
-		{"confirm", "POST", "/api/stacks/demo/secret-bindings/confirm", h.secretConfirm},
+		{"get", "GET", "/api/stacks/demo/secret-bindings", retiredSecretBindings},
+		{"put", "PUT", "/api/stacks/demo/secret-bindings", retiredSecretBindings},
+		{"status", "POST", "/api/stacks/demo/secret-bindings/status", retiredSecretBindings},
+		{"preview", "POST", "/api/stacks/demo/secret-bindings/preview", retiredSecretBindings},
+		{"confirm", "POST", "/api/stacks/demo/secret-bindings/confirm", retiredSecretBindings},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, handler := range []http.Handler{r, a.Middleware(tc.fn)} {

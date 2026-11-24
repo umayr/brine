@@ -21,7 +21,7 @@ test('read-only project preview retains stack controls and explains its boundari
   await expect(section.locator('#project-preview-result unsafe')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Variables', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'File secret references' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'File secret references' })).toHaveCount(0);
   await section.getByRole('button', { name: 'Project snapshot preview (read-only)' }).click();
   await expect(page.locator('#project-preview-content')).toBeHidden();
   await expect(page.locator('#stack-variables-content')).toBeVisible();
