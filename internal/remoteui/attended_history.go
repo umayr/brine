@@ -192,6 +192,10 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 	ref, err := h.history.archive.Commit(ctx, snapshothistory.CommitRequest{ObjectID: objectID, Intent: intent, ExpectedManifestDigest: a.manifest, Snapshot: a.snapshot})
+	if errors.Is(err, snapshothistory.ErrUnresolvedOperation) {
+		http.Error(w, "An unresolved local operation blocks this deployment. No operation was sent.", http.StatusConflict)
+		return
+	}
 	if errors.Is(err, snapshothistory.ErrIndeterminate) {
 		http.Error(w, "Local history retention is uncertain; preserve it for inspection. No operation was sent. Do not retry.", http.StatusServiceUnavailable)
 		return

@@ -100,6 +100,23 @@ func (s *store) loadEvidence(id ObjectID, kind string) (evidencePayload, error) 
 	return p, nil
 }
 
+// Only an authenticated terminal receipt with complete or no effects clears
+// this object's local blocker. Partial or missing evidence never does.
+func (s *store) attendedTerminal(id ObjectID, intent Intent) (bool, error) {
+	p, err := s.loadEvidence(id, evidenceReceipt)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil || !validReceipt(p.Receipt, intent) {
+		return false, ErrUnavailable
+	}
+	marker, err := s.loadEvidence(id, evidenceMarker)
+	if err != nil || p.At.Before(marker.At) {
+		return false, ErrUnavailable
+	}
+	return p.Receipt.Effects != "partial", nil
+}
+
 func (s *store) checkEvidence(ctx context.Context, id ObjectID, kind string) error {
 	parent, err := s.loadContext(ctx, id)
 	if err != nil || parent.Intent.Attended == nil {
@@ -155,6 +172,11 @@ func (s *store) appendEvidence(ctx context.Context, request OpenRequest, kind st
 	if kind == evidenceReceipt && (current.State != DeliveryUnknown || at.Before(current.UnknownSince) || !validReceipt(receipt, request.Intent)) {
 		return ErrUnavailable
 	}
+	key := operationKey(request.Intent.ApprovedTargetScope, request.Intent.Attended.Stack)
+	if s.attended == nil || !s.attended.contains(request.ObjectID, key) {
+		s.failed = true
+		return ErrUnavailable
+	}
 	plain, err := json.Marshal(evidencePayload{Version: evidenceVersion, At: at, Receipt: receipt})
 	if err != nil {
 		return ErrUnavailable
@@ -180,6 +202,9 @@ func (s *store) appendEvidence(ctx context.Context, request OpenRequest, kind st
 			s.failed = true
 		}
 		return err
+	}
+	if kind == evidenceReceipt && receipt.Effects != "partial" {
+		s.attended.remove(request.ObjectID, key)
 	}
 	return nil
 }

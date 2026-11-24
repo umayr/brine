@@ -67,6 +67,7 @@ type attendedArchiveFixture struct {
 	historical                 snapshothistory.Record
 	evidence                   snapshothistory.Evidence
 	historicalReads            int
+	idleErr                    error
 }
 
 func (a *attendedArchiveFixture) Commit(_ context.Context, r snapshothistory.CommitRequest) (snapshothistory.OpenRequest, error) {
@@ -87,6 +88,10 @@ func (a *attendedArchiveFixture) MarkDeliveryUnknown(_ context.Context, _ snapsh
 func (a *attendedArchiveFixture) RecordTerminalObservation(_ context.Context, _ snapshothistory.OpenRequest, _ snapshothistory.TerminalObservation) error {
 	a.receipts++
 	return a.receiptErr
+}
+
+func (a *attendedArchiveFixture) CheckAttendedIdle(context.Context, string, string) error {
+	return a.idleErr
 }
 
 func (a *attendedArchiveFixture) Open(context.Context, snapshothistory.OpenRequest) (snapshothistory.Record, error) {
@@ -186,6 +191,7 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		{"restore historical unknown", "update", "restore unknown", "", 0, 0, 0},
 		{"restore authorization denied", "update", "restore denied", "", 0, 0, 0},
 		{"restore rotation fenced", "update", "restore rotation", "", 0, 0, 0},
+		{"operation admitted after restore review", "update", "restore now blocked", "Archived configuration is not authorized", 0, 0, 0},
 		{"restore journal changed", "update", "restore journal", "Cannot retain an exact attended review", 0, 0, 0},
 		{"restore gate lost during stage", "update", "restore gate lost", "Archived configuration is not authorized", 0, 0, 0},
 		{"restore backend gone at confirm", "update", "restore backend gone", "Attended authority unavailable", 0, 0, 0},
@@ -363,6 +369,9 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 					t.Fatalf("fresh review unavailable: %v", err)
 				}
 				form.Set("id", preview.ID)
+				if tc.problem == "restore now blocked" {
+					archive.idleErr = snapshothistory.ErrUnresolvedOperation
+				}
 				if tc.problem == "restore journal" {
 					provider.journal = strings.Repeat("9", 32)
 				}
@@ -372,9 +381,9 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			form.Set("confirm", "transfer")
 			stage := invoke("POST", deployPath+"/stage", form)
-			if tc.problem == "no proof" || tc.problem == "no journal" || tc.problem == "restore journal" || tc.problem == "restore gate lost" {
+			if tc.problem == "no proof" || tc.problem == "no journal" || tc.problem == "restore journal" || tc.problem == "restore gate lost" || tc.problem == "restore now blocked" {
 				wantStages := 1
-				if tc.problem == "no proof" || tc.problem == "restore gate lost" {
+				if tc.problem == "no proof" || tc.problem == "restore gate lost" || tc.problem == "restore now blocked" {
 					wantStages = 0
 				}
 				if !strings.Contains(stage.Body.String(), tc.expect) || archive.commits != 0 || provider.applies != 0 || provider.stages != wantStages || strings.Contains(stage.Body.String(), `action="/remote/deployment/create"`) {

@@ -50,3 +50,37 @@ reported as a persisted receipt or lead to replay. Committed evidence is
 validated on archive open; malformed or orphaned evidence fails closed.
 Publication uses the same sync and no-clobber path as the archive. File fixtures
 prove publication return states, not power-loss durability.
+
+## Current local operation guard
+
+An attended intent publication is the local reservation. Under the same exclusive
+archive writer lock and in-process mutex used for evidence publication, Commit
+validates the complete retained inventory and rejects a new attended intent if
+any prior intent for that exact enrollment scope and stack lacks a valid terminal
+receipt with complete or no effects. This includes intent-only records, unknown
+delivery, partial receipts and failed receipt persistence. Neither a different
+journal nor another object's success clears a blocker. No force-clear path is
+introduced. This protects cooperating writers on the same trusted archive only.
+
+Before accepting requests or taking an enrollment lease, Open authenticates the
+complete archive and counts each unresolved attended object by scope and stack.
+The summary is memory-only. After authenticated rebuild Open syncs the directory
+before publishing the handle; an incomplete scan, failed sync or cancellation
+publishes no handle. A successful Commit contributes its own object; only a
+successful definitive receipt removes that object's contribution. A partial
+receipt or another object's success cannot clear it. Indeterminate publication
+poisons the handle until successful reopen. Cooperating access and the original
+trusted filesystem assumptions apply; preview cannot detect external tampering
+or rollback, and is not a reservation or provider evidence.
+
+Preview and stage admission use fail-fast mutex acquisition, SHA-256 over at
+most 512 scope bytes, and one map lookup per check, with no archive-wide reads.
+Restore still performs exact-object reads separately. Each map is bounded by the
+4095 possible intent objects; each live object stores a 32-byte ID, 32-byte
+scope digest and at most 128 stack bytes, with map keys/counts and Go overhead.
+A digest collision is conservative; the final Commit scan compares exact bytes.
+The complete Open scan retains the existing 4096-entry/32-MiB-object bounds
+and may be slow; neither Open nor an individual object read guarantees a
+wall-clock bound on a stalled filesystem. The final atomic Commit still scans
+and validates the retained inventory before marker and send; a preview may
+race a subsequent new commit and cannot substitute for that check.
