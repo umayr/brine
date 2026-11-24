@@ -33,6 +33,10 @@ func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *
 		return
 	}
 	defer releaseAdmission()
+	if !h.manualClear(p.Stack) {
+		http.Error(w, "Manual recovery is unresolved or unavailable", 409)
+		return
+	}
 	stack, err := h.stacks.Get(p.Stack)
 	source := stack.RemoteGitSource()
 	if err != nil || source == "" {
@@ -180,6 +184,9 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 		return
 	}
 	defer releaseAdmission()
+	if !h.manualClear(name) {
+		return
+	}
 	s, err := h.stacks.Get(name)
 	if err != nil || s == nil || s.RemoteGit == nil {
 		return

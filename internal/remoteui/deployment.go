@@ -48,10 +48,10 @@ type Deployment struct {
 }
 
 type deploymentReview struct {
-	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest string
-	Mode, PriorRequestID                                             string
-	Expiry                                                           time.Time
-	Attended                                                         *attendedReview
+	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest, Journal string
+	Mode, PriorRequestID                                                      string
+	Expiry                                                                    time.Time
+	Attended                                                                  *attendedReview
 }
 
 const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect. Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result."
@@ -66,6 +66,8 @@ func (p *deploymentPage) showGenericStatus(status agentclient.DeploymentStatus) 
 }
 
 type deploymentPage struct {
+	ManualIntents                []store.ManualDeploymentIntent
+	ManualRecover                bool
 	CSRF, Host, Stack, ID, Error string
 	Review                       *projectreview.Preview
 	Plan                         *dill.PreflightResult
@@ -136,7 +138,23 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		p.Host, p.Stack, p.ID = form.Get("host"), form.Get("stack"), form.Get("id")
 	}
+	if r.URL.Path == deployPath+"/recover" && r.Method == http.MethodPost {
+		h.recoverManual(lease, w, r, &p)
+		return
+	}
 	if r.URL.Path == deployPath && r.Method == http.MethodGet && p.ID == "" {
+		if intents, ok := h.stacks.(store.ManualDeploymentStore); ok {
+			rows, err := intents.ListManualIntents()
+			if err != nil {
+				p.Error = deploymentStatusUnavailable
+			} else {
+				for _, intent := range rows {
+					if !intent.Resolved {
+						p.ManualIntents = append(p.ManualIntents, intent)
+					}
+				}
+			}
+		}
 		p.GitSettings = h.gitStore != nil
 		h.render(w, p)
 		return
@@ -171,6 +189,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer releaseAdmission()
+		if !h.manualClear(p.Stack) {
+			http.Error(w, "Unresolved manual recovery or unavailable recovery store; no operation sent", 409)
+			return
+		}
 		stack, stackErr := h.stacks.Get(p.Stack)
 		// A retained attended review cannot become a legacy confirmation
 		// when the history backend is no longer available.
@@ -208,11 +230,17 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer c.Close()
+		intents, ok := h.stacks.(store.ManualDeploymentStore)
+		intent := store.ManualDeploymentIntent{Host: review.Host, Target: review.TargetDigest, Stack: review.Stack, Mode: review.Mode, Request: p.ID, PriorRequest: review.PriorRequestID, Journal: review.Journal, Selection: review.Selection, Stage: review.StageID, Manifest: review.Manifest}
+		if !ok || intents.SaveManualIntent(intent) != nil {
+			http.Error(w, "Durable recovery unavailable or unresolved operation exists; no operation sent", http.StatusConflict)
+			return
+		}
 		var status agentclient.DeploymentStatus
 		if review.Mode == "remove" {
-			status, err = c.RemoveDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID)
+			status, err = c.RemoveJournalDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID, review.Journal)
 		} else {
-			status, err = c.ApplyDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode)
+			status, err = c.ApplyJournalDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode, review.Journal)
 		}
 		if err == nil {
 			p.Status = &status
@@ -247,13 +275,42 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			h.renderStatus(w, p, http.StatusConflict)
 			return
 		}
+		var saved *store.ManualDeploymentIntent
+		if intents, ok := h.stacks.(store.ManualDeploymentStore); ok {
+			rows, loadErr := intents.ListManualIntents()
+			if loadErr != nil {
+				p.Error = deploymentStatusUnavailable
+				h.renderStatus(w, p, http.StatusConflict)
+				return
+			}
+			for _, intent := range rows {
+				if intent.Request == p.ID {
+					saved = &intent
+					break
+				}
+			}
+		}
+		if saved != nil && (saved.Host != p.Host || saved.Target != targetDigest(record)) {
+			p.Error = deploymentStatusUnavailable
+			h.renderStatus(w, p, http.StatusConflict)
+			return
+		}
 		c, epoch, err := openDeploymentSession(ctx, record)
 		if err == nil {
 			defer c.Close()
 			var status agentclient.DeploymentStatus
-			status, err = c.DeploymentStatus(ctx, epoch, p.ID)
-			if err == nil {
-				p.showGenericStatus(status)
+			if saved != nil {
+				p.Stack = saved.Stack
+				p.ManualRecover = !saved.Resolved
+				status, err = c.JournalDeploymentStatus(ctx, epoch, saved.Request, saved.Stack, saved.Journal)
+				if err == nil {
+					p.Status = &status
+				}
+			} else {
+				status, err = c.DeploymentStatus(ctx, epoch, p.ID)
+				if err == nil {
+					p.showGenericStatus(status)
+				}
 			}
 		}
 		if err != nil {
@@ -391,7 +448,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 			}
 		}
 	}
-	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
+	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Journal: plan.JournalID, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
 	if p.ID != "" {
 		p.Mode = plan.Mode
 	}
@@ -545,6 +602,8 @@ func IsDeploymentPath(path string) bool {
 }
 
 var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Remote deployment</title><main><h1>Remote deployment</h1><p><a href="/remote">Remote hosts</a></p>
+{{range .ManualIntents}}<p>Unresolved {{.Mode}} for <bdi>{{.Stack}}</bdi>: <a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.Request|urlquery}}">Recover exact request {{.Request}}</a></p>{{end}}
+{{if .ManualRecover}}<form method="post" action="/remote/deployment/recover"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="check-and-fence" required> Check the original journal and prevent this request starting if not admitted. This does not cancel admitted operations or retry them.</label><button>Check and fence request</button></form>{{end}}
 {{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .JournalCapacityLow}}<p role="alert">Dill's journal is nearing its size limit. Preserve the journal; do not delete it to make room.</p>{{end}}<p>Target: <bdi>{{.Host}}</bdi></p>
 {{if and .ID (not .Review) (or (not .Attended) (not .Plan))}}<p><label for="deployment-request-id">Request ID</label><br><input type="text" id="deployment-request-id" value="{{.ID}}" readonly size="34" style="max-width:100%;box-sizing:border-box" aria-describedby="deployment-request-help"></p>
 <p id="deployment-request-help">Select and copy the full request ID, or save the status link to return after a disconnect.</p>

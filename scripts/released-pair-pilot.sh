@@ -32,7 +32,13 @@ printf '%s  %s\n%s  %s\n' "$dill_sha" "$root/dill" "$pkl_sha" "$root/pkl" | sha2
 chmod 700 "$root/dill" "$root/pkl"
 [[ $("$root/dill" version) == v0.8.1 ]]
 echo "Brine fixture image: $image; Dill asset sha256:$dill_sha"
-d pull "$image"
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  image=brine-hardening-candidate:local
+  d build --build-arg DILL_VERSION=0.8.1 -t "$image" .
+  echo "Candidate image: $(d image inspect --format '{{.Id}}' "$image"); source: $(git rev-parse HEAD)"
+else
+  d pull "$image"
+fi
 d pull docker.io/library/alpine:3.22
 mkdir -m 700 "$root"/{stages,catalog,coordination,operations}
 d run --rm --entrypoint /bin/mkdir -v "$volume:/data" "$image" -m 0700 /data/remote
@@ -92,4 +98,12 @@ for _ in {1..30}; do
   sleep 1
 done
 curl -ksS --max-time 1 "https://$PILOT_AGENT_ADDR/" >/dev/null
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  d restart "$(< "$root/container-id")" >/dev/null
+  for _ in {1..30}; do
+    if curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null
+fi
 node scripts/released-pair-pilot.cjs --after-restart

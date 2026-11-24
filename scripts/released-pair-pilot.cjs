@@ -63,6 +63,14 @@ async function exercise(page) {
     const deployURL = new URL(await deploy.getAttribute('href'), base).href;
     if (!afterRestart) console.log('Authenticated Chromium paired released native Dill agent');
 
+    async function recoverManual() {
+      if (process.env.PILOT_CANDIDATE !== 'true') return;
+      await page.locator('form[action="/remote/deployment/recover"] input[type=checkbox]').check();
+      await page.getByRole('button', {name:'Check and fence request'}).click();
+      await page.getByText(/State succeeded · Effects complete/).waitFor();
+      assert.equal(await page.locator('form[action="/remote/deployment/recover"]').count(), 0);
+    }
+
     async function confirm(label, interrupt = false) {
       const link = page.getByRole('link', { name: 'Open status link' });
       const statusURL = new URL(await link.getAttribute('href'), base).href;
@@ -92,6 +100,7 @@ async function exercise(page) {
       }
       const receipt = await status(statusURL);
       console.log(`${label}: exact request status verified by GET${interrupt ? ' after browser-response loss' : ''}`);
+      if (!interrupt) await recoverManual();
       return { statusURL, receipt };
     }
 
@@ -134,13 +143,15 @@ async function exercise(page) {
 
     const { statusURL, receipt, container, network } = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
     assert.equal(await status(statusURL), receipt);
+    await recoverManual();
     assert.equal(docker('inspect', '--format', '{{.Id}}', `${name}_web`), container);
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Same durable outcome and Docker identities after native Dill restart; status lookup used GET');
     await page.goto(deployURL);
     await page.getByLabel('Managed stack name').fill(name);
     await page.getByRole('button', { name: 'Preview removal' }).click();
-    await confirm('Remove containers; keep data');
+    await confirm('Remove containers; keep data', process.env.PILOT_CANDIDATE === 'true');
+    if (process.env.PILOT_CANDIDATE === 'true') await recoverManual();
     assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Manual lifecycle passed: update replaced the container; removal retained network identity');

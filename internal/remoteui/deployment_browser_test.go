@@ -19,6 +19,7 @@ func TestDeploymentStatusBrowserFixture(t *testing.T) {
 	unverified := deploymentPage{Host: "demo", ID: id}
 	unverified.showGenericStatus(agentclient.DeploymentStatus{RequestID: id, Stack: "unverified-stack", State: "not-admitted", Effects: "none"})
 	for name, page := range map[string]deploymentPage{
+		"recover":     {Host: "demo", ID: id, CSRF: "synthetic-csrf", ManualRecover: true, Error: deploymentStatusUnavailable},
 		"unverified":  unverified,
 		"unavailable": {Host: "demo", ID: id, Error: deploymentStatusUnavailable},
 		"partial": {Host: "demo", ID: id, Status: &agentclient.DeploymentStatus{

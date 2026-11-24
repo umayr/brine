@@ -50,7 +50,10 @@ func (i ManualDeploymentIntent) valid() bool {
 
 // All access is rooted at an opened non-symlink directory and serialized across
 // FSStore instances/processes. A missing ledger is only an initial empty store;
-// corrupt/unreadable state never authorizes a mutation.
+// corrupt/unreadable state never authorizes a mutation. The independent
+// initialization anchor detects loss of both ledger and sidecar. The trusted
+// data root (including its initialization anchor) must not be deleted/replaced;
+// destruction of all trusted state is not distinguishable from first provision.
 func (s *FSStore) manualTransaction(change func(*[]ManualDeploymentIntent) error, write bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -59,8 +62,30 @@ func (s *FSStore) manualTransaction(change func(*[]ManualDeploymentIntent) error
 		return ErrManualIntent
 	}
 	defer unix.Close(dir)
+	// Lock the trusted root inode, not a replaceable sidecar inode.
+	if unix.Flock(dir, unix.LOCK_EX|unix.LOCK_NB) != nil {
+		return ErrManualIntent
+	}
+	defer unix.Flock(dir, unix.LOCK_UN)
+	anchorErr := unix.Mkdirat(dir, "manual-deployments.initialized", 0700)
+	initialized := errors.Is(anchorErr, unix.EEXIST)
+	if anchorErr != nil && !initialized {
+		return ErrManualIntent
+	}
+	anchor, anchorErr := unix.Openat(dir, "manual-deployments.initialized", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if anchorErr != nil {
+		return ErrManualIntent
+	}
+	defer unix.Close(anchor)
+	if unix.Fsync(dir) != nil {
+		return ErrManualIntent
+	}
 	lock, err := unix.Openat(dir, "manual-deployments.lock", unix.O_RDWR|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	fresh := err == nil
+	if fresh && initialized {
+		unix.Close(lock)
+		return ErrManualIntent
+	}
 	if errors.Is(err, unix.EEXIST) {
 		lock, err = unix.Openat(dir, "manual-deployments.lock", unix.O_RDWR|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	}
@@ -72,12 +97,10 @@ func (s *FSStore) manualTransaction(change func(*[]ManualDeploymentIntent) error
 	if unix.Fstat(lock, &ls) != nil || ls.Mode&unix.S_IFMT != unix.S_IFREG || ls.Mode&0077 != 0 {
 		return ErrManualIntent
 	}
-	if unix.Flock(lock, unix.LOCK_EX|unix.LOCK_NB) != nil {
-		return ErrManualIntent
-	}
-	defer unix.Flock(lock, unix.LOCK_UN)
+	// The sidecar is now only a provision marker; replacing it cannot split
+	// serialization because every transaction holds the root directory lock.
 	rows := []ManualDeploymentIntent{}
-	fd, err := unix.Openat(dir, manualIntentFile, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	fd, err := unix.Openat(dir, manualIntentFile, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err == nil {
 		f := os.NewFile(uintptr(fd), manualIntentFile)
 		defer f.Close()
@@ -91,7 +114,14 @@ func (s *FSStore) manualTransaction(change func(*[]ManualDeploymentIntent) error
 		}
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
-		if dec.Decode(&rows) != nil {
+		if dec.Decode(&rows) != nil || rows == nil {
+			return ErrManualIntent
+		}
+		// This private ledger is written only by this serializer. Require its
+		// canonical shape, rejecting duplicate/aliased/omitted fields too.
+		canonical, marshalErr := json.Marshal(rows)
+		var compact bytes.Buffer
+		if marshalErr != nil || json.Compact(&compact, raw) != nil || !bytes.Equal(canonical, compact.Bytes()) {
 			return ErrManualIntent
 		}
 		var extra any

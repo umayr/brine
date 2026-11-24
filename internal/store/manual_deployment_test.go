@@ -46,7 +46,7 @@ func TestManualIntentDurableRemoteOnlyRemoval(t *testing.T) {
 	}
 }
 func TestManualIntentCorruptStateFailsClosed(t *testing.T) {
-	for _, raw := range []string{"null garbage", "{}", "[{\"unknown\":true}]"} {
+	for _, raw := range []string{"null", "null garbage", "{}", "[{\"unknown\":true}]"} {
 		t.Run(raw, func(t *testing.T) {
 			root := t.TempDir()
 			s, _ := NewFSStore(root)
