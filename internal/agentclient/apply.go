@@ -75,6 +75,19 @@ func (c *Client) applyDeployment(ctx context.Context, epoch, stage, manifest, st
 }
 
 func (c *Client) RemoveDeployment(ctx context.Context, epoch, stack, selection, requestID, prior string) (DeploymentStatus, error) {
+	return c.removeDeployment(ctx, epoch, stack, selection, requestID, prior, "")
+}
+
+// RemoveJournalDeployment requires the saved original journal and a fresh
+// request ID. It never falls back to an unbound removal or retries a write.
+func (c *Client) RemoveJournalDeployment(ctx context.Context, epoch, stack, selection, requestID, prior, journal string) (DeploymentStatus, error) {
+	if !canonicalHex(journal, 16) || requestID == prior {
+		return DeploymentStatus{}, ErrProtocol
+	}
+	return c.removeDeployment(ctx, epoch, stack, selection, requestID, prior, journal)
+}
+
+func (c *Client) removeDeployment(ctx context.Context, epoch, stack, selection, requestID, prior, journal string) (DeploymentStatus, error) {
 	if !canonicalHex(prior, 16) || !strings.HasPrefix(selection, "sha256:") || !canonicalHex(strings.TrimPrefix(selection, "sha256:"), 32) || stack == "" || len(stack) > 128 {
 		return DeploymentStatus{}, ErrProtocol
 	}
@@ -82,7 +95,7 @@ func (c *Client) RemoveDeployment(ctx context.Context, epoch, stack, selection, 
 	if err != nil {
 		return DeploymentStatus{}, ErrProtocol
 	}
-	return c.deploymentStatus(ctx, epoch, requestID, stack, "/v1/deploy/remove", "", body)
+	return c.deploymentStatus(ctx, epoch, requestID, stack, "/v1/deploy/remove", journal, body)
 }
 
 // DeploymentStatus looks up the same request without submitting a write.

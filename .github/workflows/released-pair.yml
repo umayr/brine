@@ -14,7 +14,13 @@ permissions:
 jobs:
   pilot:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: ['false', 'true']
+    env:
+      PILOT_CANDIDATE: ${{ matrix.candidate }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

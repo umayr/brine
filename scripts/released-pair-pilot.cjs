@@ -5,7 +5,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { chromium } = require('playwright');
 
 const base = process.env.PILOT_BRINE_URL;
-const name = 'released-pair-pilot';
+const name = `${process.env.PILOT_RESOURCE_PREFIX}-manual`;
 const api = { Authorization: `Bearer ${process.env.BRINE_API_TOKEN}` };
 const project = marker => `amends "package://pkg.ushd.ca/dill@0.8.1#/dill.pkl"
 config {
@@ -24,7 +24,8 @@ function docker(...args) {
   return execFileSync('docker', ['--context', 'default', ...args], { encoding: 'utf8' }).trim();
 }
 
-const afterRestart = process.argv[2] === '--after-restart';
+const afterRemoval = process.argv[2] === '--after-removal-restart';
+const afterRestart = process.argv[2] === '--after-restart' || afterRemoval;
 const checkpoint = process.env.PILOT_CHECKPOINT;
 
 async function run() {
@@ -63,6 +64,14 @@ async function exercise(page) {
     const deployURL = new URL(await deploy.getAttribute('href'), base).href;
     if (!afterRestart) console.log('Authenticated Chromium paired released native Dill agent');
 
+    async function recoverManual() {
+      if (process.env.PILOT_CANDIDATE !== 'true') return;
+      await page.locator('form[action="/remote/deployment/recover"] input[type=checkbox]').check();
+      await page.getByRole('button', {name:'Check and fence request'}).click();
+      await page.getByText(/State succeeded · Effects complete/).waitFor();
+      assert.equal(await page.locator('form[action="/remote/deployment/recover"]').count(), 0);
+    }
+
     async function confirm(label, interrupt = false) {
       const link = page.getByRole('link', { name: 'Open status link' });
       const statusURL = new URL(await link.getAttribute('href'), base).href;
@@ -92,6 +101,7 @@ async function exercise(page) {
       }
       const receipt = await status(statusURL);
       console.log(`${label}: exact request status verified by GET${interrupt ? ' after browser-response loss' : ''}`);
+      if (!interrupt) await recoverManual();
       return { statusURL, receipt };
     }
 
@@ -132,15 +142,29 @@ async function exercise(page) {
       return;
     }
 
+    if (afterRemoval) {
+      const saved = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
+      assert.equal(await status(saved.statusURL), saved.receipt);
+      await recoverManual();
+      assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
+      assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), saved.network);
+      await verifyGitPause(page, deployURL);
+      return;
+    }
     const { statusURL, receipt, container, network } = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
     assert.equal(await status(statusURL), receipt);
+    await recoverManual();
     assert.equal(docker('inspect', '--format', '{{.Id}}', `${name}_web`), container);
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Same durable outcome and Docker identities after native Dill restart; status lookup used GET');
     await page.goto(deployURL);
     await page.getByLabel('Managed stack name').fill(name);
     await page.getByRole('button', { name: 'Preview removal' }).click();
-    await confirm('Remove containers; keep data');
+    const removed = await confirm('Remove containers; keep data', process.env.PILOT_CANDIDATE === 'true');
+    if (process.env.PILOT_CANDIDATE === 'true') {
+      fs.writeFileSync(checkpoint, JSON.stringify({...removed, network}), {mode:0o600});
+      return; // shell restarts both processes before explicit removal recovery
+    }
     assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Manual lifecycle passed: update replaced the container; removal retained network identity');
@@ -149,7 +173,7 @@ async function exercise(page) {
 }
 
 async function verifyGitPause(page, deployURL) {
-  const stack = 'released-git-pause';
+  const stack = `${process.env.PILOT_RESOURCE_PREFIX}-pause`;
   const source = process.env.PILOT_GIT_SOURCE;
   const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' }).trim();
   const invalidCommit = git('rev-parse', 'HEAD');
@@ -202,7 +226,7 @@ async function verifyGitPause(page, deployURL) {
 
   // Enable a separate valid stack only after advertising the successor. Its
   // durable receipt proves the serial Git worker completed subsequent work.
-  const witness = 'released-git-witness';
+  const witness = `${process.env.PILOT_RESOURCE_PREFIX}-witness`;
   git('switch', '-qc', 'witness');
   fs.writeFileSync(`${source}/compose.pkl`, project('git-witness').replace(name, witness));
   git('add', 'compose.pkl');

@@ -101,7 +101,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var differentManifest atomic.Bool
 	var catalogReads, previewCalls atomic.Int32
 	var operationID atomic.Value
-	var fenceCalls, fenceState atomic.Int32
+	var fenceCalls, fenceState, manualFenceState atomic.Int32
 	var partial atomic.Bool
 	var statusGETs atomic.Int32
 	journal, stranded, unknown := strings.Repeat("d", 32), strings.Repeat("e", 32), strings.Repeat("f", 32)
@@ -199,6 +199,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			}
 			_, _ = w.Write(plan)
 		case "/v1/deploy/apply", "/v1/deploy/journal-apply":
+			w.Header().Set("X-Dill-Journal-Id", journal)
 			calls.Add(1)
 			var f map[string]string
 			if json.NewDecoder(r.Body).Decode(&f) != nil || f["stageId"] != stage || f["confirm"] != "create" || f["stack"] != "synthetic" {
@@ -219,6 +220,18 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 					return
 				}
 			}
+			if calls.Load() == 1 {
+				reopened, err := store.NewFSStore(data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				intent, err := reopened.GetManualIntent(f["requestId"])
+				if err != nil || intent.Stack != f["stack"] || intent.Journal != journal || intent.Resolved {
+					t.Error("manual apply preceded durable bound intent")
+					w.WriteHeader(409)
+					return
+				}
+			}
 			operationID.Store(f["requestId"])
 			if partial.Load() {
 				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"failed","effects":"partial","operationId":%q}`, f["requestId"], "op_"+f["requestId"])
@@ -234,6 +247,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
+			w.Header().Set("X-Dill-Journal-Id", journal)
 			w.Header().Set("X-Dill-Deployment-Mode", "remove")
 			w.Header().Set("X-Dill-Prior-Request", prior)
 			_, _ = w.Write(removePlan)
@@ -253,7 +267,27 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		case "/v1/deploy/fence":
 			fenceCalls.Add(1)
 			var f map[string]string
-			if json.NewDecoder(r.Body).Decode(&f) != nil || f["requestId"] != stranded || f["stack"] != "synthetic" || f["confirm"] != "fence-if-unadmitted" || r.Header.Get("X-Dill-Journal-Id") != journal {
+			if err := json.NewDecoder(r.Body).Decode(&f); err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			if f["requestId"] != stranded && f["stack"] == "synthetic" && f["confirm"] == "fence-if-unadmitted" && r.Header.Get("X-Dill-Journal-Id") == journal {
+				w.Header().Set("X-Dill-Journal-Id", journal)
+				if manualFenceState.Load() == 1 {
+					fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, f["requestId"])
+					return
+				}
+				if manualFenceState.Load() == 2 {
+					w.Header().Set("X-Dill-Journal-Id", strings.Repeat("9", 32))
+				}
+				if manualFenceState.Load() == 3 {
+					w.Header().Del("X-Dill-Journal-Id")
+				}
+				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"failed","effects":"partial","operationId":%q}`, f["requestId"], "op_"+f["requestId"])
+				return
+			}
+			if f["requestId"] != stranded || f["stack"] != "synthetic" || f["confirm"] != "fence-if-unadmitted" || r.Header.Get("X-Dill-Journal-Id") != journal {
 				t.Error("unbound fence request")
 				w.WriteHeader(409)
 				return
@@ -288,11 +322,12 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"unverified-stack","state":"not-admitted","effects":"none"}`, unbound)
 		default:
 			if id, _ := removalRequest.Load().(string); id != "" && r.URL.Path == "/v1/deploy/operations/"+id {
-				if r.Method != http.MethodGet || r.ContentLength != 0 || r.Header.Get("X-Dill-Journal-Id") != "" {
-					t.Error("expected a bodyless generic status GET after lost response")
+				if r.Method != http.MethodGet || r.ContentLength != 0 || r.Header.Get("X-Dill-Journal-Id") != journal {
+					t.Error("expected a bodyless journal-bound status GET after lost response")
 					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
+				w.Header().Set("X-Dill-Journal-Id", journal)
 				removeGETs.Add(1)
 				fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"unknown","effects":"unknown"}`, id)
 				return
@@ -439,7 +474,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	// Exercise the immediate result and a later GET against the same validated status.
 	partial.Store(true)
-	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Journal: journal, StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 	partialPath := deployPath + "?host=demo&id=" + partialID
 	for _, w := range []*httptest.ResponseRecorder{
 		invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {partialID}, "confirm": {"create"}}),
@@ -454,6 +489,63 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	if calls.Load() != 1 || statusGETs.Load() != 1 || fenceCalls.Load() != 0 {
 		t.Fatal("partial status lookup resubmitted or did not use GET")
 	}
+	resolveManual := func(id string) {
+		t.Helper()
+		before := calls.Load()
+		w := invoke("POST", deployPath+"/recover", url.Values{"_csrf": {csrf}, "host": {"demo"}, "id": {id}, "confirm": {"check-and-fence"}})
+		saved, err := fs.GetManualIntent(id)
+		if w.Code != 200 || err != nil || !saved.Resolved || calls.Load() != before {
+			t.Fatalf("manual recovery did not resolve without replay: HTTP %d err %v", w.Code, err)
+		}
+		fenceCalls.Store(0)
+	}
+	for _, tc := range []struct {
+		name, csrfValue, host, confirm string
+		mode                           int32
+	}{
+		{"csrf", "wrong", "demo", "check-and-fence", 0},
+		{"host", csrf, "missing", "check-and-fence", 0},
+		{"confirmation", csrf, "demo", "", 0},
+		{"unknown", csrf, "demo", "check-and-fence", 1},
+		{"wrong-journal", csrf, "demo", "check-and-fence", 2},
+		{"missing-journal", csrf, "demo", "check-and-fence", 3},
+	} {
+		t.Run("manual-recovery-denial-"+tc.name, func(t *testing.T) {
+			manualFenceState.Store(tc.mode)
+			beforeFence := fenceCalls.Load()
+			invoke("POST", deployPath+"/recover", url.Values{"_csrf": {tc.csrfValue}, "host": {tc.host}, "id": {partialID}, "confirm": {tc.confirm}})
+			saved, err := fs.GetManualIntent(partialID)
+			if err != nil || saved.Resolved || calls.Load() != 1 {
+				t.Fatal("uncertain/unauthorized recovery released or replayed intent")
+			}
+			if tc.mode == 0 && fenceCalls.Load() != beforeFence {
+				t.Fatal("denied request reached target")
+			}
+		})
+	}
+	manualFenceState.Store(0)
+	t.Run("saved-intent-rejects-replaced-target", func(t *testing.T) {
+		replacement, err := targetregistry.Open(filepath.Join(t.TempDir(), "replacement"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := row
+		other.HTTPSAddress = "127.0.0.1:1"
+		if err = replacement.AddContext(context.Background(), other, other); err != nil {
+			t.Fatal(err)
+		}
+		original := h.registry
+		h.registry = replacement
+		defer func() { h.registry = original }()
+		beforeGET, beforeFence := statusGETs.Load(), fenceCalls.Load()
+		invoke("GET", partialPath, nil)
+		invoke("POST", deployPath+"/recover", url.Values{"_csrf": {csrf}, "host": {"demo"}, "id": {partialID}, "confirm": {"check-and-fence"}})
+		saved, err := fs.GetManualIntent(partialID)
+		if err != nil || saved.Resolved || statusGETs.Load() != beforeGET || fenceCalls.Load() != beforeFence {
+			t.Fatal("replacement target reached or original intent cleared")
+		}
+	})
+	resolveManual(partialID)
 	partial.Store(false)
 	calls.Store(0)
 	params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
@@ -512,6 +604,18 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	if w := invoke("POST", deployPath+"/create", params); w.Code != 409 || calls.Load() != 1 {
 		t.Fatal("create replayed", w.Code)
 	}
+	// Recreate both filesystem store and handler: no in-memory review survives.
+	h.Close()
+	reopenedStore, err := store.NewFSStore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err = NewDeployment(a, reg, reopenedStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	handler = h.Protected()
 	if w := invoke("GET", statusPath, nil); !strings.Contains(w.Body.String(), "State succeeded") || calls.Load() != 1 {
 		t.Fatal("status did not reconcile request", w.Code)
 	} else {
@@ -542,6 +646,11 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		}
 		assertStatusControls(w, tc.id, tc.host)
 	}
+	resolveManual(id)
+	// Removal and its recovery must work even without a local registration.
+	if err := fs.Delete("synthetic"); err != nil {
+		t.Fatal(err)
+	}
 	t.Run("remove review binds prior request and permits only one submission", func(t *testing.T) {
 		w := invoke(http.MethodPost, deployPath+"/remove-preview", url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}})
 		id := field(w, "id")
@@ -570,10 +679,14 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		w = invoke(http.MethodGet, deployPath+"?host=demo&id="+id, nil)
 		assertStatusControls(w, id, "demo")
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Outcome unknown") || removeGETs.Load() != 1 ||
-			removeCalls.Load() != 1 || calls.Load() != 1 || fenceCalls.Load() != 0 || strings.Contains(w.Body.String(), `<form`) {
+			removeCalls.Load() != 1 || calls.Load() != 1 || fenceCalls.Load() != 0 || !strings.Contains(w.Body.String(), `check-and-fence`) {
 			t.Fatalf("removal lookup was not read-only and uncertain: HTTP %d", w.Code)
 		}
 	})
+	resolveManual(removalRequest.Load().(string))
+	if _, err := fs.Create("synthetic", "original-reviewed-project"); err != nil {
+		t.Fatal(err)
+	}
 	t.Run("git persists and reconciles the same request after restart", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git unavailable")
