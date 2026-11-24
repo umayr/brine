@@ -117,17 +117,6 @@ func (s *store) attendedTerminal(id ObjectID, intent Intent) (bool, error) {
 	return p.Receipt.Effects != "partial", nil
 }
 
-func (s *store) checkAttendedIdle(ctx context.Context, scope, stack string) error {
-	u, err := s.scan(ctx, &Intent{ApprovedTargetScope: []byte(scope), Attended: &AttendedIntent{Stack: stack}})
-	if err != nil || ctx.Err() != nil {
-		return ErrUnavailable
-	}
-	if u.unresolved {
-		return ErrUnresolvedOperation
-	}
-	return nil
-}
-
 func (s *store) checkEvidence(ctx context.Context, id ObjectID, kind string) error {
 	parent, err := s.loadContext(ctx, id)
 	if err != nil || parent.Intent.Attended == nil {
@@ -183,6 +172,11 @@ func (s *store) appendEvidence(ctx context.Context, request OpenRequest, kind st
 	if kind == evidenceReceipt && (current.State != DeliveryUnknown || at.Before(current.UnknownSince) || !validReceipt(receipt, request.Intent)) {
 		return ErrUnavailable
 	}
+	key := operationKey(request.Intent.ApprovedTargetScope, request.Intent.Attended.Stack)
+	if s.attended == nil || !s.attended.contains(request.ObjectID, key) {
+		s.failed = true
+		return ErrUnavailable
+	}
 	plain, err := json.Marshal(evidencePayload{Version: evidenceVersion, At: at, Receipt: receipt})
 	if err != nil {
 		return ErrUnavailable
@@ -208,6 +202,9 @@ func (s *store) appendEvidence(ctx context.Context, request OpenRequest, kind st
 			s.failed = true
 		}
 		return err
+	}
+	if kind == evidenceReceipt && receipt.Effects != "partial" {
+		s.attended.remove(request.ObjectID, key)
 	}
 	return nil
 }

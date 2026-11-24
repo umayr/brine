@@ -62,10 +62,25 @@ delivery, partial receipts and failed receipt persistence. Neither a different
 journal nor another object's success clears a blocker. No force-clear path is
 introduced. This protects cooperating writers on the same trusted archive only.
 
-Restore uses an exact full scan (not discovery pagination), with fail-fast mutex
-admission, before review and staging. It is not a reservation: a concurrent new
-intent may be admitted after a scan, so the same atomic Commit guard is final
-before marker and send. Full inventory work is bounded by the existing archive
-entry/object limits, may be slow, and observes context between items; it is not a
-hard wall-clock filesystem guarantee. Neither local quiet nor a historical
-receipt establishes current provider state, ownership or grant authority.
+Before accepting requests or taking an enrollment lease, Open authenticates the
+complete archive and counts each unresolved attended object by scope and stack.
+The summary is memory-only. After authenticated rebuild Open syncs the directory
+before publishing the handle; an incomplete scan, failed sync or cancellation
+publishes no handle. A successful Commit contributes its own object; only a
+successful definitive receipt removes that object's contribution. A partial
+receipt or another object's success cannot clear it. Indeterminate publication
+poisons the handle until successful reopen. Cooperating access and the original
+trusted filesystem assumptions apply; preview cannot detect external tampering
+or rollback, and is not a reservation or provider evidence.
+
+Preview and stage admission use fail-fast mutex acquisition, SHA-256 over at
+most 512 scope bytes, and one map lookup per check, with no archive-wide reads.
+Restore still performs exact-object reads separately. Each map is bounded by the
+4095 possible intent objects; each live object stores a 32-byte ID, 32-byte
+scope digest and at most 128 stack bytes, with map keys/counts and Go overhead.
+A digest collision is conservative; the final Commit scan compares exact bytes.
+The complete Open scan retains the existing 4096-entry/32-MiB-object bounds
+and may be slow; neither Open nor an individual object read guarantees a
+wall-clock bound on a stalled filesystem. The final atomic Commit still scans
+and validates the retained inventory before marker and send; a preview may
+race a subsequent new commit and cannot substitute for that check.

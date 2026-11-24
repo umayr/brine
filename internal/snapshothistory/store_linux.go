@@ -56,6 +56,7 @@ type store struct {
 	failed, closed     bool
 	reservedBytes      int64
 	reservedOperations int
+	attended           *attendedSummary // published only after successful authenticated Open
 }
 
 type payload struct {
@@ -143,10 +144,18 @@ func openStore(ctx context.Context, options Options) (*store, error) {
 	}
 	// Existing valid retained data remains readable if an operator later lowers
 	// a quota. Only a new Commit is refused by the reduced cap.
-	if _, err := s.scan(ctx, nil); err != nil {
+	summary := newAttendedSummary()
+	if _, err := s.scanWithSummary(ctx, nil, summary); err != nil || ctx.Err() != nil {
 		s.close()
 		return nil, ErrUnavailable
 	}
+	// A prior publication may have been visible but indeterminate after rename.
+	// Sync the directory before using a reopened receipt to clear a blocker.
+	if err := unix.Fsync(int(root.Fd())); err != nil || ctx.Err() != nil {
+		s.close()
+		return nil, ErrUnavailable
+	}
+	s.attended = summary
 	return s, nil
 }
 
@@ -321,6 +330,10 @@ func (s *store) verifyIdentity() error {
 }
 
 func (s *store) scan(ctx context.Context, want *Intent) (usage, error) {
+	return s.scanWithSummary(ctx, want, nil)
+}
+
+func (s *store) scanWithSummary(ctx context.Context, want *Intent, rebuilding *attendedSummary) (usage, error) {
 	if err := s.check(); err != nil {
 		return usage{}, err
 	}
@@ -365,13 +378,19 @@ func (s *store) scan(ctx context.Context, want *Intent) (usage, error) {
 			if err != nil {
 				return usage{}, ErrUnavailable
 			}
-			if want != nil && want.Attended != nil && record.Intent.Attended != nil && want.Attended.Stack == record.Intent.Attended.Stack &&
-				subtle.ConstantTimeCompare(record.Intent.ApprovedTargetScope, want.ApprovedTargetScope) == 1 {
+			matches := want != nil && want.Attended != nil && record.Intent.Attended != nil && want.Attended.Stack == record.Intent.Attended.Stack &&
+				subtle.ConstantTimeCompare(record.Intent.ApprovedTargetScope, want.ApprovedTargetScope) == 1
+			if record.Intent.Attended != nil && (matches || rebuilding != nil) {
 				terminal, err := s.attendedTerminal(id, record.Intent)
 				if err != nil {
 					return usage{}, err
 				}
-				u.unresolved = u.unresolved || !terminal
+				if !terminal {
+					u.unresolved = u.unresolved || matches
+					if rebuilding != nil && !rebuilding.add(id, operationKey(record.Intent.ApprovedTargetScope, record.Intent.Attended.Stack)) {
+						return usage{}, ErrUnavailable
+					}
+				}
 			}
 			if want != nil && subtle.ConstantTimeCompare(record.Intent.OriginalJournal, want.OriginalJournal) == 1 &&
 				(subtle.ConstantTimeCompare(record.Intent.AttemptID, want.AttemptID) == 1 || subtle.ConstantTimeCompare(record.Intent.ProviderRequestID, want.ProviderRequestID) == 1) {
@@ -479,6 +498,14 @@ func (s *store) commit(ctx context.Context, r CommitRequest) (OpenRequest, error
 	if u.duplicate {
 		return OpenRequest{}, ErrDuplicateIntent
 	}
+	var scopeStack attendedKey
+	if r.Intent.Attended != nil {
+		scopeStack = operationKey(r.Intent.ApprovedTargetScope, r.Intent.Attended.Stack)
+		if s.attended == nil || (s.attended.counts[scopeStack] != 0) != u.unresolved {
+			s.failed = true
+			return OpenRequest{}, ErrUnavailable
+		}
+	}
 	if u.unresolved {
 		return OpenRequest{}, ErrUnresolvedOperation
 	}
@@ -501,6 +528,10 @@ func (s *store) commit(ctx context.Context, r CommitRequest) (OpenRequest, error
 			s.failed = true
 		}
 		return OpenRequest{}, err
+	}
+	if r.Intent.Attended != nil && !s.attended.add(r.ObjectID, scopeStack) {
+		s.failed = true
+		return OpenRequest{}, ErrIndeterminate
 	}
 	return OpenRequest{ObjectID: r.ObjectID, Intent: cloneIntent(r.Intent), ManifestDigest: digest}, nil
 }
@@ -882,6 +913,7 @@ func (s *store) close() error {
 		return nil
 	}
 	s.closed = true
+	s.attended = nil
 	clear(s.key[:])
 	err := s.root.Close()
 	return err
