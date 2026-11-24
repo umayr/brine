@@ -364,6 +364,58 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
 	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	for _, mode := range []string{"create", "update", "remove"} {
+		for _, tc := range []struct {
+			name  string
+			err   error
+			stack *store.Stack
+		}{
+			{"unreadable", fmt.Errorf("metadata unreadable"), nil},
+			{"malformed", fmt.Errorf("metadata malformed"), nil},
+			{"nil", nil, nil},
+			{"wrong-name", nil, &store.Stack{Name: "other"}},
+			{"missing", fmt.Errorf("lookup: %w", store.ErrStackNotFound), nil},
+		} {
+			if mode == "remove" && tc.name == "missing" {
+				continue
+			} // existing remote-only removal remains supported
+			t.Run("overlap-"+mode+"-"+tc.name, func(t *testing.T) {
+				original := h.stacks
+				h.stacks = overlapErrorStore{StackStore: original, err: tc.err, stack: tc.stack}
+				defer func() { h.stacks = original }()
+				beforeApply, beforeRemove := calls.Load(), removeCalls.Load()
+				id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: mode, TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+				w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {mode}})
+				if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") {
+					t.Fatalf("expected fail-closed overlap rejection: %d %s", w.Code, w.Body.String())
+				}
+				if calls.Load() != beforeApply || removeCalls.Load() != beforeRemove {
+					t.Fatal("unreadable overlap state reached mutation")
+				}
+			})
+		}
+	}
+	t.Run("missing-metadata-blocks-removal", func(t *testing.T) {
+		path := filepath.Join(data, "stacks", "synthetic", "meta.json")
+		metadata, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			if err := os.WriteFile(path, metadata, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}()
+		id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+		before := removeCalls.Load()
+		w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"remove"}})
+		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") || removeCalls.Load() != before {
+			t.Fatalf("missing metadata removal: %d %s", w.Code, w.Body.String())
+		}
+	})
 	for _, tc := range []struct {
 		name, target, message string
 		expiry                time.Time

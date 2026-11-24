@@ -174,7 +174,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		// A retained attended review cannot become a legacy confirmation
 		// when the history backend is no longer available.
 		historyRequired := review.Attended != nil || (h.history != nil && review.Mode != "remove")
-		if historyRequired && (stackErr != nil || stack == nil || stack.Name != p.Stack) {
+		// Removal may target a deployment without a local registration, but
+		// unreadable metadata is never evidence that automation is absent.
+		absentRemoval := !historyRequired && review.Mode == "remove" && errors.Is(stackErr, store.ErrStackNotFound)
+		if !absentRemoval && (stackErr != nil || stack == nil || stack.Name != p.Stack) {
 			http.Error(w, "Cannot verify remote Git overlap; no operation sent", http.StatusConflict)
 			return
 		}
