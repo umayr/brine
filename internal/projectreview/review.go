@@ -391,6 +391,16 @@ func equalCurrent(a, b Current) bool {
 // Confirm requires explicit separate confirmation. Current must be freshly
 // resolved by the trusted caller, not merely echoed from the preview. An
 // observed configuration mismatch permanently revokes the preview.
+// Discard invalidates an unpublished review owned by the creating session.
+func (s *Store) Discard(session, id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e := s.entries[id]; e != nil && e.session == session {
+		delete(s.entries, id)
+		s.used -= e.size
+	}
+}
+
 func (s *Store) Confirm(ctx context.Context, session, id string, current Current) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
