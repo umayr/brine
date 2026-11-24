@@ -84,7 +84,11 @@ func writeStackLookupError(w http.ResponseWriter, name string, err error) {
 
 func (h *stackHandler) get(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeStackLookupError(w, name, err)
@@ -132,7 +136,11 @@ type updateRequest struct {
 
 func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	var req updateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -203,7 +211,11 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -238,7 +250,11 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeStackLookupError(w, name, err)
@@ -302,7 +318,11 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -328,7 +348,11 @@ func (h *stackHandler) plan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeStackLookupError(w, name, err)
@@ -350,7 +374,11 @@ func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeStackLookupError(w, name, err)
@@ -365,7 +393,11 @@ func (h *stackHandler) validate(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) containers(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	all, err := h.agent.Engine().ListContainers(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Stack container inventory unavailable; check the local container engine and retry")
@@ -384,7 +416,11 @@ func (h *stackHandler) containers(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) listFiles(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	files, err := h.store.Files(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "Stack file list unavailable; check the stack name and local workspace storage")
@@ -395,7 +431,11 @@ func (h *stackHandler) listFiles(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	filename := chi.URLParam(r, "filename")
 	content, err := h.store.ReadFile(name, filename)
 	if err != nil {
@@ -407,7 +447,11 @@ func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	filename := chi.URLParam(r, "filename")
 	var body struct {
 		Content string `json:"content"`
@@ -425,7 +469,11 @@ func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	filename := chi.URLParam(r, "filename")
 	if err := h.store.DeleteFile(name, filename); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -436,7 +484,11 @@ func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *stackHandler) setEntrypoint(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	var body struct {
 		Filename string `json:"filename"`
 	}
@@ -493,7 +545,11 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 // gitInfo returns the git source configuration and sync status.
 func (h *stackHandler) gitInfo(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -509,7 +565,11 @@ func (h *stackHandler) gitInfo(w http.ResponseWriter, r *http.Request) {
 // gitPull fetches and merges from origin.
 func (h *stackHandler) gitPull(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -539,7 +599,11 @@ const maxGitPushOptionsBytes = 64 * 1024
 // gitPush commits local changes and pushes to origin. Streams output.
 func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -612,7 +676,11 @@ func (h *stackHandler) ensureRuntimeEngine(w http.ResponseWriter, stack *store.S
 // gitUpdateSource updates the git source configuration (branch, folder, auto_deploy, etc.).
 func (h *stackHandler) gitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
