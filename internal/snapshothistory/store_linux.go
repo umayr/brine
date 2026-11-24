@@ -551,6 +551,22 @@ func cloneSnapshot(in projectsnapshot.Snapshot) projectsnapshot.Snapshot {
 	return out
 }
 
+func (s *store) resolveAttendedBinding(ctx context.Context, q AttendedBindingSelector) (OpenRequest, error) {
+	if ctx.Err() != nil || s.check() != nil {
+		return OpenRequest{}, ErrUnavailable
+	}
+	record, err := s.loadContext(ctx, q.Locator)
+	if err != nil || ctx.Err() != nil {
+		return OpenRequest{}, ErrUnavailable
+	}
+	a := record.Intent.Attended
+	if a == nil || a.Target != q.Target || a.AuthorityRevision != q.AuthorityRevision || a.Stack != q.Stack ||
+		subtle.ConstantTimeCompare(record.Intent.ApprovedTargetScope, []byte(q.Scope)) != 1 {
+		return OpenRequest{}, ErrUnavailable
+	}
+	return OpenRequest{ObjectID: record.ObjectID, Intent: record.Intent, ManifestDigest: record.ManifestDigest}, nil
+}
+
 func (s *store) open(ctx context.Context, r OpenRequest) (Record, error) {
 	if ctx == nil || ctx.Err() != nil || r.ObjectID == (ObjectID{}) || !validIntent(r.Intent) {
 		return Record{}, ErrUnavailable
