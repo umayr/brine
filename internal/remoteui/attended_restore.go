@@ -12,9 +12,22 @@ import (
 
 var errRestoreReview = errors.New("cannot prepare a new deployment review from archived configuration")
 
+type attendedIdleChecker interface {
+	CheckAttendedIdle(context.Context, string, string) error
+}
+
+func (h *attendedHistory) localRestoreIdle(ctx context.Context, scope, stack string) bool {
+	if h == nil {
+		return false
+	}
+	checker, ok := h.archive.(attendedIdleChecker)
+	return ok && checker.CheckAttendedIdle(ctx, scope, stack) == nil
+}
+
 type restoreReader interface {
 	Open(context.Context, snapshothistory.OpenRequest) (snapshothistory.Record, error)
 	ReadEvidence(context.Context, snapshothistory.OpenRequest) (snapshothistory.Evidence, error)
+	CheckAttendedIdle(context.Context, string, string) error
 }
 
 // authorizeRestore checks backend availability at the point of use. A retained
@@ -31,6 +44,7 @@ type restoreBindingResolver interface {
 	ResolveAttendedBinding(context.Context, snapshothistory.AttendedBindingSelector, snapshothistory.AttendedBindingAuthorizer) (snapshothistory.OpenRequest, error)
 	TryOpenAttended(context.Context, snapshothistory.OpenRequest) (snapshothistory.Record, error)
 	TryReadAttendedEvidence(context.Context, snapshothistory.OpenRequest) (snapshothistory.Evidence, error)
+	CheckAttendedIdle(context.Context, string, string) error
 }
 
 type leasedRestoreReader struct{ restoreBindingResolver }
@@ -118,7 +132,7 @@ func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session stri
 	if reader == nil || a == nil || prior.ObjectID == (snapshothistory.ObjectID{}) || a.Stack != current.Stack || a.Target != current.Target.Identity || a.Target != binding.target || a.AuthorityRevision != binding.revision || string(prior.Intent.ApprovedTargetScope) != binding.scope || !attendedHex(string(prior.Intent.AttemptID), 16) || !attendedHex(string(prior.Intent.ProviderRequestID), 16) || !attendedHex(string(prior.Intent.OriginalJournal), 16) || !attendedHex(a.AuthorityRevision, 32) {
 		return projectreview.Preview{}, errRestoreReview
 	}
-	if permit == nil || !permit(false) || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) {
+	if permit == nil || !permit(false) || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) || reader.CheckAttendedIdle(ctx, binding.scope, current.Stack) != nil {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	evidence, err := reader.ReadEvidence(ctx, prior)
@@ -144,7 +158,7 @@ func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session stri
 	if err != nil {
 		return projectreview.Preview{}, err
 	}
-	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) || !permit(true) {
+	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) || reader.CheckAttendedIdle(ctx, binding.scope, current.Stack) != nil || !permit(true) {
 		h.reviews.Discard(session, preview.ID)
 		return projectreview.Preview{}, errRestoreReview
 	}

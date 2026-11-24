@@ -30,4 +30,5 @@ func (*store) readEvidence(context.Context, OpenRequest) (Evidence, error) {
 func (*store) resolveAttendedBinding(context.Context, AttendedBindingSelector) (OpenRequest, error) {
 	return OpenRequest{}, ErrUnavailable
 }
-func (*store) close() error { return nil }
+func (*store) checkAttendedIdle(context.Context, string, string) error { return ErrUnavailable }
+func (*store) close() error                                            { return nil }

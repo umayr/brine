@@ -50,3 +50,22 @@ reported as a persisted receipt or lead to replay. Committed evidence is
 validated on archive open; malformed or orphaned evidence fails closed.
 Publication uses the same sync and no-clobber path as the archive. File fixtures
 prove publication return states, not power-loss durability.
+
+## Current local operation guard
+
+An attended intent publication is the local reservation. Under the same exclusive
+archive writer lock and in-process mutex used for evidence publication, Commit
+validates the complete retained inventory and rejects a new attended intent if
+any prior intent for that exact enrollment scope and stack lacks a valid terminal
+receipt with complete or no effects. This includes intent-only records, unknown
+delivery, partial receipts and failed receipt persistence. Neither a different
+journal nor another object's success clears a blocker. No force-clear path is
+introduced. This protects cooperating writers on the same trusted archive only.
+
+Restore uses an exact full scan (not discovery pagination), with fail-fast mutex
+admission, before review and staging. It is not a reservation: a concurrent new
+intent may be admitted after a scan, so the same atomic Commit guard is final
+before marker and send. Full inventory work is bounded by the existing archive
+entry/object limits, may be slow, and observes context between items; it is not a
+hard wall-clock filesystem guarantee. Neither local quiet nor a historical
+receipt establishes current provider state, ownership or grant authority.

@@ -178,6 +178,28 @@ func TestResolveRestoreLocatorAfterColdReopen(t *testing.T) {
 		t.Fatal("revocation during connection was not exercised")
 	}
 	revokeAt = 0
+	// The original locator still has a successful receipt. Inject a distinct
+	// later unresolved operation in the same enrollment and stack.
+	newIntent := ref.Intent
+	newIntent.AttemptID = []byte(strings.Repeat("4", 32))
+	newIntent.ProviderRequestID = []byte(strings.Repeat("5", 32))
+	newRef, err := reopened.Commit(ctx, snapshothistory.CommitRequest{ObjectID: sha256.Sum256([]byte("later-intent")), Intent: newIntent, Snapshot: snapshot, ExpectedManifestDigest: digest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.MarkDeliveryUnknown(ctx, newRef, at.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	afterNew, err := snapshothistory.Open(ctx, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer afterNew.Close()
+	h.history.archive = afterNew
+	assertDenied()
 	if err := registry.ForgetHTTPS(ctx, host); err != nil {
 		t.Fatal(err)
 	}

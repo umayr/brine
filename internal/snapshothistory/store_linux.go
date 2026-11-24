@@ -80,6 +80,7 @@ type usage struct {
 	operations int
 	entries    int
 	duplicate  bool
+	unresolved bool
 }
 
 func initialize(ctx context.Context, options Options) error {
@@ -364,6 +365,14 @@ func (s *store) scan(ctx context.Context, want *Intent) (usage, error) {
 			if err != nil {
 				return usage{}, ErrUnavailable
 			}
+			if want != nil && want.Attended != nil && record.Intent.Attended != nil && want.Attended.Stack == record.Intent.Attended.Stack &&
+				subtle.ConstantTimeCompare(record.Intent.ApprovedTargetScope, want.ApprovedTargetScope) == 1 {
+				terminal, err := s.attendedTerminal(id, record.Intent)
+				if err != nil {
+					return usage{}, err
+				}
+				u.unresolved = u.unresolved || !terminal
+			}
 			if want != nil && subtle.ConstantTimeCompare(record.Intent.OriginalJournal, want.OriginalJournal) == 1 &&
 				(subtle.ConstantTimeCompare(record.Intent.AttemptID, want.AttemptID) == 1 || subtle.ConstantTimeCompare(record.Intent.ProviderRequestID, want.ProviderRequestID) == 1) {
 				u.duplicate = true
@@ -469,6 +478,9 @@ func (s *store) commit(ctx context.Context, r CommitRequest) (OpenRequest, error
 	}
 	if u.duplicate {
 		return OpenRequest{}, ErrDuplicateIntent
+	}
+	if u.unresolved {
+		return OpenRequest{}, ErrUnresolvedOperation
 	}
 	s.reservedBytes += int64(sealedBytes)
 	s.reservedOperations++

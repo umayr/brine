@@ -100,6 +100,34 @@ func (s *store) loadEvidence(id ObjectID, kind string) (evidencePayload, error) 
 	return p, nil
 }
 
+// Only an authenticated terminal receipt with complete or no effects clears
+// this object's local blocker. Partial or missing evidence never does.
+func (s *store) attendedTerminal(id ObjectID, intent Intent) (bool, error) {
+	p, err := s.loadEvidence(id, evidenceReceipt)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil || !validReceipt(p.Receipt, intent) {
+		return false, ErrUnavailable
+	}
+	marker, err := s.loadEvidence(id, evidenceMarker)
+	if err != nil || p.At.Before(marker.At) {
+		return false, ErrUnavailable
+	}
+	return p.Receipt.Effects != "partial", nil
+}
+
+func (s *store) checkAttendedIdle(ctx context.Context, scope, stack string) error {
+	u, err := s.scan(ctx, &Intent{ApprovedTargetScope: []byte(scope), Attended: &AttendedIntent{Stack: stack}})
+	if err != nil || ctx.Err() != nil {
+		return ErrUnavailable
+	}
+	if u.unresolved {
+		return ErrUnresolvedOperation
+	}
+	return nil
+}
+
 func (s *store) checkEvidence(ctx context.Context, id ObjectID, kind string) error {
 	parent, err := s.loadContext(ctx, id)
 	if err != nil || parent.Intent.Attended == nil {

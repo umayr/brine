@@ -327,7 +327,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			defer c.Close()
 			stager, epoch = c, e
 		}
-		if prior := intent.PriorDeployment; prior != nil && (!restoreBindingMatches(prior, binding, "") || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID)) {
+		if prior := intent.PriorDeployment; prior != nil && (!restoreBindingMatches(prior, binding, "") || !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) || !h.history.localRestoreIdle(ctx, binding.scope, current.Stack)) {
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
