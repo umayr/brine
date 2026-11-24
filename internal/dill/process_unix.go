@@ -73,7 +73,7 @@ func runOwnedProcessWith(ctx context.Context, cmd *exec.Cmd, killGroup func(int)
 	deadline := time.Now().Add(time.Second)
 	for {
 		done, e := exited(pid)
-		if e == nil && done {
+		if e == nil && done && cleanup == nil {
 			wait := cmd.Wait() // no group signals occur after this point
 			pipeErr := pipes.finish(true)
 			if cleanup != nil || observation != nil {
@@ -81,7 +81,7 @@ func runOwnedProcessWith(ctx context.Context, cmd *exec.Cmd, killGroup func(int)
 			}
 			return errors.Join(wait, pipeErr, ctx.Err())
 		}
-		if time.Now().After(deadline) {
+		if (e == nil && done && cleanup != nil) || time.Now().After(deadline) {
 			break
 		}
 		<-ticker.C
@@ -99,8 +99,11 @@ func runOwnedProcessWith(ctx context.Context, cmd *exec.Cmd, killGroup func(int)
 			if e != nil {
 				continue
 			}
-			_ = killGroup(pid)
-			if done {
+			// Keep the unreaped leader (and slot) while group cleanup is refused.
+			// Reaping only the leader would lose safe PGID ownership while
+			// descendants may still be alive.
+			cleanupErr := killGroup(pid)
+			if done && cleanupErr == nil {
 				_ = cmd.Wait()
 				return
 			}

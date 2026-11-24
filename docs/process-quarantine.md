@@ -2,7 +2,7 @@
 
 Before starting a local Dill command, Brine persists an intent for its stack. An unconfirmed termination or uncertain intent completion leaves conflicting local work blocked across Brine restarts. Unknown means effects may have occurred; never replay to discover the outcome.
 
-Linux and macOS supervise the owned process group, retaining the unreaped leader while signalling it. Capacity is eight active or retained supervisors; exhaustion rejects before process launch. This is not containment of descendants that escape their process group. Owned pipe copies are joined before returning output ownership; callers must provide finite stdin and bounded writers.
+Linux and macOS supervise the owned process group, retaining the unreaped leader while signalling it. Capacity is eight active or retained supervisors; exhaustion rejects before process launch. If group signalling is refused, leader exit alone does not release the slot: the supervisor retains the unreaped leader and retries group cleanup before reaping. Reclaiming a slot never clears the durable unknown intent. This is not containment of descendants that escape their process group. Owned pipe copies are joined before returning output ownership; callers must provide finite stdin and bounded writers.
 
 ## Operator recovery
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -20,7 +21,13 @@ func TestBothSignalsRefusedReturnsUnknown(t *testing.T) {
 	configureProcessCancellation(cmd)
 	leaderCalls := 0
 	start := time.Now()
-	err := runOwnedProcessWith(ctx, cmd, func(int) error { return syscall.EPERM }, processExited, func() error { leaderCalls++; return syscall.EPERM })
+	var allowCleanup atomic.Bool
+	err := runOwnedProcessWith(ctx, cmd, func(pid int) error {
+		if !allowCleanup.Load() {
+			return syscall.EPERM
+		}
+		return groupCleanupError(pid, syscall.Kill(-pid, syscall.SIGKILL))
+	}, processExited, func() error { leaderCalls++; return syscall.EPERM })
 	if !errors.Is(err, ErrProcessUnknown) || leaderCalls != 1 {
 		t.Fatalf("result %v, fallback calls %d", err, leaderCalls)
 	}
@@ -30,6 +37,12 @@ func TestBothSignalsRefusedReturnsUnknown(t *testing.T) {
 	if len(processSlots) != baseline+1 {
 		t.Fatal("lost retained ownership")
 	}
+	// Leader exits naturally, but a refused group signal must still retain ownership.
+	time.Sleep(2 * time.Second)
+	if len(processSlots) != baseline+1 {
+		t.Error("leader exit released refused group ownership")
+	}
+	allowCleanup.Store(true)
 	deadline := time.Now().Add(4 * time.Second)
 	for len(processSlots) != baseline && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)

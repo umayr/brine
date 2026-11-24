@@ -70,8 +70,26 @@ func TestProcessFailedGroupSignalIsUnknown(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/bin/sleep", "3")
 	configureProcessCancellation(cmd)
-	err := runOwnedProcess(ctx, cmd, func(int) error { return syscall.EPERM }, processExited)
+	before := len(processSlots)
+	var allowCleanup atomic.Bool
+	err := runOwnedProcess(ctx, cmd, func(pid int) error {
+		if !allowCleanup.Load() {
+			return syscall.EPERM
+		}
+		return groupCleanupError(pid, syscall.Kill(-pid, syscall.SIGKILL))
+	}, processExited)
 	if !errors.Is(err, ErrProcessUnknown) || !errors.Is(err, syscall.EPERM) {
-		t.Fatalf("cleanup failure hidden: %v", err)
+		t.Errorf("cleanup failure hidden: %v", err)
+	}
+	if len(processSlots) != before+1 {
+		t.Error("dead leader released refused group ownership")
+	}
+	allowCleanup.Store(true)
+	deadline := time.Now().Add(4 * time.Second)
+	for len(processSlots) != before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(processSlots) != before {
+		t.Fatal("confirmed signal did not release ownership")
 	}
 }
