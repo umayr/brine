@@ -20,11 +20,9 @@ import (
 func TestRestartOnlyHistoryLifecycle(t *testing.T) {
 	ctx, stopTest := context.WithTimeout(context.Background(), 5*time.Second)
 	defer stopTest()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip(err)
+	if base := os.Getenv("BRINE_TEST_TRUSTED_ROOT"); base != "" {
+		t.Setenv("TMPDIR", base)
 	}
-	t.Setenv("TMPDIR", home)
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -43,6 +41,10 @@ func TestRestartOnlyHistoryLifecycle(t *testing.T) {
 		t.Fatal("path alone enabled history")
 	}
 	if _, err := Start(StartupConfig{Enabled: true, Directory: dir}); err == nil {
+		t.Fatal("enabled lifecycle accepted no page cap")
+	}
+	settings := StartupConfig{Enabled: true, Directory: dir, MaxPages: 1024}
+	if _, err := Start(settings); err == nil {
 		t.Fatal("startup initialized a store")
 	}
 	path := filepath.Join(dir, sqlitestore.HistoryFilename)
@@ -52,7 +54,7 @@ func TestRestartOnlyHistoryLifecycle(t *testing.T) {
 	if err := sqlitestore.InitializeObservations(dir); err != nil {
 		t.Fatal(err)
 	}
-	h, err := Start(StartupConfig{Enabled: true, Directory: dir})
+	h, err := Start(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +74,13 @@ func TestRestartOnlyHistoryLifecycle(t *testing.T) {
 	}()
 	if err := h.Append(ctx, id, o); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("queued a second write: %v", err)
+	}
+	h.Cutoff()
+	if _, err := h.Read(ctx, id, recorded, recorded, 1); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("read admitted after cutoff acknowledgement")
+	}
+	if err := h.Append(ctx, id, o); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("append admitted after cutoff acknowledgement")
 	}
 	deadline, cancel := context.WithCancel(ctx)
 	cancel()
@@ -115,7 +124,7 @@ func TestRestartOnlyHistoryLifecycle(t *testing.T) {
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatal("disabled restart changed previous history")
 	}
-	restarted, err := Start(StartupConfig{Enabled: true, Directory: dir})
+	restarted, err := Start(settings)
 	if err != nil {
 		t.Fatalf("explicit restart after drain failed: %v", err)
 	}

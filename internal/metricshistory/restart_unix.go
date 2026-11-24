@@ -20,6 +20,7 @@ var ErrUnavailable = errors.New("metrics history is unavailable")
 type StartupConfig struct {
 	Enabled   bool
 	Directory string
+	MaxPages  int
 }
 
 // History owns the open store for one server lifetime. Stop is one-way. The
@@ -39,7 +40,7 @@ type History struct {
 // or modify persistent config. The enabled path is local-filesystem only.
 func Start(config StartupConfig) (*History, error) {
 	if !config.Enabled {
-		if config.Directory != "" {
+		if config.Directory != "" || config.MaxPages != 0 {
 			return nil, errors.New("history directory requires explicit enablement")
 		}
 		return &History{}, nil
@@ -47,7 +48,7 @@ func Start(config StartupConfig) (*History, error) {
 	if config.Directory == "" {
 		return nil, errors.New("enabled history requires a provisioned directory")
 	}
-	store, err := sqlitestore.OpenObservations(config.Directory)
+	store, err := sqlitestore.OpenBoundedObservations(config.Directory, config.MaxPages)
 	if err != nil {
 		return nil, err
 	}
@@ -93,12 +94,11 @@ func (h *History) Read(ctx context.Context, id sqlitestore.EnrollmentID, from, t
 	return store.Read(ctx, id, from, through, limit)
 }
 
-// Stop closes admission before waiting for already admitted calls. A nil
-// result acknowledges local drain and store Close, not external stop or config
-// persistence. Deadline/cancellation ends only the wait; it never reopens
-// admission or releases the store before admitted work finishes.
-func (h *History) Stop(ctx context.Context) error {
+// Cutoff returns once future reads and appends are refused; it does not wait
+// for already admitted work or closing the database.
+func (h *History) Cutoff() {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.stop == nil {
 		h.stop = make(chan struct{})
 		if h.store == nil {
@@ -107,6 +107,13 @@ func (h *History) Stop(ctx context.Context) error {
 			go h.drain(h.store, h.stop)
 		}
 	}
+}
+
+// Stop acknowledges local drain and store Close, not external stop or config
+// persistence. Deadline/cancellation ends only the wait.
+func (h *History) Stop(ctx context.Context) error {
+	h.Cutoff()
+	h.mu.Lock()
 	stopped := h.stop
 	h.mu.Unlock()
 	select {

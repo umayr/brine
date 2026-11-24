@@ -15,7 +15,7 @@ var ErrMetricsHistorySettings = errors.New("invalid metrics history startup sett
 func (c *Config) MetricsHistoryStartupDir() (string, error) {
 	root := c.MetricsHistoryDir
 	if !c.MetricsHistoryEnabled {
-		if root != "" {
+		if root != "" || c.MetricsHistoryMaxPages != 0 {
 			return "", ErrMetricsHistorySettings
 		}
 		return "", nil
@@ -23,7 +23,7 @@ func (c *Config) MetricsHistoryStartupDir() (string, error) {
 	isAbsolute := func(p string) bool {
 		return p != "/" && filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\r\n")
 	}
-	if !c.RemoteEnabled || c.NoAuth || !isAbsolute(root) || !isAbsolute(c.DataDir) || !isAbsolute(c.RemoteRegistryDir) {
+	if c.MetricsHistoryMaxPages < 2 || !c.RemoteEnabled || c.NoAuth || !isAbsolute(root) || !isAbsolute(c.DataDir) || !isAbsolute(c.RemoteRegistryDir) {
 		return "", ErrMetricsHistorySettings
 	}
 	// The store checks trusted ancestry and symlinks of its own root at open.

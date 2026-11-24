@@ -40,9 +40,10 @@ type Config struct {
 	RemoteRevealSeedPath string
 	RemoteRevealAuditDir string
 
-	// Candidate restart-only metrics history settings. No public flags yet.
-	MetricsHistoryEnabled bool
-	MetricsHistoryDir     string
+	// Restart-only metrics history settings. These are not write authorization.
+	MetricsHistoryEnabled  bool
+	MetricsHistoryDir      string
+	MetricsHistoryMaxPages int
 
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.

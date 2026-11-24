@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/umayr/brine/internal/config"
@@ -21,10 +22,17 @@ const (
 	historyReady
 )
 
+type historyHandle interface {
+	Cutoff()
+	Stop(context.Context) error
+}
+
 type optionalMetricsHistory struct {
 	state historyState
-	store *metricshistory.History
+	store historyHandle
 }
+
+type historyOpener func(metricshistory.StartupConfig) (historyHandle, error)
 
 var errHistoryShutdown = errors.New("metrics history shutdown not acknowledged")
 
@@ -35,14 +43,19 @@ type metricsHistoryWorker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 	err    error // published by closing done
+	mu     sync.Mutex
+	store  historyHandle // only synchronized with cutoff; no route accessor
 }
 
 func beginOptionalMetricsHistory(ctx context.Context, cfg *config.Config) *metricsHistoryWorker {
-	if !cfg.MetricsHistoryEnabled && cfg.MetricsHistoryDir == "" {
+	if !cfg.MetricsHistoryEnabled && cfg.MetricsHistoryDir == "" && cfg.MetricsHistoryMaxPages == 0 {
 		return nil // default off does not schedule work or inspect the filesystem
 	}
+	settings := *cfg // snapshot startup options; no hot reconfiguration
 	return beginMetricsHistory(ctx, func(ctx context.Context) optionalMetricsHistory {
-		return startOptionalMetricsHistory(ctx, cfg)
+		// No production writable opener before an enforced total-footprint
+		// quota and enrollment ACL have been reviewed. Flags alone never open it.
+		return startOptionalMetricsHistory(ctx, &settings, nil)
 	})
 }
 
@@ -52,6 +65,13 @@ func beginMetricsHistory(ctx context.Context, open func(context.Context) optiona
 	go func() {
 		defer close(w.done)
 		h := open(life)
+		w.mu.Lock()
+		if life.Err() != nil && h.store != nil {
+			h.store.Cutoff() // canceled during open: never expose open admission
+		} else {
+			w.store = h.store
+		}
+		w.mu.Unlock()
 		if life.Err() == nil {
 			h.reportStartup()
 		}
@@ -65,7 +85,12 @@ func beginMetricsHistory(ctx context.Context, open func(context.Context) optiona
 
 func (w *metricsHistoryWorker) cutoff() {
 	if w != nil {
+		w.mu.Lock()
+		defer w.mu.Unlock()
 		w.cancel()
+		if w.store != nil {
+			w.store.Cutoff()
+		}
 	}
 }
 
@@ -86,7 +111,7 @@ func (w *metricsHistoryWorker) stop(grace time.Duration) error {
 
 // startOptionalMetricsHistory never returns an error to the live server. Raw
 // database/OS errors, paths and enrollment material are not reported here.
-func startOptionalMetricsHistory(ctx context.Context, cfg *config.Config) optionalMetricsHistory {
+func startOptionalMetricsHistory(ctx context.Context, cfg *config.Config, open historyOpener) optionalMetricsHistory {
 	if ctx.Err() != nil {
 		return optionalMetricsHistory{state: historyOff}
 	}
@@ -97,8 +122,11 @@ func startOptionalMetricsHistory(ctx context.Context, cfg *config.Config) option
 	if dir == "" || ctx.Err() != nil {
 		return optionalMetricsHistory{state: historyOff}
 	}
-	h, err := metricshistory.Start(metricshistory.StartupConfig{Enabled: true, Directory: dir})
-	if err != nil {
+	if open == nil {
+		return optionalMetricsHistory{state: historyUnavailable}
+	}
+	h, err := open(metricshistory.StartupConfig{Enabled: true, Directory: dir, MaxPages: cfg.MetricsHistoryMaxPages})
+	if err != nil || h == nil {
 		return optionalMetricsHistory{state: historyUnavailable}
 	}
 	return optionalMetricsHistory{state: historyReady, store: h}

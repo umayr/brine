@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,13 +43,70 @@ func TestOptionalHistoryWorkerDoesNotWaitForStartup(t *testing.T) {
 	}
 }
 
+type closingHistory struct {
+	cutoff chan struct{}
+	drain  chan struct{}
+	once   sync.Once
+}
+
+func (h *closingHistory) Cutoff() { h.once.Do(func() { close(h.cutoff) }) }
+
+func (h *closingHistory) Stop(ctx context.Context) error {
+	h.Cutoff()
+	select {
+	case <-h.drain:
+		return errors.New("synthetic unsafe raw close message")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestHistoryCutoffDuringOpenDrainsAndRedactsCloseFailure(t *testing.T) {
+	h := &closingHistory{cutoff: make(chan struct{}), drain: make(chan struct{})}
+	started, publish := make(chan struct{}), make(chan struct{})
+	w := beginMetricsHistory(context.Background(), func(context.Context) optionalMetricsHistory {
+		close(started)
+		<-publish
+		return optionalMetricsHistory{state: historyReady, store: h}
+	})
+	unblock := sync.OnceFunc(func() { close(publish) })
+	finish := sync.OnceFunc(func() { close(h.drain) })
+	defer unblock()
+	defer finish()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("optional startup did not begin")
+	}
+	w.cutoff()
+	unblock()
+	select {
+	case <-h.cutoff:
+	case <-time.After(time.Second):
+		t.Fatal("store opened after cutoff without closing admission")
+	}
+	w.mu.Lock()
+	late := w.store
+	w.mu.Unlock()
+	if late != nil {
+		t.Fatal("canceled startup published its store")
+	}
+	select {
+	case <-w.done:
+		t.Fatal("shutdown acknowledged before close completed")
+	default:
+	}
+	finish()
+	if err := w.stop(time.Second); err != errHistoryShutdown {
+		t.Fatalf("close failure did not surface as sanitized shutdown error: %v", err)
+	}
+}
+
 func TestOptionalHistoryStartupIsIndependent(t *testing.T) {
 	ctx := context.Background()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Skip(err)
+	if base := os.Getenv("BRINE_TEST_TRUSTED_ROOT"); base != "" {
+		t.Setenv("TMPDIR", base)
 	}
-	t.Setenv("TMPDIR", home)
 	root := t.TempDir()
 	makeDir := func(name string) string {
 		t.Helper()
@@ -66,9 +124,16 @@ func TestOptionalHistoryStartupIsIndependent(t *testing.T) {
 		t.Skipf("unsafe synthetic root: %v", err)
 	}
 	cfg := &config.Config{RemoteEnabled: true, DataDir: makeDir("data"), RemoteRegistryDir: makeDir("registry")}
+	open := func(cfg metricshistory.StartupConfig) (historyHandle, error) {
+		h, err := metricshistory.Start(cfg)
+		if err != nil {
+			return nil, err
+		}
+		return h, nil
+	}
 	check := func(want historyState) {
 		t.Helper()
-		h := startOptionalMetricsHistory(ctx, cfg)
+		h := startOptionalMetricsHistory(ctx, cfg, open)
 		if h.store != nil {
 			_ = h.stop(time.Second)
 		}
@@ -80,6 +145,8 @@ func TestOptionalHistoryStartupIsIndependent(t *testing.T) {
 	cfg.MetricsHistoryDir = history
 	check(historyUnavailable) // no implicit enable from a path
 	cfg.MetricsHistoryEnabled = true
+	check(historyUnavailable) // explicit capacity also required
+	cfg.MetricsHistoryMaxPages = 1024
 	check(historyUnavailable) // no implicit provisioning
 	path := filepath.Join(history, sqlitestore.HistoryFilename)
 	if _, err := os.Lstat(path); !os.IsNotExist(err) {
@@ -102,10 +169,13 @@ func TestOptionalHistoryStartupIsIndependent(t *testing.T) {
 	cfg.DataDir = original
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if h := startOptionalMetricsHistory(canceled, cfg); h.state != historyOff || h.store != nil {
+	if h := startOptionalMetricsHistory(canceled, cfg, open); h.state != historyOff || h.store != nil {
 		t.Fatal("canceled startup opened history")
 	}
-	h := startOptionalMetricsHistory(ctx, cfg)
+	if h := startOptionalMetricsHistory(ctx, cfg, nil); h.state != historyUnavailable || h.store != nil {
+		t.Fatal("valid options without product qualification opened history")
+	}
+	h := startOptionalMetricsHistory(ctx, cfg, open)
 	if h.state != historyReady || h.store == nil {
 		t.Fatal("approved synthetic settings did not open the initialized store")
 	}
@@ -114,10 +184,10 @@ func TestOptionalHistoryStartupIsIndependent(t *testing.T) {
 	if err := h.stop(time.Second); err != nil {
 		t.Fatalf("server shutdown failed to acknowledge drain: %v", err)
 	}
-	if err := h.store.Append(ctx, sqlitestore.EnrollmentID{1}, sqlitestore.Observation{}); !errors.Is(err, metricshistory.ErrUnavailable) {
+	if err := h.store.(*metricshistory.History).Append(ctx, sqlitestore.EnrollmentID{1}, sqlitestore.Observation{}); !errors.Is(err, metricshistory.ErrUnavailable) {
 		t.Fatal("server shutdown cutoff left admission open")
 	}
-	two := startOptionalMetricsHistory(ctx, cfg)
+	two := startOptionalMetricsHistory(ctx, cfg, open)
 	if two.state != historyReady || two.store == nil {
 		t.Fatal("validated restart could not reacquire the store")
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/umayr/brine/internal/agentmetrics"
@@ -53,7 +54,10 @@ var observationFormat = persistentFormat{
 // ObservationStore owns a private store lock until Close. It exposes neither
 // the prototype gauge API nor unscoped queries.
 type ObservationStore struct {
-	root *PersistentStore
+	root      *PersistentStore
+	maxPages  int
+	writer    sync.Mutex
+	suspended bool // protected by writer; never automatically reopened
 }
 
 // InitializeObservations explicitly provisions an empty versioned store. An
@@ -139,10 +143,32 @@ func (s *ObservationStore) Append(ctx context.Context, id EnrollmentID, o Observ
 		return errors.New("observation store closed")
 	}
 	v := o.Sample
-	_, err := p.store.db.ExecContext(ctx, `INSERT INTO captures
+	exec := p.store.db.ExecContext
+	if s.maxPages != 0 {
+		s.writer.Lock()
+		defer s.writer.Unlock()
+		if s.suspended {
+			return ErrObservationWritesSuspended
+		}
+		// Configure on the connection that runs the statement. A pool
+		// replacement must not silently lose a connection-local cap.
+		conn, err := p.store.db.Conn(ctx)
+		if err != nil {
+			return s.recordWriteError(err)
+		}
+		defer conn.Close()
+		if err := configureBoundedConn(ctx, conn, s.maxPages); err != nil {
+			return s.recordWriteError(err)
+		}
+		exec = conn.ExecContext
+	}
+	_, err := exec(ctx, `INSERT INTO captures
 	 (enrollment, received_ns, host_total, host_available, owned_count, owned_usage) VALUES (?, ?, ?, ?, ?, ?)`,
 		id[:], ns, nullable(v.HostTotal, v.HasHost), nullable(v.HostAvailable, v.HasHost),
 		nullable(v.OwnedCount, v.HasOwnedCount), nullable(v.OwnedUsage, v.HasOwnedUsage))
+	if s.maxPages != 0 {
+		return s.recordWriteError(err)
+	}
 	return err
 }
 
