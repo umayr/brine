@@ -58,6 +58,18 @@ type Intent struct {
 	ProviderRequestID   []byte
 	OriginalJournal     []byte
 	ApprovedTargetScope []byte
+	Attended            *AttendedIntent
+}
+
+// AttendedIntent authenticates the reviewed delivery context alongside the
+// snapshot and original provider IDs. It contains no credential or proof token.
+type AttendedIntent struct {
+	Target            string `json:"target"`
+	AuthorityRevision string `json:"authorityRevision"`
+	Stack             string `json:"stack"`
+	Mode              string `json:"mode"`
+	Stage             string `json:"stage"`
+	Selection         string `json:"selection"`
 }
 
 // CommitRequest contains the exact reviewed snapshot and its independent

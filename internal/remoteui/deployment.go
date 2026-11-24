@@ -32,22 +32,26 @@ const deployPath = "/remote/deployment"
 var captureLimits = projectsnapshot.Limits{MaxFiles: 1000, MaxEntries: 2000, MaxDepth: 32, MaxFileBytes: 4 << 20, MaxTotalBytes: 16 << 20}
 
 type Deployment struct {
-	auth     *auth.Authenticator
-	registry *targetregistry.Registry
-	stacks   store.StackStore
-	reviews  *projectreview.Store
-	slot     chan struct{}
-	mu       sync.Mutex
-	pending  map[string]deploymentReview
-	git      *git.Runner
-	gitStore store.RemoteGitStore
-	gitMu    sync.Mutex
+	auth          *auth.Authenticator
+	registry      *targetregistry.Registry
+	stacks        store.StackStore
+	reviews       *projectreview.Store
+	slot          chan struct{}
+	mu            sync.Mutex
+	pending       map[string]deploymentReview
+	attendedBytes int
+	closed        bool
+	history       *attendedHistory // nil for every production constructor
+	git           *git.Runner
+	gitStore      store.RemoteGitStore
+	gitMu         sync.Mutex
 }
 
 type deploymentReview struct {
 	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest string
 	Mode, PriorRequestID                                             string
 	Expiry                                                           time.Time
+	Attended                                                         *attendedReview
 }
 
 const deploymentStatusUnavailable = "Status unavailable. Brine could not verify this request. This does not mean the deployment had no effect. Check the original target and its journal, and inspect the target before taking further action; do not retry based on this result."
@@ -71,6 +75,8 @@ type deploymentPage struct {
 	Branch, Source, Target       string
 	GitPolicy                    *store.RemoteGitPolicy
 	JournalCapacityLow           bool
+	Attended                     bool
+	Evidence                     string
 }
 
 func NewDeployment(a *auth.Authenticator, registry *targetregistry.Registry, stacks store.StackStore) (*Deployment, error) {
@@ -84,7 +90,15 @@ func NewDeployment(a *auth.Authenticator, registry *targetregistry.Registry, sta
 	return &Deployment{auth: a, registry: registry, stacks: stacks, reviews: reviews, slot: make(chan struct{}, 4), pending: make(map[string]deploymentReview)}, nil
 }
 
-func (h *Deployment) Close() { h.reviews.Close() }
+func (h *Deployment) Close() {
+	h.reviews.Close()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
+	for id := range h.pending {
+		h.dropReview(id)
+	}
+}
 
 func (h *Deployment) Protected() http.Handler {
 	inner := h.auth.Middleware(http.HandlerFunc(h.serve))
@@ -152,7 +166,15 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer h.gitMu.Unlock()
-		if stack, err := h.stacks.Get(p.Stack); err == nil && stack != nil && stack.RemoteGit != nil && (stack.RemoteGit.Enabled || stack.RemoteGit.Request != "") {
+		stack, stackErr := h.stacks.Get(p.Stack)
+		// A retained attended review cannot become a legacy confirmation
+		// when the history backend is no longer available.
+		historyRequired := review.Attended != nil || (h.history != nil && review.Mode != "remove")
+		if historyRequired && (stackErr != nil || stack == nil || stack.Name != p.Stack) {
+			http.Error(w, "Cannot verify remote Git overlap; no operation sent", http.StatusConflict)
+			return
+		}
+		if stackErr == nil && stack != nil && stack.RemoteGit != nil && (stack.RemoteGit.Enabled || stack.RemoteGit.Request != "") {
 			http.Error(w, "Disable or reconcile remote Git automation before manual operations", 409)
 			return
 		}
@@ -166,6 +188,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		defer releaseRecord.Close()
 		if targetDigest(record) != review.TargetDigest {
 			http.Error(w, "Target was re-paired; no creation sent", 409)
+			return
+		}
+		if historyRequired {
+			h.submitAttended(ctx, w, p, review, record)
 			return
 		}
 		c, epoch, err := openDeploymentSession(ctx, record)
@@ -268,20 +294,44 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Review unavailable; no transfer sent", 409)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
-		if err != nil {
-			http.Error(w, "Target unavailable; no transfer sent", 409)
-			return
+		var stager deploymentStager
+		var epoch string
+		var binding attendedBinding
+		if h.history != nil {
+			c, err := h.history.connection(ctx, record, current.Target.Identity)
+			if err != nil {
+				http.Error(w, "Attended authority unavailable; no transfer sent", http.StatusConflict)
+				return
+			}
+			defer c.client.Close()
+			stager, epoch, binding = c.client, c.epoch, c.binding
+		} else {
+			c, e, err := openDeploymentSession(ctx, record)
+			if err != nil {
+				http.Error(w, "Target unavailable; no transfer sent", 409)
+				return
+			}
+			defer c.Close()
+			stager, epoch = c, e
 		}
-		defer c.Close()
-		stage, manifest, plan, err := stageAndPreview(ctx, c, epoch, p.Stack, intent.Snapshot)
+		stage, manifest, plan, err := stageAndPreview(ctx, stager, epoch, p.Stack, intent.Snapshot)
 		if err != nil {
 			p.Error = "Staging or preview could not be confirmed. Inspect the receiver before preparing another transfer. No retry was sent."
 			p.ID = ""
 			h.render(w, p)
 			return
 		}
-		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan)
+		var review *attendedReview
+		if h.history != nil {
+			p.Attended = true
+			review = newAttendedReview(intent.Snapshot, binding, stage, manifest, p.Stack, plan)
+			if review == nil {
+				p.ID = ""
+				p.Error = "Cannot retain an exact attended review; no operation sent."
+				break
+			}
+		}
+		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review)
 	case deployPath + "/remove-preview":
 		c, epoch, err := openDeploymentSession(ctx, record)
 		if err != nil {
@@ -294,7 +344,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			p.Error = "Managed removal preview unavailable. No operation was sent."
 			break
 		}
-		h.renderPlan(&p, session, current.Target.Identity, "", "", plan)
+		h.renderPlan(&p, session, current.Target.Identity, "", "", plan, nil)
 	default:
 		http.NotFound(w, r)
 		return
@@ -302,7 +352,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	h.render(w, p)
 }
 
-func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview) {
+func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview, attended *attendedReview) {
 	p.JournalCapacityLow = plan.JournalCapacityLow
 	p.Plan, p.ID = plan.PreflightResult, ""
 	if plan.Mode == "" || plan.SelectionDigest == nil || len(plan.Resources) == 0 {
@@ -315,7 +365,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 			}
 		}
 	}
-	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Expiry: time.Now().Add(5 * time.Minute)})
+	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
 	if p.ID != "" {
 		p.Mode = plan.Mode
 	}
@@ -336,7 +386,7 @@ func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agent
 	return p.Open(ctx, ctx, r.HTTPSAddress)
 }
 
-func stageAndPreview(ctx context.Context, c *agentclient.Client, epoch, stack string, snap projectsnapshot.Snapshot) (string, string, *agentclient.DeploymentPreview, error) {
+func stageAndPreview(ctx context.Context, c deploymentStager, epoch, stack string, snap projectsnapshot.Snapshot) (string, string, *agentclient.DeploymentPreview, error) {
 	expected, err := dillserve.SnapshotManifestDigest(ctx, snap)
 	if err != nil {
 		return "", "", nil, err
@@ -392,12 +442,13 @@ func manifestMatches(m dillserve.Manifest, s projectsnapshot.Snapshot) bool {
 func (h *Deployment) add(v deploymentReview) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	now := time.Now()
 	for k, r := range h.pending {
-		if time.Now().After(r.Expiry) {
-			delete(h.pending, k)
+		if !now.Before(r.Expiry) {
+			h.dropReview(k)
 		}
 	}
-	if len(h.pending) >= 64 {
+	if h.closed || len(h.pending) >= 64 || (v.Attended != nil && v.Attended.bytes > maxAttendedReviewBytes-h.attendedBytes) {
 		return ""
 	}
 	var raw [16]byte
@@ -408,9 +459,30 @@ func (h *Deployment) add(v deploymentReview) string {
 	if _, exists := h.pending[id]; exists {
 		return ""
 	}
+	if a := v.Attended; a != nil {
+		h.attendedBytes += a.bytes
+		a.timer = time.AfterFunc(time.Until(v.Expiry), func() {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			if h.pending[id].Attended == a {
+				h.dropReview(id)
+			}
+		})
+	}
 	h.pending[id] = v
 	return id
 }
+
+// dropReview requires h.mu. It releases retained byte accounting on expiry,
+// consumption and shutdown, including when no subsequent request arrives.
+func (h *Deployment) dropReview(id string) {
+	if a := h.pending[id].Attended; a != nil {
+		h.attendedBytes -= a.bytes
+		a.timer.Stop()
+	}
+	delete(h.pending, id)
+}
+
 func (h *Deployment) take(id, session, confirm string) (deploymentReview, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -418,7 +490,7 @@ func (h *Deployment) take(id, session, confirm string) (deploymentReview, bool) 
 	if !ok || r.Session != session || confirm != r.Mode || !time.Now().Before(r.Expiry) {
 		return deploymentReview{}, false
 	}
-	delete(h.pending, id)
+	h.dropReview(id)
 	return r, true
 }
 
@@ -438,14 +510,14 @@ func IsDeploymentPath(path string) bool {
 
 var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Remote deployment</title><main><h1>Remote deployment</h1><p><a href="/remote">Remote hosts</a></p>
 {{if .Error}}<p role="alert">{{.Error}}</p>{{end}}{{if .JournalCapacityLow}}<p role="alert">Dill's journal is nearing its size limit. Preserve the journal; do not delete it to make room.</p>{{end}}<p>Target: <bdi>{{.Host}}</bdi></p>
-{{if and .ID (not .Review)}}<p><label for="deployment-request-id">Request ID</label><br><input type="text" id="deployment-request-id" value="{{.ID}}" readonly size="34" style="max-width:100%;box-sizing:border-box" aria-describedby="deployment-request-help"></p>
+{{if and .ID (not .Review) (or (not .Attended) (not .Plan))}}<p><label for="deployment-request-id">Request ID</label><br><input type="text" id="deployment-request-id" value="{{.ID}}" readonly size="34" style="max-width:100%;box-sizing:border-box" aria-describedby="deployment-request-help"></p>
 <p id="deployment-request-help">Select and copy the full request ID, or save the status link to return after a disconnect.</p>
-<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">{{if .Plan}}Open status link{{else}}Refresh status{{end}}</a> · Checks this request without resubmitting it.</p>{{end}}
-{{if .Status}}<p>Stack {{.Status.Stack}} · State {{.Status.State}} · Effects {{.Status.Effects}}{{if .Status.OperationID}} · Dill operation <code>{{.Status.OperationID}}</code>{{end}}</p>{{if eq .Status.State "unknown"}}<p role="alert">Outcome unknown. Dill recorded this request but could not determine its outcome. Inspect the target before taking further action; do not retry based on this result.</p>{{else if and (eq .Status.State "failed") (eq .Status.Effects "partial")}}<p role="alert">The operation failed after partially changing the target. Inspect the target and the recorded Dill operation before taking further action; do not retry based on this result.</p>{{end}}{{end}}
+{{if not .Attended}}<p><a href="/remote/deployment?host={{.Host|urlquery}}&amp;id={{.ID|urlquery}}">{{if .Plan}}Open status link{{else}}Refresh status{{end}}</a> · Checks this request without resubmitting it.</p>{{end}}{{end}}
+{{if .Evidence}}<p role="status">{{.Evidence}}</p>{{end}}{{if .Status}}<p>Stack {{.Status.Stack}} · State {{.Status.State}} · Effects {{.Status.Effects}}{{if .Status.OperationID}} · Dill operation <code>{{.Status.OperationID}}</code>{{end}}</p>{{if eq .Status.State "unknown"}}<p role="alert">Outcome unknown. Dill recorded this request but could not determine its outcome. Inspect the target before taking further action; do not retry based on this result.</p>{{else if and (eq .Status.State "failed") (eq .Status.Effects "partial")}}<p role="alert">The operation failed after partially changing the target. Inspect the target and the recorded Dill operation before taking further action; do not retry based on this result.</p>{{end}}{{end}}
 {{if .Review}}<h2>Review captured files</h2><p>Only transfer trusted projects. Staging may contain credentials; the configured target can evaluate Pkl with the agent account’s privileges. This is not a sandbox. Effective Brine variables are not transferred. No files have been sent yet.</p><p>Entrypoint: <code>{{.Review.Entrypoint}}</code></p><ul>{{range .Review.Files}}<li>{{.Path}} · {{.Size}} bytes · <code>{{printf "%x" .SHA256}}</code></li>{{end}}</ul>
 <form method="post" action="/remote/deployment/stage"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="id" value="{{.Review.ID}}"><label><input type="checkbox" name="confirm" value="transfer" required> Send these exact files and request a preview</label><button>Stage and preview</button></form>
 {{else if .Plan}}<h2>Deployment preview for {{.Stack}}</h2><ul>{{range .Plan.Resources}}<li>{{.Kind}} {{.Name}} · {{.Presence}} · {{.Action}}{{if .Retention}} · {{.Retention}}{{end}}</li>{{end}}</ul>
-{{if .Mode}}<p>This preview did not permit writes. Save the status link before confirming if you need to recover after a disconnect.</p><form method="post" action="/remote/deployment/create"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="{{.Mode}}" required> Confirm {{.Mode}} for this stack on this target</label><button>{{if eq .Mode "create"}}Create stack{{else if eq .Mode "update"}}Update stack{{else}}Remove containers; keep data{{end}}</button></form>{{else}}<p>Mutation unavailable. Existing resources are not adopted.</p>{{end}}
+{{if .Mode}}<p>This preview did not permit writes.{{if not .Attended}} Save the status link before confirming if you need to recover after a disconnect.{{end}}</p><form method="post" action="/remote/deployment/create"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="id" value="{{.ID}}"><label><input type="checkbox" name="confirm" value="{{.Mode}}" required> Confirm {{.Mode}} for this stack on this target</label><button>{{if eq .Mode "create"}}Create stack{{else if eq .Mode "update"}}Update stack{{else}}Remove containers; keep data{{end}}</button></form>{{else}}<p>Mutation unavailable. Existing resources are not adopted.</p>{{end}}
 {{else if .GitPolicy}}<h2>Remote Git automation for {{.Stack}}</h2><p>Selected target: {{.Host}} · Branch: <code>{{.Branch}}</code> · State: {{.GitPolicy.Phase}} · Commit: <code>{{.GitPolicy.Commit}}</code></p>
 {{if .GitPolicy.AttemptHistoryLow}}<p role="alert">{{if .GitPolicy.CanRecordAttempt}}The Git attempt history is nearing its size limit.{{else}}The Git attempt history is full. No new commits will be sent.{{end}} Preserve the recorded attempts.</p>{{end}}
 {{with .GitPolicy.Reason}}<p>{{if eq . "awaiting-status"}}No terminal status has been recorded yet.{{else if eq . "running"}}Dill admitted the request and it is running.{{else if eq . "unknown"}}Dill admitted the request but cannot prove its outcome. Inspect the target; do not retry.{{else if eq . "status-unavailable"}}The exact request or its original journal could not be verified.{{else if eq . "staging-or-preview"}}Staging or preview did not complete. Inspect the receiver before taking further action.{{else if eq . "journal-capacity"}}Dill reports that its journal is near capacity. No apply was sent. Preserve the journal and inspect agent state.{{else if eq . "no-journal"}}The agent does not advertise a recoverable journal. No apply was sent.{{else if eq . "not-admitted"}}Dill fenced the request without admitting it. Automation is disabled and the same commit will not be resubmitted.{{else if eq . "failed"}}Dill reported a failure. Inspect the target before re-enabling automation.{{end}}</p>{{end}}
