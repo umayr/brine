@@ -294,6 +294,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Review unavailable; no transfer sent", 409)
 			return
 		}
+		if intent.PriorDeployment != nil && (h.history == nil || h.history.restoreGate == nil) {
+			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
+			return
+		}
 		var stager deploymentStager
 		var epoch string
 		var binding attendedBinding
@@ -314,6 +318,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			defer c.Close()
 			stager, epoch = c, e
 		}
+		if prior := intent.PriorDeployment; prior != nil && (!restoreBindingMatches(prior, binding, "") || h.history.restoreGate(ctx, session, current, prior.ObjectID) != nil || ctx.Err() != nil) {
+			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
+			return
+		}
 		stage, manifest, plan, err := stageAndPreview(ctx, stager, epoch, p.Stack, intent.Snapshot)
 		if err != nil {
 			p.Error = "Staging or preview could not be confirmed. Inspect the receiver before preparing another transfer. No retry was sent."
@@ -325,11 +333,12 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		if h.history != nil {
 			p.Attended = true
 			review = newAttendedReview(intent.Snapshot, binding, stage, manifest, p.Stack, plan)
-			if review == nil {
+			if review == nil || (intent.PriorDeployment != nil && !restoreBindingMatches(intent.PriorDeployment, binding, review.journal)) {
 				p.ID = ""
 				p.Error = "Cannot retain an exact attended review; no operation sent."
 				break
 			}
+			review.prior = intent.PriorDeployment
 		}
 		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review)
 	case deployPath + "/remove-preview":

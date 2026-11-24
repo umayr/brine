@@ -514,7 +514,7 @@ func validAttended(a *AttendedIntent) bool {
 	}
 	return canonicalHex(a.Target, 32) && canonicalHex(a.AuthorityRevision, 32) &&
 		len(a.Stack) > 0 && len(a.Stack) <= 128 && (a.Mode == "create" || a.Mode == "update") &&
-		canonicalHex(a.Stage, 16) && strings.HasPrefix(a.Selection, "sha256:") && canonicalHex(strings.TrimPrefix(a.Selection, "sha256:"), 32)
+		(a.PriorObject == "" || canonicalHex(a.PriorObject, 32)) && canonicalHex(a.Stage, 16) && strings.HasPrefix(a.Selection, "sha256:") && canonicalHex(strings.TrimPrefix(a.Selection, "sha256:"), 32)
 }
 
 func canonicalHex(s string, n int) bool {

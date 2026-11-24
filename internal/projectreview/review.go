@@ -60,8 +60,21 @@ type Current struct {
 
 // Intent is captured once at Create; callers must not mutate inputs concurrently.
 type Intent struct {
-	Snapshot projectsnapshot.Snapshot
-	Current  Current
+	Snapshot        projectsnapshot.Snapshot
+	Current         Current
+	PriorDeployment *PriorDeployment
+}
+
+// PriorDeployment is private provenance, not approval or a public review field.
+// IDs are encoded bytes to keep the retained metadata bounded and independent
+// of provider request, local intent, and operation identifiers on the new run.
+type PriorDeployment struct {
+	ObjectID          [32]byte
+	RequestID         [16]byte
+	AttemptID         [16]byte
+	Journal           [16]byte
+	ScopeDigest       [32]byte
+	AuthorityRevision [32]byte
 }
 
 // File is public metadata only; it cannot expose captured content by serialization.
@@ -174,6 +187,10 @@ func copyCurrent(c Current) Current {
 }
 func clone(in Intent) Intent {
 	out := in
+	if in.PriorDeployment != nil {
+		prior := *in.PriorDeployment
+		out.PriorDeployment = &prior
+	}
 	out.Current = copyCurrent(in.Current)
 	out.Snapshot.Entrypoint = strings.Clone(in.Snapshot.Entrypoint)
 	out.Snapshot.Files = make([]projectsnapshot.File, len(in.Snapshot.Files))

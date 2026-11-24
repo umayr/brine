@@ -24,6 +24,8 @@ import (
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/dillserve"
+	"github.com/umayr/brine/internal/projectreview"
+	"github.com/umayr/brine/internal/projectsnapshot"
 	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
@@ -62,6 +64,9 @@ type attendedArchiveFixture struct {
 	commits, markers, receipts int
 	retained                   []snapshothistory.CommitRequest
 	err, markerErr, receiptErr error
+	historical                 snapshothistory.Record
+	evidence                   snapshothistory.Evidence
+	historicalReads            int
 }
 
 func (a *attendedArchiveFixture) Commit(_ context.Context, r snapshothistory.CommitRequest) (snapshothistory.OpenRequest, error) {
@@ -82,6 +87,14 @@ func (a *attendedArchiveFixture) MarkDeliveryUnknown(_ context.Context, _ snapsh
 func (a *attendedArchiveFixture) RecordTerminalObservation(_ context.Context, _ snapshothistory.OpenRequest, _ snapshothistory.TerminalObservation) error {
 	a.receipts++
 	return a.receiptErr
+}
+
+func (a *attendedArchiveFixture) Open(context.Context, snapshothistory.OpenRequest) (snapshothistory.Record, error) {
+	a.historicalReads++
+	return a.historical, nil
+}
+func (a *attendedArchiveFixture) ReadEvidence(context.Context, snapshothistory.OpenRequest) (snapshothistory.Evidence, error) {
+	return a.evidence, nil
 }
 
 type attendedProviderFixture struct {
@@ -169,6 +182,12 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		{"create backend absent at confirm", "create", "backend absent", "Attended authority unavailable", 0, 0, 0},
 		{"update backend absent at confirm", "update", "backend absent", "Attended authority unavailable", 0, 0, 0},
 		{"lost provider reply", "update", "lost reply", "Operation not confirmed. No retry was sent", 1, 1, 1},
+		{"restore as new", "update", "restore", "Verified terminal receipt saved", 1, 1, 1},
+		{"restore historical unknown", "update", "restore unknown", "", 0, 0, 0},
+		{"restore authorization denied", "update", "restore denied", "", 0, 0, 0},
+		{"restore rotation fenced", "update", "restore rotation", "", 0, 0, 0},
+		{"restore journal changed", "update", "restore journal", "Cannot retain an exact attended review", 0, 0, 0},
+		{"restore revoked after preview", "update", "restore revoked", "Archived configuration is not authorized", 0, 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var archive attendedArchiveFixture
@@ -275,13 +294,63 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
 			form := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
-			form.Set("id", field(invoke("POST", deployPath+"/review", form), "id"))
+			isRestore := strings.HasPrefix(tc.problem, "restore")
+			var prior snapshothistory.OpenRequest
+			var gateDenied bool
+			if !isRestore {
+				form.Set("id", field(invoke("POST", deployPath+"/review", form), "id"))
+			} else {
+				content := []byte(attendedSource)
+				snapshot := projectsnapshot.Snapshot{Entrypoint: "main.pkl", Files: []projectsnapshot.File{{Path: "main.pkl", Content: content, SHA256: sha256.Sum256(content)}}}
+				digest, err := dillserve.SnapshotManifestDigest(context.Background(), snapshot)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prior = snapshothistory.OpenRequest{ObjectID: sha256.Sum256([]byte("prior-object")), ManifestDigest: digest, Intent: snapshothistory.Intent{
+					AttemptID: []byte(strings.Repeat("1", 32)), ProviderRequestID: []byte(strings.Repeat("2", 32)), OriginalJournal: []byte(attendedJournal), ApprovedTargetScope: []byte(binding.scope),
+					Attended: &snapshothistory.AttendedIntent{Target: binding.target, Stack: "synthetic", AuthorityRevision: binding.revision},
+				}}
+				archive.historical = snapshothistory.Record{ObjectID: prior.ObjectID, Intent: prior.Intent, ManifestDigest: digest, Snapshot: snapshot}
+				archive.evidence = snapshothistory.Evidence{State: snapshothistory.VerifiedReceipt, Receipt: &snapshothistory.TerminalObservation{State: "succeeded", Effects: "complete", ContractVersion: binding.contractVersion}}
+				gateDenied = tc.problem == "restore denied"
+				h.history.restoreGate = func(_ context.Context, _ string, _ projectreview.Current, object snapshothistory.ObjectID) error {
+					if gateDenied || object != prior.ObjectID {
+						return errRestoreReview
+					}
+					return nil
+				}
+				if tc.problem == "restore unknown" {
+					archive.evidence = snapshothistory.Evidence{State: snapshothistory.DeliveryUnknown}
+				}
+				if tc.problem == "restore rotation" {
+					binding.revision = strings.Repeat("f", 64)
+				}
+				if err := os.WriteFile(stack.PklPath, []byte("current workspace differs from history"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+				current := projectreview.Current{Stack: "synthetic", Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: binding.target, Socket: row.HTTPSAddress, Endpoint: row.ID}}
+				preview, err := h.prepareRestoreReview(context.Background(), session, current, binding, prior)
+				if tc.problem == "restore unknown" || tc.problem == "restore denied" || tc.problem == "restore rotation" {
+					if err == nil || preview.ID != "" || archive.historicalReads != 0 || provider.stages != 0 || provider.applies != 0 {
+						t.Fatal("unauthorized or unresolved history reached byte review")
+					}
+					return
+				}
+				if err != nil || preview.ID == "" {
+					t.Fatalf("fresh review unavailable: %v", err)
+				}
+				form.Set("id", preview.ID)
+				if tc.problem == "restore journal" {
+					provider.journal = strings.Repeat("9", 32)
+				}
+			}
 			if err := os.WriteFile(stack.PklPath, []byte("different-after-review"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			form.Set("confirm", "transfer")
 			stage := invoke("POST", deployPath+"/stage", form)
-			if tc.problem == "no proof" || tc.problem == "no journal" {
+			if tc.problem == "no proof" || tc.problem == "no journal" || tc.problem == "restore journal" {
 				wantStages := 1
 				if tc.problem == "no proof" {
 					wantStages = 0
@@ -312,6 +381,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 				provider.loss = true
 			case "backend absent":
 				h.history = nil
+			case "restore revoked":
+				gateDenied = true
 			default:
 				stacks.block = tc.problem
 			}
@@ -344,6 +415,10 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			if len(archive.retained) > 0 {
 				r := archive.retained[0]
+				if isRestore && (r.ObjectID == prior.ObjectID || r.Intent.Attended == nil || r.Intent.Attended.PriorObject != fmt.Sprintf("%x", prior.ObjectID) ||
+					string(r.Intent.AttemptID) == string(prior.Intent.AttemptID) || string(r.Intent.ProviderRequestID) == string(prior.Intent.ProviderRequestID) || archive.evidence.State != snapshothistory.VerifiedReceipt) {
+					t.Fatal("new operation reused or modified historical identity/evidence")
+				}
 				if r.Intent.Attended == nil || r.Intent.Attended.Target != targetDigest(row) || string(r.Intent.ApprovedTargetScope) != binding.scope || string(r.Intent.AttemptID) != id || string(r.Intent.OriginalJournal) != attendedJournal || string(r.Snapshot.Files[0].Content) != attendedSource {
 					t.Fatal("archive lost reviewed binding or exact bytes")
 				}
