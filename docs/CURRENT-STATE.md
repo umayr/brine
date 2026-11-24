@@ -1,6 +1,6 @@
 # Brine and Dill: current state and roadmap
 
-This summarizes Brine after its Dill v0.8.0 bundle update and the companion Dill v0.8.0 release. “Shipped” means available in these versions, not validated in every deployment. Brine's [longer roadmap](../ROADMAP.md) is a vision; older Alpha documents are historical where their instructions conflict with current disablement.
+Brine owns workspaces and operator workflows. Dill owns the schema, engine operations and target-side results. See the [roadmap](../ROADMAP.md) for proposed work.
 
 ## Shipped / present
 
@@ -18,15 +18,13 @@ This summarizes Brine after its Dill v0.8.0 bundle update and the companion Dill
 
 - **HTTPS deployment:** Disposable Linux arm64 Docker on Colima covered reviewed lifecycle, Git deployment, late-request rejection, post-admission restart without replay, and capacity refusal ([lifecycle evidence](https://github.com/umayr/dill/pull/108#issuecomment-6970362755), [recovery and retention evidence](https://github.com/umayr/dill/pull/110#issuecomment-6997931833)). Those checks are not a production rollout or a qualification of remote Podman, SSH, or local Alpha. Use a supervised disposable-host pilot before relying on automation.
 - **Remote reads and reveal:** real SSH transport and provisioning are not qualified by the synthetic evidence; independently verify SSH, agent and engine identities. Dill's agent does not authenticate socket callers; same-UID access and engine sockets are privileged trust boundaries, not a sandbox. Podman is not supported by that agent CLI. Reveal requires separately provisioned keys and audit state; delivery, revocation and erasure are not guaranteed. See [target registry](target-registry.md) and [remote reveal](remote-reveal.md).
-- **Cross-application Alpha:** historical paired Docker/rootless Podman results cover particular prior commits and fixtures, not current disabled functionality, complete browser/server deployment, restart recovery, or arbitrary environments. See [historical evidence](alpha-secrets-status.md) and [operation evidence](alpha-operation-consumer.md). No new real-engine, real-SSH or browser qualification is asserted here.
 - **Project transfer:** staging moves potentially sensitive project files, not an approved execution. Dill's receiver has stricter path rules than Brine's builder; compatibility and explicit whole-file-list consent matter. Trusted local filesystem, same-user and retention assumptions apply; hashes alone do not authenticate a sender. See Dill's [receiver limitations](https://github.com/umayr/dill/blob/5e493fdaf1b32363b4b3d620b1422be77725d280/docs/project-snapshot-receiver.md) and Brine's [sender](../internal/projectstaging/sender.go).
 
 ## Planned / dependencies
 
 1. Keep Dill the execution and coordination authority and Brine the operator interface and workspace owner. Broader managed execution still requires negotiated contracts and matching endpoint identity; successful inventory alone does not establish ownership.
 2. Run a supervised disposable-host pilot with the released agent before broader adoption. Staging alone grants no execution authority and does not sandbox source evaluation.
-3. Re-enable any qualified operations, history or secrets only after explicit design, compatible paired versions, retained-state safety, real target/runtime tests and end-to-end browser/restart/recovery qualification. Do not infer re-enablement from old documentation or capability pins.
-4. Later work includes more visible recovery and diagnostics, staged coexistence with existing controllers, richer recipes, scheduling and integrations. Dependencies and acceptance criteria are in the [ticket index](design/TICKETS.md); phase labels are not claims of implementation.
+3. Later work includes more visible recovery and diagnostics, staged coexistence with existing controllers, richer recipes, scheduling and integrations. Dependencies and acceptance criteria are in the [ticket index](design/TICKETS.md); phase labels are not claims of implementation.
 
 ## Evidence limits
 
