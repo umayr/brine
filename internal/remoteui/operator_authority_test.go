@@ -33,6 +33,12 @@ func (s *operatorSourceFixture) LoadCurrent(_ context.Context, _ targetregistry.
 }
 
 func TestOperatorDeployAuthoritySeparatesCredentialsAndFailsClosed(t *testing.T) {
+	exerciseOperatorAuthority(t, nil)
+}
+
+// prepareSource, when provided, drives the same adapter through the actual
+// generated private-file source and returns a credential replacement action.
+func exerciseOperatorAuthority(t *testing.T, prepareSource func(*testing.T, operatorGrantApproval, string) (operatorGrantSource, func())) {
 	ctx := context.Background()
 	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{11}, 32))
 	pub := priv.Public().(ed25519.PublicKey)
@@ -114,6 +120,10 @@ func TestOperatorDeployAuthoritySeparatesCredentialsAndFailsClosed(t *testing.T)
 		})
 	}
 	*source = operatorSourceFixture{approval: base, token: deploy}
+	replace := func() { source.approval.Revision = strings.Repeat("3", 64) }
+	if prepareSource != nil {
+		a.source, replace = prepareSource(t, base, deploy)
+	}
 	c, err := a.connect(ctx, row, active)
 	if err != nil {
 		t.Fatal(err)
@@ -127,9 +137,15 @@ func TestOperatorDeployAuthoritySeparatesCredentialsAndFailsClosed(t *testing.T)
 	if got, err := apply(); got != (agentclient.DeploymentStatus{}) || err == nil || monitorCalls.Load() != 1 || deployCalls.Load() != 1 || escapedCalls.Load() != 0 {
 		t.Fatalf("unexpected split or redirect behavior: %v", err)
 	}
-	source.approval.Revision = strings.Repeat("3", 64)
+	replace()
 	if got, err := apply(); got != (agentclient.DeploymentStatus{}) || err == nil || deployCalls.Load() != 1 {
-		t.Fatal("stale connected client sent after revision replacement")
+		t.Fatal("stale connected client sent after approval or credential replacement")
+	}
+	if prepareSource != nil {
+		before := monitorCalls.Load()
+		if fresh, err := a.connect(ctx, row, active); err != errOperatorAuthority || fresh.client != nil || monitorCalls.Load() != before {
+			t.Fatal("replacement silently renewed approval")
+		}
 	}
 	if c.binding.scope != fmt.Sprintf("%x", active) || c.binding.target != targetDigest(row) {
 		t.Fatal("connection was not scoped to exact active enrollment")

@@ -26,9 +26,17 @@ existing exact journal echo and response checks. No secret or reference is
 written to archive or logs. Only a non-secret derived approval revision is passed
 to archive intent. Transport errors and denials do not establish non-admission.
 
-There is no real credential source, startup/config mounting, HTTP activation,
-credential provisioning or production qualification here. A future trusted
-source must implement private reference resolution, operator-only approval and
-revision/custody lifecycle. In particular, no ambient token-file reader may
-silently bless replacement bytes or auto-rotate a local approval. Generated
-loopback fixtures exercise the seam, not the released pair or live authority.
+An unmounted Linux reader accepts an absolute trusted owner-only directory plus
+one independently approved opaque basename and SHA-256 commitment. It follows
+no links, rejects hardlinks, unsafe modes/owners/ACLs, non-regular files and
+noncanonical or oversized bytes, and rechecks the file descriptor and directory
+entry after reading. It has no file writer or approval-renewal mechanism.
+Changing bytes cannot renew authority under an existing approval. Returning the
+original exact bytes is not permanent revocation; that requires retiring the
+approval through a lifecycle not implemented here. The filesystem contract
+does not protect against root, hostile same-UID writers, or unsupported mounts.
+
+There is no startup/config mounting, HTTP activation, credential provisioning,
+operator-facing custody lifecycle, or production qualification here. Generated
+private Linux fixture files and loopback clients exercise the reader, not the
+released pair or live authority.
