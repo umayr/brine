@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 )
@@ -19,6 +20,10 @@ func (h *stackHandler) admitStack(w http.ResponseWriter, r *http.Request, name s
 	}
 	unlock, err := h.agent.Dill().LockStackContext(ctx, name)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			writeError(w, http.StatusServiceUnavailable, "Local admission blocked; inspect process quarantine and persistent state; no operation started")
+			return nil, false
+		}
 		writeError(w, http.StatusRequestTimeout, "Stack busy or request cancelled; no operation started")
 		return nil, false
 	}
