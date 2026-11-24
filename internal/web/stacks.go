@@ -90,7 +90,11 @@ func (h *Handler) stackDetail(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Request, variableError string) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -152,7 +156,11 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 
 func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -285,7 +293,11 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	entrypointContent = pkl.WithStackName(entrypointContent, name)
 
 	if _, err := h.store.Create(name, entrypointContent); err != nil {
@@ -310,7 +322,11 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -337,7 +353,11 @@ func (h *Handler) stackValidate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderAlert(w, "error", "Stack not found")
@@ -385,7 +405,11 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		http.Error(w, "Stack not found", http.StatusNotFound)
@@ -426,7 +450,11 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
 		h.renderAlert(w, "error", "Stack not found")
@@ -452,7 +480,11 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	// Return a swappable partial even on failure so polling and manual refresh
 	// remain recoverable. Never expose subprocess output or workspace paths.
 	unavailable := func(message string) {
@@ -491,7 +523,11 @@ func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -512,7 +548,11 @@ func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	filename := chi.URLParam(r, "filename")
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
@@ -528,7 +568,11 @@ func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	filename := chi.URLParam(r, "filename")
 	if err := h.store.DeleteFile(name, filename); err != nil {
 		h.renderAlert(w, "error", err.Error())
@@ -540,7 +584,11 @@ func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) stackSetEntrypoint(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return
@@ -610,7 +658,11 @@ func (h *Handler) stackGitCreate(w http.ResponseWriter, r *http.Request) {
 // stackGitPull pulls from origin and shows the result.
 func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil || stack.Git == nil {
 		h.renderAlert(w, "error", "Stack not found or not git-backed")
@@ -642,7 +694,11 @@ func (h *Handler) stackGitPull(w http.ResponseWriter, r *http.Request) {
 // stackGitUpdateSource saves updated git source settings.
 func (h *Handler) stackGitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if err := r.ParseForm(); err != nil {
 		h.renderAlert(w, "error", "Invalid form data")
 		return

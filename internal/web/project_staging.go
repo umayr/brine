@@ -166,7 +166,11 @@ func (h *Handler) stagingPrepare(w http.ResponseWriter, r *http.Request) {
 	r, releaseContext := h.stagingLifecycle.request(r)
 	defer releaseContext()
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if r.Context().Err() != nil {
 		http.Error(w, "Request cancelled", http.StatusRequestTimeout)
 		return
@@ -234,7 +238,11 @@ func (h *Handler) stagingConfirm(w http.ResponseWriter, r *http.Request) {
 	r, releaseContext := h.stagingLifecycle.request(r)
 	defer releaseContext()
 	name := chi.URLParam(r, "name")
-	defer h.lockStack(name)()
+	unlock, admitted := h.admitStack(w, r, name)
+	if !admitted {
+		return
+	}
+	defer unlock()
 	if r.Context().Err() != nil {
 		http.Error(w, "Request cancelled", http.StatusRequestTimeout)
 		return
