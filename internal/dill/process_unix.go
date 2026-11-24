@@ -5,36 +5,56 @@ package dill
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os/exec"
 	"syscall"
 	"time"
 )
 
+var processSlots = make(chan struct{}, 8)
+
 func configureProcessCancellation(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
-
-// Observe exit without reaping: the leader reserves its PID until group cleanup
-// is finished. No cancellation goroutine may signal the numeric PGID after Wait.
 func runSupervised(ctx context.Context, cmd *exec.Cmd) error {
-	delay := cmd.WaitDelay
-	cmd.Cancel = nil
-	cmd.WaitDelay = 0 // disable exec's independent cancellation/reaping machinery
-	if err := cmd.Start(); err != nil {
+	return runOwnedProcess(ctx, cmd, func(pid int) error { return groupCleanupError(pid, syscall.Kill(-pid, syscall.SIGKILL)) }, processExited)
+}
+func runOwnedProcess(ctx context.Context, cmd *exec.Cmd, killGroup func(int) error, exited func(int) (bool, error)) error {
+	select {
+	case processSlots <- struct{}{}:
+	default:
+		return errors.New("local process supervisor capacity exhausted")
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			<-processSlots
+		}
+	}()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cmd.WaitDelay = delay // still bound inherited pipes after group cleanup
-	var observation error
+	pipes, err := ownProcessIO(cmd)
+	if err != nil {
+		return err
+	}
+	cmd.Cancel = nil
+	cmd.WaitDelay = 0 // no independent exec watcher or pipe goroutines
+	if err = cmd.Start(); err != nil {
+		pipes.finish(false)
+		return err
+	}
+	pipes.started()
+	pid := cmd.Process.Pid
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+	var observation error
 	for {
-		exited, err := processExited(cmd.Process.Pid)
-		if err != nil {
-			observation = err
+		done, e := exited(pid)
+		if e != nil {
+			observation = e
 			break
 		}
-		if exited || ctx.Err() != nil {
+		if done || ctx.Err() != nil {
 			break
 		}
 		select {
@@ -42,14 +62,45 @@ func runSupervised(ctx context.Context, cmd *exec.Cmd) error {
 		case <-ticker.C:
 		}
 	}
-	killErr := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	killErr = groupCleanupError(cmd.Process.Pid, killErr)
-	if observation != nil {
-		observation = fmt.Errorf("observe owned process: %w", observation)
+	cleanup := killGroup(pid)
+	if cleanup != nil {
+		_ = cmd.Process.Kill()
+	} // direct leader fallback, still before reap
+	deadline := time.Now().Add(time.Second)
+	for {
+		done, e := exited(pid)
+		if e == nil && done {
+			wait := cmd.Wait() // no group signals occur after this point
+			pipeErr := pipes.finish(true)
+			if cleanup != nil || observation != nil {
+				return errors.Join(ErrProcessUnknown, cleanup, observation, wait, pipeErr, ctx.Err())
+			}
+			return errors.Join(wait, pipeErr, ctx.Err())
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		<-ticker.C
 	}
-	if killErr != nil {
-		killErr = fmt.Errorf("clean owned process group: %w", killErr)
-	}
-	waitErr := cmd.Wait()
-	return errors.Join(observation, killErr, waitErr, ctx.Err())
+	pipes.finish(false) // join all output before returning buffers/handler ownership
+	retained = true
+	// Capacity is reserved before Start. At most eight owned leaders can remain;
+	// durable quarantine is separate and is never automatically cleared here.
+	go func() {
+		defer func() { <-processSlots }()
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for range tick.C {
+			done, e := exited(pid)
+			if e != nil {
+				continue
+			}
+			_ = killGroup(pid)
+			if done {
+				_ = cmd.Wait()
+				return
+			}
+		}
+	}()
+	return errors.Join(ErrProcessUnknown, cleanup, observation, ctx.Err())
 }

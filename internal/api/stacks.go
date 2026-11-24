@@ -742,11 +742,3 @@ func (h *stackHandler) gitUpdateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, &src)
 }
-
-// lockStack shares the same coordinator with Git sync and secret previews.
-func (h *stackHandler) lockStack(name string) func() {
-	if h.agent == nil || h.agent.Dill() == nil {
-		return func() {}
-	}
-	return h.agent.Dill().LockStack(name)
-}

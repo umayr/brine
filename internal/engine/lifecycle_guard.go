@@ -17,7 +17,7 @@ var ErrManagedRestart = errors.New("Dill-associated containers cannot be restart
 type LifecycleGuard struct {
 	Engine
 	SecretEnabled func(string) (bool, error)
-	LockStack     func(string) func()
+	LockStack     func(context.Context, string) (func(), error)
 }
 
 func dillAssociated(c *ContainerInfo) bool {
@@ -76,7 +76,11 @@ func (g *LifecycleGuard) change(ctx context.Context, id string, restart bool) er
 	}
 	stack := first.Labels["dill.stack"]
 	if stack != "" && g.LockStack != nil {
-		defer g.LockStack(stack)()
+		unlock, err := g.LockStack(ctx, stack)
+		if err != nil {
+			return err
+		}
+		defer unlock()
 	}
 	immutable, err := g.inspectStart(ctx, first.ID, stack, restart)
 	if err != nil {

@@ -171,6 +171,11 @@ func run() error {
 	runner.Socket = strings.TrimPrefix(effectiveHost, "unix://")
 	runner.ResolveStack = stackPathResolver(st)
 	runner.CheckSource = stackSourceCheck(st)
+	quarantine, err := secretbindings.NewQuarantine(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("local process quarantine unavailable: %w", err)
+	}
+	runner.ConfigureQuarantine(quarantine)
 	variableStore, err := configvars.New(cfg.DataDir, st)
 	if err != nil {
 		return fmt.Errorf("init configuration variables: %w", err)

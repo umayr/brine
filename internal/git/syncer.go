@@ -81,7 +81,13 @@ func (s *Syncer) sync(ctx context.Context, name string) {
 		return // a sync for this stack is already running
 	}
 	defer s.inFlight.Delete(name)
-	defer s.dill.LockStack(name)()
+	admissionCtx, cancelAdmission := context.WithTimeout(ctx, s.timeout)
+	unlock, err := s.dill.LockStackContext(admissionCtx, name)
+	cancelAdmission()
+	if err != nil {
+		return
+	}
+	defer unlock()
 
 	stack, err := s.store.Get(name)
 	if err != nil || stack == nil || (stack.RemoteGit != nil && (stack.RemoteGit.Enabled || stack.RemoteGit.Request != "")) {

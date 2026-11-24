@@ -41,6 +41,7 @@ type Runner struct {
 	RequireOperationObserver bool
 
 	Coordinator secretbindings.Coordinator
+	quarantine  *secretbindings.Quarantine
 
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
@@ -211,7 +212,7 @@ func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
 	defer cleanup()
 	cmd.Stdout = w
 	cmd.Stderr = w
-	if err := runSupervised(ctx, cmd); err != nil {
+	if err := r.runTracked(ctx, cmd); err != nil {
 		return fmt.Errorf("dill %v: %w", args, err)
 	}
 	return nil
@@ -228,7 +229,7 @@ func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
 	defer cleanup()
 	cmd.Stdout = &out
 	cmd.Stderr = &diagnostics
-	err = runSupervised(ctx, cmd)
+	err = r.runTracked(ctx, cmd)
 	if err != nil && diagnostics.buf.Len() > 0 {
 		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(diagnostics.buf.String()))
 	}
@@ -255,6 +256,9 @@ func (r *Runner) runLifecycle(ctx context.Context, w io.Writer, path string, arg
 		return err
 	}
 	if err = r.run(ctx, w, argv...); err != nil {
+		if errors.Is(err, ErrProcessUnknown) {
+			return err
+		}
 		return errors.New("Dill lifecycle failed; an endpoint-pinning compatible Dill may be required")
 	}
 	return nil
@@ -294,7 +298,10 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 	cmd.Args = append([]string{cmd.Path}, argv...)
 	cmd.Stdout = w
 	cmd.Stderr = w
-	if err = runSupervised(ctx, cmd); err != nil {
+	if err = r.runTracked(ctx, cmd); err != nil {
+		if errors.Is(err, ErrProcessUnknown) {
+			return err
+		}
 		if ctx.Err() != nil {
 			return fmt.Errorf("Dill label cleanup interrupted: %w", ctx.Err())
 		}
@@ -556,7 +563,10 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := runSupervised(ctx, cmd); err != nil {
+	if err := r.runTracked(ctx, cmd); err != nil {
+		if errors.Is(err, ErrProcessUnknown) {
+			return err
+		}
 		// Unexpected non-zero exit (e.g. binary not found). Fall back to raw output.
 		out := stdout.String()
 		if errOut := stderr.String(); errOut != "" {
@@ -587,7 +597,10 @@ func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, erro
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := runSupervised(ctx, cmd); err != nil {
+	if err := r.runTracked(ctx, cmd); err != nil {
+		if errors.Is(err, ErrProcessUnknown) {
+			return "", err
+		}
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return "", fmt.Errorf("%s", msg)
 		}

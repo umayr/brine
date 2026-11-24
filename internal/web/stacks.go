@@ -748,10 +748,3 @@ func (h *Handler) qualifiedReadAllowed(w http.ResponseWriter, r *http.Request) b
 	}
 	return true
 }
-
-func (h *Handler) lockStack(name string) func() {
-	if h.agent == nil || h.agent.Dill() == nil {
-		return func() {}
-	}
-	return h.agent.Dill().LockStack(name)
-}

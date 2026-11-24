@@ -37,7 +37,7 @@ func NewLocalAgent(eng engine.Engine, runner *dill.Runner) *LocalAgent {
 	if eng != nil {
 		guard := &engine.LifecycleGuard{Engine: eng}
 		if runner != nil {
-			guard.LockStack = runner.LockStack
+			guard.LockStack = runner.LockStackContext
 		}
 		eng = guard
 		if runner != nil && runner.Profile == target.Alpha {
