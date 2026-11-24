@@ -19,6 +19,10 @@ func runSupervised(ctx context.Context, cmd *exec.Cmd) error {
 	return runOwnedProcess(ctx, cmd, func(pid int) error { return groupCleanupError(pid, syscall.Kill(-pid, syscall.SIGKILL)) }, processExited)
 }
 func runOwnedProcess(ctx context.Context, cmd *exec.Cmd, killGroup func(int) error, exited func(int) (bool, error)) error {
+	return runOwnedProcessWith(ctx, cmd, killGroup, exited, func() error { return cmd.Process.Kill() })
+}
+
+func runOwnedProcessWith(ctx context.Context, cmd *exec.Cmd, killGroup func(int) error, exited func(int) (bool, error), killLeader func() error) error {
 	select {
 	case processSlots <- struct{}{}:
 	default:
@@ -64,7 +68,7 @@ func runOwnedProcess(ctx context.Context, cmd *exec.Cmd, killGroup func(int) err
 	}
 	cleanup := killGroup(pid)
 	if cleanup != nil {
-		_ = cmd.Process.Kill()
+		_ = killLeader()
 	} // direct leader fallback, still before reap
 	deadline := time.Now().Add(time.Second)
 	for {

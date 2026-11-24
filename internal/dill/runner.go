@@ -1,7 +1,6 @@
 package dill
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -550,7 +549,7 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 			return err
 		}
 	}
-	var stdout, stderr bytes.Buffer
+	stdout, stderr := captureBuffer{limit: 4 << 20}, captureBuffer{limit: 64 << 10}
 	args, err := r.lifecycleArgs(pklPath, "validate", "--stdin", "--format", "json")
 	if err != nil {
 		return err
@@ -563,7 +562,11 @@ func (r *Runner) ValidateContent(ctx context.Context, pklPath, content string) e
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := r.runTracked(ctx, cmd); err != nil {
+	err = r.runTracked(ctx, cmd)
+	if stdout.overflow || stderr.overflow {
+		return errors.Join(errCaptureLimit, err)
+	}
+	if err != nil {
 		if errors.Is(err, ErrProcessUnknown) {
 			return err
 		}
@@ -588,7 +591,7 @@ func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, erro
 	if err := r.checkSource(pklPath); err != nil {
 		return "", err
 	}
-	var stdout, stderr bytes.Buffer
+	stdout, stderr := captureBuffer{limit: 4 << 20}, captureBuffer{limit: 64 << 10}
 	cmd, cleanup, err := r.command(ctx, "-f", pklPath, "fmt", "--stdin")
 	if err != nil {
 		return "", err
@@ -597,7 +600,11 @@ func (r *Runner) Fmt(ctx context.Context, pklPath, content string) (string, erro
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := r.runTracked(ctx, cmd); err != nil {
+	err = r.runTracked(ctx, cmd)
+	if stdout.overflow || stderr.overflow {
+		return "", errors.Join(errCaptureLimit, err)
+	}
+	if err != nil {
 		if errors.Is(err, ErrProcessUnknown) {
 			return "", err
 		}

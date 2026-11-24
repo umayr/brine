@@ -229,11 +229,13 @@ func (h *stackHandler) delete(w http.ResponseWriter, r *http.Request) {
 	if removeContainers {
 		ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 		defer cancel()
-		var out bytes.Buffer
+		var out diagnosticOutput
 		if err := h.agent.Dill().Down(ctx, stack.PklPath, &out); err != nil {
 			msg := strings.TrimSpace(out.String())
 			if msg == "" {
 				msg = err.Error()
+			} else {
+				msg = err.Error() + "\n" + msg
 			}
 			writeError(w, http.StatusBadGateway, "stop/remove containers: "+msg)
 			return

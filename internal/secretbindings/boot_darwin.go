@@ -3,14 +3,18 @@
 package secretbindings
 
 import (
-	"fmt"
+	"errors"
 	"golang.org/x/sys/unix"
 )
 
 func bootIdentity() (string, error) {
-	v, err := unix.SysctlTimeval("kern.boottime")
+	// Wall-clock boot time is not a safe epoch when the host clock changes.
+	value, err := unix.Sysctl("kern.bootsessionuuid")
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%d:%d", v.Sec, v.Usec), nil
+	if len(value) != 36 {
+		return "", errors.New("invalid host boot-session UUID")
+	}
+	return value, nil
 }

@@ -92,12 +92,17 @@ func run() error {
 	flag.DurationVar(&cfg.RequestTimeout, "request-timeout", cfg.RequestTimeout, "timeout for ordinary HTTP handlers")
 	flag.DurationVar(&cfg.DeployTimeout, "deploy-timeout", cfg.DeployTimeout, "timeout for deploy/teardown/git commands")
 
+	quarantineAction := registerQuarantineFlags(flag.CommandLine, &cfg.DataDir, os.Stdout)
 	ver := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	if *ver {
 		fmt.Println(version)
 		return nil
+	}
+
+	if handled, err := quarantineAction(); handled {
+		return err
 	}
 
 	if *initRemoteRegistry {

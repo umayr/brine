@@ -1,6 +1,7 @@
 package secretbindings
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -24,6 +25,15 @@ type Quarantine struct{ root, boot string }
 // NewQuarantine requires an existing private directory. The directory and its
 // anchor must remain trusted; destruction of both is outside this guarantee.
 func NewQuarantine(root string) (*Quarantine, error) {
+	return openQuarantine(root, true)
+}
+
+// OpenQuarantine never provisions missing state during operator recovery.
+func OpenQuarantine(root string) (*Quarantine, error) {
+	return openQuarantine(root, false)
+}
+
+func openQuarantine(root string, initialize bool) (*Quarantine, error) {
 	boot, err := bootIdentity()
 	if err != nil {
 		return nil, err
@@ -34,6 +44,9 @@ func NewQuarantine(root string) (*Quarantine, error) {
 		a, ae := readQuarantineFile(fd, anchorName)
 		_, le := readQuarantineFile(fd, ledgerName)
 		if errors.Is(ae, unix.ENOENT) && errors.Is(le, unix.ENOENT) {
+			if !initialize {
+				return errors.New("quarantine state is not initialized")
+			}
 			// An independent directory marks provisioning even if both files vanish.
 			if err := unix.Mkdirat(fd, "quarantine.initialized", 0700); err != nil {
 				return err
@@ -172,6 +185,10 @@ func loadQuarantine(fd int) (map[string]string, error) {
 	}
 	if _, err = d.Token(); err != io.EOF {
 		return nil, errors.New("trailing ledger data")
+	}
+	canonical, err := json.Marshal(m)
+	if err != nil || !bytes.Equal(b, canonical) {
+		return nil, errors.New("noncanonical quarantine ledger")
 	}
 	return m, nil
 }
