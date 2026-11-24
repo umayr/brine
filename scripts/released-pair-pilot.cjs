@@ -5,7 +5,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { chromium } = require('playwright');
 
 const base = process.env.PILOT_BRINE_URL;
-const name = 'released-pair-pilot';
+const name = `${process.env.PILOT_RESOURCE_PREFIX}-manual`;
 const api = { Authorization: `Bearer ${process.env.BRINE_API_TOKEN}` };
 const project = marker => `amends "package://pkg.ushd.ca/dill@0.8.1#/dill.pkl"
 config {
@@ -24,7 +24,8 @@ function docker(...args) {
   return execFileSync('docker', ['--context', 'default', ...args], { encoding: 'utf8' }).trim();
 }
 
-const afterRestart = process.argv[2] === '--after-restart';
+const afterRemoval = process.argv[2] === '--after-removal-restart';
+const afterRestart = process.argv[2] === '--after-restart' || afterRemoval;
 const checkpoint = process.env.PILOT_CHECKPOINT;
 
 async function run() {
@@ -141,6 +142,15 @@ async function exercise(page) {
       return;
     }
 
+    if (afterRemoval) {
+      const saved = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
+      assert.equal(await status(saved.statusURL), saved.receipt);
+      await recoverManual();
+      assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
+      assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), saved.network);
+      await verifyGitPause(page, deployURL);
+      return;
+    }
     const { statusURL, receipt, container, network } = JSON.parse(fs.readFileSync(checkpoint, 'utf8'));
     assert.equal(await status(statusURL), receipt);
     await recoverManual();
@@ -150,8 +160,11 @@ async function exercise(page) {
     await page.goto(deployURL);
     await page.getByLabel('Managed stack name').fill(name);
     await page.getByRole('button', { name: 'Preview removal' }).click();
-    await confirm('Remove containers; keep data', process.env.PILOT_CANDIDATE === 'true');
-    if (process.env.PILOT_CANDIDATE === 'true') await recoverManual();
+    const removed = await confirm('Remove containers; keep data', process.env.PILOT_CANDIDATE === 'true');
+    if (process.env.PILOT_CANDIDATE === 'true') {
+      fs.writeFileSync(checkpoint, JSON.stringify({...removed, network}), {mode:0o600});
+      return; // shell restarts both processes before explicit removal recovery
+    }
     assert.equal(docker('ps', '-aq', '--filter', `label=dill.stack=${name}`), '');
     assert.equal(docker('network', 'inspect', '--format', '{{.Id}}', name), network);
     console.log('Manual lifecycle passed: update replaced the container; removal retained network identity');
@@ -160,7 +173,7 @@ async function exercise(page) {
 }
 
 async function verifyGitPause(page, deployURL) {
-  const stack = 'released-git-pause';
+  const stack = `${process.env.PILOT_RESOURCE_PREFIX}-pause`;
   const source = process.env.PILOT_GIT_SOURCE;
   const git = (...args) => execFileSync('git', ['-C', source, ...args], { encoding: 'utf8' }).trim();
   const invalidCommit = git('rev-parse', 'HEAD');
@@ -213,7 +226,7 @@ async function verifyGitPause(page, deployURL) {
 
   // Enable a separate valid stack only after advertising the successor. Its
   // durable receipt proves the serial Git worker completed subsequent work.
-  const witness = 'released-git-witness';
+  const witness = `${process.env.PILOT_RESOURCE_PREFIX}-witness`;
   git('switch', '-qc', 'witness');
   fs.writeFileSync(`${source}/compose.pkl`, project('git-witness').replace(name, witness));
   git('add', 'compose.pkl');

@@ -15,10 +15,21 @@ if [[ -n $baseline ]]; then
 fi
 root=$(mktemp -d "$HOME/brine-released-pair.XXXXXX")
 volume=${root##*/}
+export PILOT_RESOURCE_PREFIX="brine-pilot-$(openssl rand -hex 6)"
+pilot_names=("$PILOT_RESOURCE_PREFIX-manual" "$PILOT_RESOURCE_PREFIX-pause" "$PILOT_RESOURCE_PREFIX-witness")
+for name in "${pilot_names[@]}"; do
+  if d network inspect "$name" >/dev/null 2>&1 || d volume inspect "$name" >/dev/null 2>&1; then
+    echo 'Refusing conflicting pilot resource name' >&2; exit 1
+  fi
+done
 cleanup() {
   if [[ -n ${git_pid:-} ]]; then kill "$git_pid" 2>/dev/null || true; wait "$git_pid" 2>/dev/null || true; fi
   if [[ -n ${agent_pid:-} ]]; then kill "$agent_pid" 2>/dev/null || true; wait "$agent_pid" 2>/dev/null || true; fi
   if [[ -f $root/container-id ]]; then d rm -fv "$( < "$root/container-id" )" >/dev/null 2>&1 || true; fi
+  for name in "${pilot_names[@]}"; do
+    while IFS= read -r id; do [[ -z $id ]] || d rm -fv "$id" >/dev/null 2>&1 || true; done < <(d ps -aq --filter "label=dill.stack=$name")
+    d network rm "$name" >/dev/null 2>&1 || true
+  done
   d volume rm "$volume" >/dev/null 2>&1 || true
   rm -rf -- "$root"
 }
@@ -39,6 +50,8 @@ if [[ ${PILOT_CANDIDATE:-} == true ]]; then
 else
   d pull "$image"
 fi
+[[ $(d run --rm --entrypoint /usr/local/bin/dill "$image" version) == v0.8.1 ]]
+[[ $(d run --rm --entrypoint sha256sum "$image" /usr/local/bin/dill | awk '{print $1}') == "$dill_sha" ]]
 d pull docker.io/library/alpine:3.22
 mkdir -m 700 "$root"/{stages,catalog,coordination,operations}
 d run --rm --entrypoint /bin/mkdir -v "$volume:/data" "$image" -m 0700 /data/remote
@@ -107,3 +120,14 @@ if [[ ${PILOT_CANDIDATE:-} == true ]]; then
   curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null
 fi
 node scripts/released-pair-pilot.cjs --after-restart
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  kill "$agent_pid"; wait "$agent_pid" || [[ $? == 143 ]]; unset agent_pid
+  "${agent[@]}" > "$root/agent-removal-restart.log" 2>&1 &
+  agent_pid=$!
+  d restart "$(< "$root/container-id")" >/dev/null
+  for _ in {1..30}; do
+    if curl -ksS --max-time 1 "https://$PILOT_AGENT_ADDR/" >/dev/null 2>&1 && curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  node scripts/released-pair-pilot.cjs --after-removal-restart
+fi
