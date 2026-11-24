@@ -524,6 +524,27 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		})
 	}
 	manualFenceState.Store(0)
+	t.Run("saved-intent-rejects-replaced-target", func(t *testing.T) {
+		replacement, err := targetregistry.Open(filepath.Join(t.TempDir(), "replacement"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := row
+		other.HTTPSAddress = "127.0.0.1:1"
+		if err = replacement.AddContext(context.Background(), other, other); err != nil {
+			t.Fatal(err)
+		}
+		original := h.registry
+		h.registry = replacement
+		defer func() { h.registry = original }()
+		beforeGET, beforeFence := statusGETs.Load(), fenceCalls.Load()
+		invoke("GET", partialPath, nil)
+		invoke("POST", deployPath+"/recover", url.Values{"_csrf": {csrf}, "host": {"demo"}, "id": {partialID}, "confirm": {"check-and-fence"}})
+		saved, err := fs.GetManualIntent(partialID)
+		if err != nil || saved.Resolved || statusGETs.Load() != beforeGET || fenceCalls.Load() != beforeFence {
+			t.Fatal("replacement target reached or original intent cleared")
+		}
+	})
 	resolveManual(partialID)
 	partial.Store(false)
 	calls.Store(0)
@@ -626,6 +647,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		assertStatusControls(w, tc.id, tc.host)
 	}
 	resolveManual(id)
+	// Removal and its recovery must work even without a local registration.
+	if err := fs.Delete("synthetic"); err != nil {
+		t.Fatal(err)
+	}
 	t.Run("remove review binds prior request and permits only one submission", func(t *testing.T) {
 		w := invoke(http.MethodPost, deployPath+"/remove-preview", url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}})
 		id := field(w, "id")
@@ -659,6 +684,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		}
 	})
 	resolveManual(removalRequest.Load().(string))
+	if _, err := fs.Create("synthetic", "original-reviewed-project"); err != nil {
+		t.Fatal(err)
+	}
 	t.Run("git persists and reconciles the same request after restart", func(t *testing.T) {
 		if _, err := exec.LookPath("git"); err != nil {
 			t.Skip("git unavailable")
