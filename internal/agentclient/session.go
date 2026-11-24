@@ -169,6 +169,7 @@ type Client struct {
 	http         *http.Client
 	baseURL      string
 	bearer       string
+	requestGate  func(*http.Request) bool // immutable after construction; nil for existing clients
 	mu           sync.Mutex
 	sessionMu    sync.Mutex
 	epoch        string
@@ -218,6 +219,9 @@ func newClient(forward context.Context, b Binding, baseURL, bearer, network, add
 }
 
 func (c *Client) do(req *http.Request) (*http.Response, error) {
+	if c.requestGate != nil && !c.requestGate(req) {
+		return nil, ErrProtocol
+	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}

@@ -36,7 +36,7 @@ type restoreBindingResolver interface {
 // caller supplies the session; the target lease and qualified connection derive
 // all current authority. A stale enrollment or changed grant revision cannot open.
 func (h *Deployment) prepareRestoreReviewFromLocator(ctx context.Context, session, host, stack string, locator snapshothistory.ObjectID) (projectreview.Preview, error) {
-	if ctx == nil || ctx.Err() != nil || h.history == nil || h.history.restoreGate == nil || h.registry == nil || session == "" || stack == "" {
+	if ctx == nil || ctx.Err() != nil || h.history == nil || h.history.restoreGate == nil || h.history.operator != nil || h.registry == nil || session == "" || stack == "" {
 		return projectreview.Preview{}, errRestoreReview
 	}
 	resolver, ok := h.history.archive.(restoreBindingResolver)

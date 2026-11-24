@@ -160,6 +160,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Missing, expired, or already used confirmation", 409)
 			return
 		}
+		if h.history != nil && h.history.operator != nil && review.Mode == "remove" {
+			http.Error(w, "Operator-configured authority is for new deployments only", http.StatusConflict)
+			return
+		}
 		p.Host, p.Stack = review.Host, review.Stack
 		if !h.gitMu.TryLock() {
 			http.Error(w, "Remote automation busy; review again", 409)
@@ -180,7 +184,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		ctx, cancel := context.WithTimeout(lease, 6*time.Minute)
 		defer cancel()
-		record, releaseRecord, err := h.registry.AcquireRead(ctx, p.Host)
+		record, enrollment, releaseRecord, err := h.acquireDeploymentTarget(ctx, p.Host, historyRequired)
 		if err != nil {
 			http.Error(w, "Target unavailable; no creation sent", 409)
 			return
@@ -191,7 +195,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if historyRequired {
-			h.submitAttended(ctx, w, p, review, record)
+			h.submitAttended(ctx, w, p, review, record, enrollment)
 			return
 		}
 		c, epoch, err := openDeploymentSession(ctx, record)
@@ -219,7 +223,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(lease, 75*time.Second)
 	defer cancel()
-	record, releaseRecord, err := h.registry.AcquireRead(ctx, p.Host)
+	record, enrollment, releaseRecord, err := h.acquireDeploymentTarget(ctx, p.Host, r.URL.Path == deployPath+"/stage")
 	if err != nil || record.HTTPSAddress == "" {
 		if releaseRecord != nil {
 			_ = releaseRecord.Close()
@@ -234,6 +238,11 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	defer releaseRecord.Close()
 	if r.Method == http.MethodGet {
+		if h.history != nil && h.history.operator != nil {
+			p.Error = deploymentStatusUnavailable
+			h.renderStatus(w, p, http.StatusConflict)
+			return
+		}
 		c, epoch, err := openDeploymentSession(ctx, record)
 		if err == nil {
 			defer c.Close()
@@ -294,7 +303,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Review unavailable; no transfer sent", 409)
 			return
 		}
-		if intent.PriorDeployment != nil && (h.history == nil || h.history.restoreGate == nil) {
+		if intent.PriorDeployment != nil && (h.history == nil || h.history.restoreGate == nil || h.history.operator != nil) {
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
@@ -302,7 +311,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		var epoch string
 		var binding attendedBinding
 		if h.history != nil {
-			c, err := h.history.connection(ctx, record, current.Target.Identity)
+			c, err := h.history.connection(ctx, record, current.Target.Identity, enrollment)
 			if err != nil {
 				http.Error(w, "Attended authority unavailable; no transfer sent", http.StatusConflict)
 				return
@@ -342,6 +351,10 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review)
 	case deployPath + "/remove-preview":
+		if h.history != nil && h.history.operator != nil {
+			http.Error(w, "Operator-configured authority is for new deployments only", http.StatusConflict)
+			return
+		}
 		c, epoch, err := openDeploymentSession(ctx, record)
 		if err != nil {
 			http.Error(w, "Target unavailable", 409)
@@ -378,6 +391,16 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 	if p.ID != "" {
 		p.Mode = plan.Mode
 	}
+}
+
+// New operator-authorized actions pin the active history enrollment and target
+// under one lease. Legacy reads and removal retain their existing behavior.
+func (h *Deployment) acquireDeploymentTarget(ctx context.Context, host string, attended bool) (targetregistry.Record, targetregistry.HistoryIncarnation, *targetregistry.ReadLease, error) {
+	if attended && h.history != nil && h.history.operator != nil {
+		return h.registry.AcquireHistoryRead(ctx, host)
+	}
+	r, lease, err := h.registry.AcquireRead(ctx, host)
+	return r, targetregistry.HistoryIncarnation{}, lease, err
 }
 
 func targetDigest(record targetregistry.Record) string {
