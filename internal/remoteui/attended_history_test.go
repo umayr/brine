@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,6 +166,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		{"post-rename indeterminate", "create", "post rename", "Local history retention is uncertain", 1, 0, 1},
 		{"marker uncertain", "create", "marker uncertain", "No operation was sent", 1, 0, 1},
 		{"receipt full", "create", "receipt full", "Live observation only; the local history cap prevented saving a receipt", 1, 1, 1},
+		{"create backend absent at confirm", "create", "backend absent", "Attended authority unavailable", 0, 0, 0},
+		{"update backend absent at confirm", "update", "backend absent", "Attended authority unavailable", 0, 0, 0},
 		{"lost provider reply", "update", "lost reply", "Operation not confirmed. No retry was sent", 1, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,10 +186,43 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, 32)).Public().(ed25519.PublicKey)
+			priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{9}, 32))
+			key := priv.Public().(ed25519.PublicKey)
 			token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))
-			pairing := fmt.Sprintf(`{"version":1,"certificateSha256":%q,"token":%q,"agentPublicKey":"%x","engineId":"11111111-1111-4111-8111-111111111111","generation":1,"engineKind":"docker","engineSocket":"unix:///run/docker.sock","daemonId":"synthetic"}`, strings.Repeat("1", 64), token, key)
-			row := targetregistry.Record{ID: "demo", Revision: 1, HTTPSAddress: "127.0.0.1:1", HTTPSPairing: targetregistry.PairingSecret(pairing)}
+			pin, address := strings.Repeat("1", 64), "127.0.0.1:1"
+			var legacyCalls atomic.Int32
+			const engine, socket = "11111111-1111-4111-8111-111111111111", "unix:///run/docker.sock"
+			if tc.problem == "backend absent" {
+				// The legacy path would successfully establish its own session and
+				// reach the apply endpoint. Assert it does not even open that session.
+				legacy := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					legacyCalls.Add(1)
+					if r.Method != http.MethodPost || r.URL.Path != "/v1/session" {
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					var q struct{ Nonce string }
+					if json.NewDecoder(r.Body).Decode(&q) != nil {
+						t.Error("invalid generated legacy challenge")
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					proof := agentclient.Proof{AgentID: fmt.Sprintf("%x", sha256.Sum256(key)), AgentPublicKey: base64.RawURLEncoding.EncodeToString(key), EngineID: engine, Generation: 1, EngineKind: "docker", EngineSocket: socket, DaemonID: "synthetic", Epoch: strings.Repeat("A", 43), Nonce: q.Nonce}
+					message, err := agentclient.SessionBytes(proof)
+					if err != nil {
+						t.Error("invalid generated legacy proof")
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					proof.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, message))
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{"version": "brine.agent.read/1", "requestId": r.Header.Get("X-Request-Id"), "data": proof})
+				}))
+				defer legacy.Close()
+				pin, address = fmt.Sprintf("%x", sha256.Sum256(legacy.Certificate().Raw)), strings.TrimPrefix(legacy.URL, "https://")
+			}
+			pairing := fmt.Sprintf(`{"version":1,"certificateSha256":%q,"token":%q,"agentPublicKey":"%x","engineId":%q,"generation":1,"engineKind":"docker","engineSocket":%q,"daemonId":"synthetic"}`, pin, token, key, engine, socket)
+			row := targetregistry.Record{ID: "demo", Revision: 1, HTTPSAddress: address, HTTPSPairing: targetregistry.PairingSecret(pairing)}
 			if err := reg.AddContext(context.Background(), row, row); err != nil {
 				t.Fatal(err)
 			}
@@ -274,6 +310,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 				archive.receiptErr = snapshothistory.ErrCapacity
 			case "lost reply":
 				provider.loss = true
+			case "backend absent":
+				h.history = nil
 			default:
 				stacks.block = tc.problem
 			}
@@ -287,6 +325,9 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			if archive.commits != tc.commits || provider.applies != tc.applies || len(archive.retained) != tc.retained {
 				t.Fatalf("commit/apply/retained %d/%d/%d", archive.commits, provider.applies, len(archive.retained))
+			}
+			if legacyCalls.Load() != 0 {
+				t.Fatalf("retained attended confirmation contacted legacy provider %d times", legacyCalls.Load())
 			}
 			wantMarkers, wantReceipts := tc.applies, tc.applies
 			if tc.problem == "marker uncertain" {
