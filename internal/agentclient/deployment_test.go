@@ -41,6 +41,10 @@ func TestJournalDeploymentStatusRequiresMatchingEvidence(t *testing.T) {
 		want                        DeploymentStatus
 	}{
 		{name: "matching not admitted", responseJournal: journal, body: body, status: http.StatusOK, want: notAdmitted},
+		{name: "case state alias", responseJournal: journal, body: strings.Replace(body, `"state"`, `"State"`, 1), status: http.StatusOK},
+		{name: "case request alias", responseJournal: journal, body: strings.Replace(body, `"requestId"`, `"RequestID"`, 1), status: http.StatusOK},
+		{name: "case effects collision", responseJournal: journal, body: strings.TrimSuffix(body, "}") + `,"Effects":"none"}`, status: http.StatusOK},
+		{name: "case operation alias", responseJournal: journal, body: strings.Replace(encode(partial), `"operationId"`, `"OperationID"`, 1), status: http.StatusOK},
 		{name: "missing journal", body: body, status: http.StatusOK},
 		{name: "foreign journal", responseJournal: strings.Repeat("c", 32), body: body, status: http.StatusOK},
 		{name: "duplicate journal", responseJournal: journal, body: body, status: http.StatusOK, duplicate: true},
