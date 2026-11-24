@@ -333,9 +333,10 @@ func (s *store) scan(ctx context.Context, want *Intent) (usage, error) {
 		if ctx.Err() != nil {
 			return usage{}, ctx.Err()
 		}
+		id, evidenceKind, isEvidence := parseEvidenceName(name)
 		if name == identityName {
 			seen = true
-		} else if !(validObjectName(name) || validPendingName(name)) {
+		} else if !(validObjectName(name) || validPendingName(name) || isEvidence || validEvidencePending(name)) {
 			return usage{}, ErrUnavailable
 		}
 		fd, err := unix.Openat(int(s.root.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
@@ -354,6 +355,9 @@ func (s *store) scan(ctx context.Context, want *Intent) (usage, error) {
 				return usage{}, ErrUnavailable
 			}
 			u.operations++
+		}
+		if isEvidence && s.checkEvidence(ctx, id, evidenceKind) != nil {
+			return usage{}, ErrUnavailable
 		}
 		if id, ok := parseObjectName(name); ok {
 			record, err := s.loadContext(ctx, id)
@@ -781,11 +785,15 @@ func clear(b []byte) {
 }
 
 func writeNoClobber(root *os.File, name string, data []byte) error {
+	return writeWithPendingPrefix(root, name, data, pendingPrefix)
+}
+
+func writeWithPendingPrefix(root *os.File, name string, data []byte, pending string) error {
 	var random [16]byte
 	if _, err := io.ReadFull(rand.Reader, random[:]); err != nil {
 		return ErrUnavailable
 	}
-	temp := pendingPrefix + hex.EncodeToString(random[:])
+	temp := pending + hex.EncodeToString(random[:])
 	fd, err := unix.Openat(int(root.Fd()), temp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		return ErrUnavailable
