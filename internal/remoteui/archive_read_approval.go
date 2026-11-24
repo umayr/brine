@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 const maxArchiveReadApprovals = 64
 const archiveReadApprovalTTL = 5 * time.Minute
+const archiveReadIDPrefix = "archive-read-"
 
 type archiveReadActor struct{ operator, session string }
 
@@ -104,6 +106,7 @@ func (s *archiveReadApprovals) issue(ctx context.Context, q archiveReadSelection
 	if err != nil {
 		return "", errRestoreReview
 	}
+	id = archiveReadIDPrefix + id
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
@@ -122,7 +125,7 @@ func (s *archiveReadApprovals) issue(ctx context.Context, q archiveReadSelection
 // use is checked before protected work and again atomically at publication.
 // A revoked/expired grant cannot publish an already prepared review.
 func (s *archiveReadApprovals) use(ctx context.Context, id string, q archiveReadSelection, consume bool) bool {
-	if s == nil || ctx == nil || ctx.Err() != nil || !attendedHex(id, 16) {
+	if s == nil || ctx == nil || ctx.Err() != nil || !strings.HasPrefix(id, archiveReadIDPrefix) || !attendedHex(strings.TrimPrefix(id, archiveReadIDPrefix), 16) {
 		return false
 	}
 	s.mu.Lock()

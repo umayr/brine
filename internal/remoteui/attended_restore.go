@@ -144,7 +144,7 @@ func (h *Deployment) prepareRestoreReviewUsing(ctx context.Context, session stri
 	if err != nil {
 		return projectreview.Preview{}, err
 	}
-	if !permit(true) {
+	if !h.history.authorizeRestore(ctx, session, current, prior.ObjectID) || !permit(true) {
 		h.reviews.Discard(session, preview.ID)
 		return projectreview.Preview{}, errRestoreReview
 	}
