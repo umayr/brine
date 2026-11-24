@@ -335,7 +335,24 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 				}
 				session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
 				current := projectreview.Current{Stack: "synthetic", Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: binding.target, Socket: row.HTTPSAddress, Endpoint: row.ID}}
-				preview, err := h.prepareRestoreReview(context.Background(), session, current, binding, prior)
+				approvalStore := newArchiveReadApprovals()
+				q := newArchiveReadSelection(archiveReadActor{operator: "admin", session: session}, prior.ObjectID, targetregistry.HistoryIncarnation{1}, current)
+				ctx := context.Background()
+				readID, err := approvalStore.issue(ctx, q)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, path := range []string{"/stage", "/create"} {
+					invalid := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}, "id": {readID}, "confirm": {"transfer"}}
+					if path == "/create" {
+						invalid.Set("confirm", tc.mode)
+					}
+					w := invoke("POST", deployPath+path, invalid)
+					if w.Code != http.StatusConflict || provider.stages != 0 || provider.applies != 0 || archive.commits != 0 {
+						t.Fatal("archive-read approval was accepted as a send confirmation")
+					}
+				}
+				preview, err := h.prepareRestoreReviewUsing(ctx, session, current, binding, prior, &archive, func(consume bool) bool { return approvalStore.use(ctx, readID, q, consume) })
 				if tc.problem == "restore unknown" || tc.problem == "restore denied" || tc.problem == "restore rotation" {
 					if err == nil || preview.ID != "" || archive.historicalReads != 0 || provider.stages != 0 || provider.applies != 0 {
 						t.Fatal("unauthorized or unresolved history reached byte review")

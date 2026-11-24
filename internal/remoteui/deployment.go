@@ -126,7 +126,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		lease = ctx
 	}
 	csrf := h.auth.CSRFFor(r)
-	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	session := deploymentSession(csrf)
 	if r.Method == http.MethodPost && r.ParseForm() != nil {
 		http.Error(w, "Invalid form", 400)
 		return

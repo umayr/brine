@@ -37,6 +37,7 @@ type attendedHistory struct {
 	archive     attendedArchive
 	operator    *operatorDeployAuthority
 	open        func(context.Context, targetregistry.Record) (attendedConnection, error)
+	archiveRead *archiveReadApprovals // separate local read consent; never used for sends
 	restoreGate func(context.Context, string, projectreview.Current, snapshothistory.ObjectID) error
 }
 
