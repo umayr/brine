@@ -84,6 +84,11 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 	defer unix.Close(fd)
 	data, err := readWorkspaceFile(fd, "meta.json")
 	if err != nil {
+		if os.IsNotExist(err) {
+			// The registration directory exists. Missing metadata is unknown
+			// protected state, not evidence that no registration exists.
+			return nil, fmt.Errorf("stack metadata unavailable")
+		}
 		return nil, err
 	}
 	var stack Stack
