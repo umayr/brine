@@ -65,6 +65,7 @@ type payload struct {
 	ProviderRequestID   []byte                   `json:"providerRequestId"`
 	OriginalJournal     []byte                   `json:"originalJournal"`
 	ApprovedTargetScope []byte                   `json:"approvedTargetScope"`
+	Attended            *AttendedIntent          `json:"attended,omitempty"`
 	ManifestDigest      string                   `json:"manifestDigest"`
 	Snapshot            projectsnapshot.Snapshot `json:"snapshot"`
 }
@@ -425,7 +426,7 @@ func (s *store) commit(ctx context.Context, r CommitRequest) (OpenRequest, error
 	if err != nil {
 		return OpenRequest{}, ErrUnavailable
 	}
-	p := payload{Version: payloadVersion, ObjectID: hex.EncodeToString(r.ObjectID[:]), AttemptID: append([]byte(nil), r.Intent.AttemptID...), ProviderRequestID: append([]byte(nil), r.Intent.ProviderRequestID...), OriginalJournal: append([]byte(nil), r.Intent.OriginalJournal...), ApprovedTargetScope: append([]byte(nil), r.Intent.ApprovedTargetScope...), ManifestDigest: hex.EncodeToString(digest[:]), Snapshot: cloneSnapshot(r.Snapshot)}
+	p := payload{Version: payloadVersion, ObjectID: hex.EncodeToString(r.ObjectID[:]), AttemptID: append([]byte(nil), r.Intent.AttemptID...), ProviderRequestID: append([]byte(nil), r.Intent.ProviderRequestID...), OriginalJournal: append([]byte(nil), r.Intent.OriginalJournal...), ApprovedTargetScope: append([]byte(nil), r.Intent.ApprovedTargetScope...), Attended: cloneAttended(r.Intent.Attended), ManifestDigest: hex.EncodeToString(digest[:]), Snapshot: cloneSnapshot(r.Snapshot)}
 	plain, err := json.Marshal(p)
 	if err != nil {
 		return OpenRequest{}, ErrUnavailable
@@ -500,10 +501,42 @@ func validateRequest(ctx context.Context, r CommitRequest) ([32]byte, error) {
 	return d, nil
 }
 func validIntent(i Intent) bool {
-	return len(i.AttemptID) > 0 && len(i.AttemptID) <= 512 && len(i.ProviderRequestID) > 0 && len(i.ProviderRequestID) <= 512 && subtle.ConstantTimeCompare(i.AttemptID, i.ProviderRequestID) != 1 && len(i.OriginalJournal) > 0 && len(i.OriginalJournal) <= maxIntentBytes && len(i.ApprovedTargetScope) > 0 && len(i.ApprovedTargetScope) <= maxIntentBytes
+	return len(i.AttemptID) > 0 && len(i.AttemptID) <= 512 && len(i.ProviderRequestID) > 0 && len(i.ProviderRequestID) <= 512 && subtle.ConstantTimeCompare(i.AttemptID, i.ProviderRequestID) != 1 && len(i.OriginalJournal) > 0 && len(i.OriginalJournal) <= maxIntentBytes && len(i.ApprovedTargetScope) > 0 && len(i.ApprovedTargetScope) <= maxIntentBytes && validAttended(i.Attended)
+}
+
+func validAttended(a *AttendedIntent) bool {
+	if a == nil {
+		return true
+	}
+	return canonicalHex(a.Target, 32) && canonicalHex(a.AuthorityRevision, 32) &&
+		len(a.Stack) > 0 && len(a.Stack) <= 128 && (a.Mode == "create" || a.Mode == "update") &&
+		canonicalHex(a.Stage, 16) && strings.HasPrefix(a.Selection, "sha256:") && canonicalHex(strings.TrimPrefix(a.Selection, "sha256:"), 32)
+}
+
+func canonicalHex(s string, n int) bool {
+	if len(s) != n*2 {
+		return false
+	}
+	b, err := hex.DecodeString(s)
+	return err == nil && hex.EncodeToString(b) == s
+}
+
+func cloneAttended(a *AttendedIntent) *AttendedIntent {
+	if a == nil {
+		return nil
+	}
+	out := *a
+	return &out
+}
+
+func equalAttended(a, b *AttendedIntent) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 func cloneIntent(i Intent) Intent {
-	return Intent{append([]byte(nil), i.AttemptID...), append([]byte(nil), i.ProviderRequestID...), append([]byte(nil), i.OriginalJournal...), append([]byte(nil), i.ApprovedTargetScope...)}
+	return Intent{append([]byte(nil), i.AttemptID...), append([]byte(nil), i.ProviderRequestID...), append([]byte(nil), i.OriginalJournal...), append([]byte(nil), i.ApprovedTargetScope...), cloneAttended(i.Attended)}
 }
 
 func cloneSnapshot(in projectsnapshot.Snapshot) projectsnapshot.Snapshot {
@@ -527,7 +560,7 @@ func (s *store) open(ctx context.Context, r OpenRequest) (Record, error) {
 	if err != nil {
 		return Record{}, ErrUnavailable
 	}
-	if ctx.Err() != nil || subtle.ConstantTimeCompare(got.Intent.AttemptID, r.Intent.AttemptID) != 1 || subtle.ConstantTimeCompare(got.Intent.ProviderRequestID, r.Intent.ProviderRequestID) != 1 || subtle.ConstantTimeCompare(got.Intent.OriginalJournal, r.Intent.OriginalJournal) != 1 || subtle.ConstantTimeCompare(got.Intent.ApprovedTargetScope, r.Intent.ApprovedTargetScope) != 1 || subtle.ConstantTimeCompare(got.ManifestDigest[:], r.ManifestDigest[:]) != 1 {
+	if ctx.Err() != nil || !equalAttended(got.Intent.Attended, r.Intent.Attended) || subtle.ConstantTimeCompare(got.Intent.AttemptID, r.Intent.AttemptID) != 1 || subtle.ConstantTimeCompare(got.Intent.ProviderRequestID, r.Intent.ProviderRequestID) != 1 || subtle.ConstantTimeCompare(got.Intent.OriginalJournal, r.Intent.OriginalJournal) != 1 || subtle.ConstantTimeCompare(got.Intent.ApprovedTargetScope, r.Intent.ApprovedTargetScope) != 1 || subtle.ConstantTimeCompare(got.ManifestDigest[:], r.ManifestDigest[:]) != 1 {
 		return Record{}, ErrUnavailable
 	}
 	return got, nil
@@ -649,7 +682,7 @@ func (s *store) loadContext(ctx context.Context, id ObjectID) (Record, error) {
 		return Record{}, ErrUnavailable
 	}
 	copy(digest[:], b)
-	i := Intent{p.AttemptID, p.ProviderRequestID, p.OriginalJournal, p.ApprovedTargetScope}
+	i := Intent{p.AttemptID, p.ProviderRequestID, p.OriginalJournal, p.ApprovedTargetScope, p.Attended}
 	if !validIntent(i) {
 		return Record{}, ErrUnavailable
 	}
