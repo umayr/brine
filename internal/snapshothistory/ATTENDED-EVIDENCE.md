@@ -34,10 +34,13 @@ are admitted as terminal observations by this slice. Running/unknown, missing
 operation ID, fence tombstones, 404/409/auth/transport failures are not receipts;
 partial does not authorize follow-on writes. The journal-wide status grant is
 separate from apply/fence, has no signed discovery or Brine enrollment binding,
-and does not establish continuity after rotation. No endpoint or adapter is
-wired to these methods. The storage code cannot independently validate a network
-exchange or mint authority. It accepts only a sanitized in-process projection
-from a future qualified caller; generated fixtures do not implement one.
+and does not establish continuity after rotation. The unmounted attended
+handler requires both durable intent and a durable unknown marker before its
+one checked apply. It saves a verified terminal observation only after that
+apply returns; a live response is not presented as a saved receipt on archive
+error. No production endpoint or grant adapter is wired to this seam. Storage
+cannot independently validate a network exchange or mint authority. Generated
+fixtures exercise the boundary, not a qualified provider.
 
 Sidecars consume sealed bytes and directory entries, not independent operation
 slots. Retained evidence pending names also consume bytes and entries. If an

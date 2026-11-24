@@ -58,9 +58,9 @@ func (s *attendedStackFixture) Get(name string) (*store.Stack, error) {
 }
 
 type attendedArchiveFixture struct {
-	commits  int
-	retained []snapshothistory.CommitRequest
-	err      error
+	commits, markers, receipts int
+	retained                   []snapshothistory.CommitRequest
+	err, markerErr, receiptErr error
 }
 
 func (a *attendedArchiveFixture) Commit(_ context.Context, r snapshothistory.CommitRequest) (snapshothistory.OpenRequest, error) {
@@ -71,6 +71,16 @@ func (a *attendedArchiveFixture) Commit(_ context.Context, r snapshothistory.Com
 		a.retained = append(a.retained, r)
 	}
 	return snapshothistory.OpenRequest{ObjectID: r.ObjectID, Intent: r.Intent, ManifestDigest: r.ExpectedManifestDigest}, a.err
+}
+
+func (a *attendedArchiveFixture) MarkDeliveryUnknown(_ context.Context, _ snapshothistory.OpenRequest, _ time.Time) error {
+	a.markers++
+	return a.markerErr
+}
+
+func (a *attendedArchiveFixture) RecordTerminalObservation(_ context.Context, _ snapshothistory.OpenRequest, _ snapshothistory.TerminalObservation) error {
+	a.receipts++
+	return a.receiptErr
 }
 
 type attendedProviderFixture struct {
@@ -120,8 +130,8 @@ func (f *attendedProviderFixture) PreviewDeployment(_ context.Context, _, _, _, 
 
 func (f *attendedProviderFixture) ApplyJournalDeployment(_ context.Context, epoch, stage, manifest, stack, selection, request, mode, journal string) (agentclient.DeploymentStatus, error) {
 	f.applies++
-	if len(f.archive.retained) != 1 || f.archive.err != nil {
-		f.t.Fatal("provider called without durable intent")
+	if len(f.archive.retained) != 1 || f.archive.err != nil || f.archive.markers != 1 || f.archive.markerErr != nil || f.archive.receipts != 0 {
+		f.t.Fatal("provider called without durable intent and pre-send marker, or after receipt")
 	}
 	r := f.archive.retained[0]
 	a := r.Intent.Attended
@@ -131,7 +141,7 @@ func (f *attendedProviderFixture) ApplyJournalDeployment(_ context.Context, epoc
 	if f.loss {
 		return agentclient.DeploymentStatus{}, agentclient.ErrDeploymentUnknown
 	}
-	return agentclient.DeploymentStatus{RequestID: request, Stack: stack, State: "succeeded", Effects: "complete"}, nil
+	return agentclient.DeploymentStatus{RequestID: request, Stack: stack, State: "succeeded", Effects: "complete", OperationID: "op_" + strings.Repeat("e", 32)}, nil
 }
 
 func (*attendedProviderFixture) Close() error { return nil }
@@ -141,8 +151,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		name, mode, problem, expect string
 		commits, applies, retained  int
 	}{
-		{"create", "create", "", "State succeeded", 1, 1, 1},
-		{"update", "update", "", "State succeeded", 1, 1, 1},
+		{"create", "create", "", "Verified terminal receipt saved", 1, 1, 1},
+		{"update", "update", "", "Verified terminal receipt saved", 1, 1, 1},
 		{"no distinct proof", "create", "no proof", "Attended authority unavailable", 0, 0, 0},
 		{"no original journal", "create", "no journal", "Cannot retain an exact attended review", 0, 0, 0},
 		{"revoked proof", "create", "rotated", "Attended authority changed", 0, 0, 0},
@@ -153,6 +163,8 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 		{"pending git", "create", "pending git", "Disable or reconcile remote Git", 0, 0, 0},
 		{"capacity", "create", "capacity", "no operation sent", 1, 0, 0},
 		{"post-rename indeterminate", "create", "post rename", "Local history retention is uncertain", 1, 0, 1},
+		{"marker uncertain", "create", "marker uncertain", "No operation was sent", 1, 0, 1},
+		{"receipt full", "create", "receipt full", "Live observation only; the local history cap prevented saving a receipt", 1, 1, 1},
 		{"lost provider reply", "update", "lost reply", "Operation not confirmed. No retry was sent", 1, 1, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -190,7 +202,7 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			if h.history != nil {
 				t.Fatal("constructor mounted history")
 			}
-			binding := attendedBinding{target: targetDigest(row), scope: "synthetic-local-target-scope", revision: strings.Repeat("d", 64), grants: attendedGrants, distinct: tc.problem != "no proof"}
+			binding := attendedBinding{target: targetDigest(row), scope: "synthetic-local-target-scope", contractVersion: "dill/0.9.0", revision: strings.Repeat("d", 64), grants: attendedGrants, distinct: tc.problem != "no proof"}
 			h.history = &attendedHistory{archive: &archive, open: func(context.Context, targetregistry.Record) (attendedConnection, error) {
 				return attendedConnection{client: provider, epoch: "fixture-epoch", binding: binding}, nil
 			}}
@@ -256,6 +268,10 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 				archive.err = snapshothistory.ErrCapacity
 			case "post rename":
 				archive.err = snapshothistory.ErrIndeterminate
+			case "marker uncertain":
+				archive.markerErr = snapshothistory.ErrIndeterminate
+			case "receipt full":
+				archive.receiptErr = snapshothistory.ErrCapacity
 			case "lost reply":
 				provider.loss = true
 			default:
@@ -271,6 +287,19 @@ func TestUnmountedAttendedHistoryHandler(t *testing.T) {
 			}
 			if archive.commits != tc.commits || provider.applies != tc.applies || len(archive.retained) != tc.retained {
 				t.Fatalf("commit/apply/retained %d/%d/%d", archive.commits, provider.applies, len(archive.retained))
+			}
+			wantMarkers, wantReceipts := tc.applies, tc.applies
+			if tc.problem == "marker uncertain" {
+				wantMarkers = 1
+			}
+			if tc.problem == "lost reply" {
+				wantReceipts = 0
+			}
+			if archive.markers != wantMarkers || archive.receipts != wantReceipts {
+				t.Fatalf("marker/receipt calls %d/%d", archive.markers, archive.receipts)
+			}
+			if tc.problem == "receipt full" && (!strings.Contains(w.Body.String(), "State succeeded") || strings.Contains(w.Body.String(), "Verified terminal receipt saved")) {
+				t.Fatal("live result was hidden or was misrepresented as a saved receipt")
 			}
 			if len(archive.retained) > 0 {
 				r := archive.retained[0]

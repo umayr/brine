@@ -33,10 +33,14 @@ const (
 // Open must verify a current, distinct deploy grant bound to the signed monitor
 // identity, endpoint, target and credential revision (not probe with a write).
 type attendedHistory struct {
-	archive interface {
-		Commit(context.Context, snapshothistory.CommitRequest) (snapshothistory.OpenRequest, error)
-	}
-	open func(context.Context, targetregistry.Record) (attendedConnection, error)
+	archive attendedArchive
+	open    func(context.Context, targetregistry.Record) (attendedConnection, error)
+}
+
+type attendedArchive interface {
+	Commit(context.Context, snapshothistory.CommitRequest) (snapshothistory.OpenRequest, error)
+	MarkDeliveryUnknown(context.Context, snapshothistory.OpenRequest, time.Time) error
+	RecordTerminalObservation(context.Context, snapshothistory.OpenRequest, snapshothistory.TerminalObservation) error
 }
 
 type deploymentStager interface {
@@ -47,12 +51,15 @@ type deploymentStager interface {
 
 type attendedClient interface {
 	deploymentStager
+	// A successful return requires authenticated transport and one exact echo
+	// of the supplied original journal, plus a validated response document.
 	ApplyJournalDeployment(context.Context, string, string, string, string, string, string, string, string) (agentclient.DeploymentStatus, error)
 	Close() error
 }
 
 type attendedBinding struct {
 	target, scope, revision string // opaque non-secret identities, not credentials
+	contractVersion         string // pinned by the qualified adapter, not the response
 	grants                  uint8
 	distinct                bool
 }
@@ -80,7 +87,7 @@ func (h *attendedHistory) connection(ctx context.Context, record targetregistry.
 	c, err := h.open(ctx, record)
 	b := c.binding
 	if err != nil || c.client == nil || c.epoch == "" || ctx.Err() != nil || !b.distinct || b.grants&attendedGrants != attendedGrants ||
-		b.target != expected || !attendedHex(b.target, 32) || !attendedHex(b.revision, 32) || len(b.scope) == 0 || len(b.scope) > 512 {
+		b.target != expected || !attendedHex(b.target, 32) || !attendedHex(b.revision, 32) || len(b.scope) == 0 || len(b.scope) > 512 || b.contractVersion == "" || len(b.contractVersion) > 64 {
 		if c.client != nil {
 			_ = c.client.Close()
 		}
@@ -151,7 +158,7 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Attended request canceled; no operation sent", http.StatusConflict)
 		return
 	}
-	_, err = h.history.archive.Commit(ctx, snapshothistory.CommitRequest{ObjectID: objectID, Intent: intent, ExpectedManifestDigest: a.manifest, Snapshot: a.snapshot})
+	ref, err := h.history.archive.Commit(ctx, snapshothistory.CommitRequest{ObjectID: objectID, Intent: intent, ExpectedManifestDigest: a.manifest, Snapshot: a.snapshot})
 	if errors.Is(err, snapshothistory.ErrIndeterminate) {
 		http.Error(w, "Local history retention is uncertain; preserve it for inspection. No operation was sent. Do not retry.", http.StatusServiceUnavailable)
 		return
@@ -160,15 +167,41 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, "Attended history could not authorize submission; no operation sent", http.StatusServiceUnavailable)
 		return
 	}
+	if err := h.history.archive.MarkDeliveryUnknown(ctx, ref, time.Now()); err != nil {
+		http.Error(w, "The pre-send history marker could not be confirmed. No operation was sent. Preserve local history for inspection; do not retry.", http.StatusServiceUnavailable)
+		return
+	}
+	if ctx.Err() != nil || !time.Now().Before(r.Expiry) {
+		http.Error(w, "Attended review no longer current; no operation sent", http.StatusConflict)
+		return
+	}
 	p.ID = a.requestID
 	status, err := c.client.ApplyJournalDeployment(ctx, c.epoch, r.StageID, r.Manifest, r.Stack, r.Selection, a.requestID, r.Mode, a.journal)
 	if err != nil || status.RequestID != a.requestID || status.Stack != r.Stack {
 		p.Error = "Operation not confirmed. No retry was sent. Do not retry based on this result."
 		p.JournalCapacityLow = errors.Is(err, agentclient.ErrJournalCapacity)
 	} else {
-		// The authenticated live response is not a durable receipt. No history
-		// status or restore path is mounted by this unqualified seam.
 		p.Status = &status
+		p.Evidence = "Live observation only; no terminal receipt was confirmed in local history. Do not retry based on this result."
+		if terminalAttendedStatus(status) {
+			observation := snapshothistory.TerminalObservation{
+				Binding: snapshothistory.ReceiptBinding{Target: c.binding.target, Scope: c.binding.scope, AuthorityRevision: c.binding.revision, Journal: a.journal, RequestID: status.RequestID, Stack: status.Stack},
+				State:   status.State, Effects: status.Effects, OperationID: status.OperationID,
+				Provenance: "journal-apply", ContractVersion: c.binding.contractVersion, ObservedAt: time.Now(),
+			}
+			switch err := h.history.archive.RecordTerminalObservation(ctx, ref, observation); {
+			case err == nil:
+				p.Evidence = "Verified terminal receipt saved in local history. It is not a statement of current target health."
+			case errors.Is(err, snapshothistory.ErrCapacity):
+				p.Evidence = "Live observation only; the local history cap prevented saving a receipt. Local history retains unknown delivery. Do not retry."
+			}
+		}
 	}
 	h.render(w, p)
+}
+
+func terminalAttendedStatus(status agentclient.DeploymentStatus) bool {
+	id, ok := strings.CutPrefix(status.OperationID, "op_")
+	return ok && attendedHex(id, 16) && (status.State == "succeeded" && status.Effects == "complete" ||
+		status.State == "failed" && (status.Effects == "none" || status.Effects == "partial"))
 }
