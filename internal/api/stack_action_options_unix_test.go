@@ -43,7 +43,7 @@ esac
 		{http.MethodPost, "/api/stacks/demo/teardown", `{"force":true}`, "synthetic forced teardown", http.StatusOK},
 		{http.MethodDelete, "/api/stacks/demo", `{"remove_containers":true}`, "synthetic down", http.StatusBadGateway},
 	} {
-		w := httptest.NewRecorder()
+		w := &deadlineRecorder{httptest.NewRecorder()}
 		router.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)))
 		if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.marker) {
 			t.Errorf("%s %s = %d %q, want %d with %q", tc.method, tc.path, w.Code, w.Body.String(), tc.status, tc.marker)

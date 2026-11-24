@@ -134,9 +134,9 @@ func postGitPushOptions(router *chi.Mux, body string, authed bool) *httptest.Res
 	if authed {
 		r.Header.Set("Authorization", "Bearer "+gitPushTestToken)
 	}
-	w := httptest.NewRecorder()
+	w := &deadlineRecorder{httptest.NewRecorder()}
 	router.ServeHTTP(w, r)
-	return w
+	return w.ResponseRecorder
 }
 
 func assertGitPushNotInvoked(t *testing.T, calls string) {

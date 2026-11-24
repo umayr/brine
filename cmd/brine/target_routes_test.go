@@ -198,14 +198,14 @@ func testTargetRoutes(t *testing.T, profile, kind string) {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		req.Header.Set("Authorization", "Bearer synthetic-target-token")
-		router.ServeHTTP(w, req)
+		router.ServeHTTP(&deadlineRecorder{w}, req)
 		return w
 	}
 	// Alpha cleanup is still a mutation and must not be accessible without
 	// authentication merely because it bypasses source/secret negotiation.
 	for _, action := range []string{"stop", "down", "up"} {
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, httptest.NewRequest("POST", "/api/stacks/demo/"+action, nil))
+		router.ServeHTTP(&deadlineRecorder{w}, httptest.NewRequest("POST", "/api/stacks/demo/"+action, nil))
 		if w.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated %s: %d %s", action, w.Code, w.Body.String())
 		}

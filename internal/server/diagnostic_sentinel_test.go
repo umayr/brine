@@ -127,7 +127,7 @@ exit 2
 					r.Header.Set("Authorization", "Bearer "+token)
 				}
 				w := httptest.NewRecorder()
-				s.router.ServeHTTP(w, r)
+				s.router.ServeHTTP(&deadlineRecorder{w}, r)
 				for _, forbidden := range []string{password, token} {
 					if strings.Contains(w.Body.String(), forbidden) {
 						t.Fatal("credential reached HTTP sink")

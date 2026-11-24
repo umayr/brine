@@ -277,8 +277,13 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	if action == "up" {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}
+	fw, observerErr := newOutputObserver(w)
+	if observerErr != nil {
+		writeError(w, http.StatusServiceUnavailable, observerErr.Error())
+		return
+	}
+	defer fw.Finish()
 	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
 	writeActionStatus(fw, action, run(ctx, stack.PklPath, fw))
 }
 
@@ -342,8 +347,13 @@ func (h *stackHandler) teardown(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := httpx.Detached(r.Context(), h.deployTimeout)
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	fw, observerErr := newOutputObserver(w)
+	if observerErr != nil {
+		writeError(w, http.StatusServiceUnavailable, observerErr.Error())
+		return
+	}
+	defer fw.Finish()
 	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
 	writeActionStatus(fw, "teardown", h.agent.Dill().Teardown(ctx, stack.PklPath, force, fw))
 }
 
@@ -639,8 +649,13 @@ func (h *stackHandler) gitPush(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	fw, observerErr := newOutputObserver(w)
+	if observerErr != nil {
+		writeError(w, http.StatusServiceUnavailable, observerErr.Error())
+		return
+	}
+	defer fw.Finish()
 	w.WriteHeader(http.StatusOK)
-	fw := newFlushWriter(w)
 	if err := h.git.Push(ctx, repoDir, message, fw); err != nil {
 		writeActionStatus(fw, "git push", err)
 		return
