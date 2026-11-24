@@ -27,6 +27,23 @@ type DeploymentStatus struct {
 	OperationID string `json:"operationId,omitempty"`
 }
 
+// canonicalDeploymentStatusKeys rejects case-insensitive struct field aliases.
+// checkJSON is still required separately to reject duplicate keys.
+func canonicalDeploymentStatusKeys(b []byte) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(b, &fields) != nil || fields == nil {
+		return false
+	}
+	for key := range fields {
+		switch key {
+		case "requestId", "stack", "state", "effects", "operationId":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (c *Client) CreateDeployment(ctx context.Context, epoch, stage, manifest, stack, selection, requestID string) (DeploymentStatus, error) {
 	return c.ApplyDeployment(ctx, epoch, stage, manifest, stack, selection, requestID, "create")
 }
@@ -136,7 +153,7 @@ func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack, postPat
 		return empty, failure
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 4097))
-	if err != nil || len(b) > 4096 || checkJSON(b) != nil || ctx.Err() != nil || session.Err() != nil {
+	if err != nil || len(b) > 4096 || checkJSON(b) != nil || !canonicalDeploymentStatusKeys(b) || ctx.Err() != nil || session.Err() != nil {
 		return empty, failure
 	}
 	d := json.NewDecoder(bytes.NewReader(b))

@@ -216,18 +216,25 @@ func (r *Runner) run(ctx context.Context, w io.Writer, args ...string) error {
 	return nil
 }
 
-// capture runs dill and returns combined output as a string.
+// capture keeps machine-readable stdout separate from bounded diagnostics.
 func (r *Runner) capture(ctx context.Context, args ...string) (string, error) {
-	var buf bytes.Buffer
+	out := captureBuffer{limit: 4 << 20}
+	diagnostics := captureBuffer{limit: 64 << 10}
 	cmd, cleanup, err := r.command(ctx, args...)
 	if err != nil {
 		return "", err
 	}
 	defer cleanup()
-	cmd.Stdout = &buf
-	cmd.Stderr = &buf
+	cmd.Stdout = &out
+	cmd.Stderr = &diagnostics
 	err = cmd.Run()
-	return buf.String(), err
+	if err != nil && diagnostics.buf.Len() > 0 {
+		err = fmt.Errorf("%w: %s", err, strings.TrimSpace(diagnostics.buf.String()))
+	}
+	if out.overflow || diagnostics.overflow {
+		return "", errors.Join(errCaptureLimit, err)
+	}
+	return out.buf.String(), err
 }
 
 // lifecycleArgs binds Dill to Brine's trusted deployment identity and engine.
@@ -467,15 +474,18 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 		return nil, err
 	}
 	out, err := r.capture(ctx, args...)
+	if errors.Is(err, errCaptureLimit) {
+		return nil, err
+	}
 	if err != nil && !isExitCode(err, 1) {
 		if out != "" {
-			return nil, fmt.Errorf("%s", strings.TrimSpace(out))
+			return nil, fmt.Errorf("%s: %w", strings.TrimSpace(out), err)
 		}
 		return nil, fmt.Errorf("dill plan: %w", err)
 	}
 	var result PlanResult
 	if jsonErr := json.Unmarshal([]byte(out), &result); jsonErr != nil {
-		return nil, fmt.Errorf("dill plan: invalid JSON: %w", jsonErr)
+		return nil, errors.Join(fmt.Errorf("dill plan: invalid JSON: %w", jsonErr), err)
 	}
 	return &result, nil
 }
@@ -506,9 +516,9 @@ func (r *Runner) Validate(ctx context.Context, pklPath string) error {
 	}
 	out, err := r.capture(ctx, args...)
 	if err != nil {
-		// Unexpected non-zero exit (e.g. file not found). Fall back to raw output.
+		// Preserve bounded stdout and stderr diagnostics on execution failure.
 		if msg := strings.TrimSpace(out); msg != "" {
-			return fmt.Errorf("%s", msg)
+			return fmt.Errorf("%s: %w", msg, err)
 		}
 		return err
 	}
