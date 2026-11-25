@@ -82,6 +82,7 @@ func run() error {
 	flag.StringVar(&cfg.RemoteRevealAuditDir, "remote-reveal-audit-dir", "", "absolute path to pre-initialized private reveal audit directory")
 	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
+	registerRestartMetadataFlags(flag.CommandLine, cfg)
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")

@@ -45,6 +45,9 @@ type Config struct {
 	MetricsHistoryDir      string
 	MetricsHistoryMaxPages int
 
+	// Metadata-only archive access; independent of content consent and sends.
+	RestartMetadata RestartMetadataSettings
+
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
 	AuthUser      string

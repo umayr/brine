@@ -42,9 +42,9 @@ func (a restartScopeAuthorizer) AuthorizeSnapshotHistoryRestart(ctx context.Cont
 	return a.check(ctx)
 }
 
-// protectedRestartMetadata is deliberately unmounted. Production constructors
-// do not supply a reader or an access policy. A successful page is intent
-// metadata, never a provider outcome, restore approval or permission to send.
+// protectedRestartMetadata serves only the explicitly configured metadata route.
+// A successful page is intent metadata, never a provider outcome, restore
+// approval or permission to send.
 func (h *Deployment) protectedRestartMetadata(reader restartMetadataReader, access restartMetadataAccess) http.Handler {
 	if h == nil || h.auth == nil || !h.auth.Enabled() {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

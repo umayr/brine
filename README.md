@@ -217,6 +217,8 @@ local processes and non-browser clients can still control it.
 
 ## Remote hosts
 
+Optional encrypted [archive metadata discovery](docs/restart-metadata.md) is disabled by default and remains under qualification. It is separate from configuration-read consent and deployment authority.
+
 Remote targets are read-only by default. On a paired HTTPS host, the agent operator can explicitly enable staging, preview, and checked creation, updates and removal of managed stacks. The same Brine server retains its local stack and container controls, but local Git auto-deploy is paused. This is not a whole-server read-only mode.
 
 Remote access is opt-in and requires an authenticated administrator and a private registry. For direct HTTPS, no SSH forwarding directory is needed:
