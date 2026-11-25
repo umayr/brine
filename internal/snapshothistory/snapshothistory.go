@@ -205,7 +205,11 @@ func (s *Store) DiscoverRestartMetadata(ctx context.Context, request RestartDisc
 		return RestartDiscoveryPage{}, ErrUnavailable
 	}
 	request.ApprovedTargetScope = scope
-	s.mu.Lock()
+	// Discovery is a read-only preview. Never queue a session or enrollment
+	// lease behind a writer; the caller can explicitly request a fresh page.
+	if !s.mu.TryLock() {
+		return RestartDiscoveryPage{}, ErrUnavailable
+	}
 	defer s.mu.Unlock()
 	if s.impl == nil {
 		return RestartDiscoveryPage{}, ErrUnavailable
