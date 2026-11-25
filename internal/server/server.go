@@ -35,6 +35,8 @@ type Server struct {
 	authn             *auth.Authenticator
 	remoteCancel      context.CancelFunc
 	remoteDeploy      *remoteui.Deployment
+	remoteRegistry    *targetregistry.Registry
+	metadata          *metadataWorker
 	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
@@ -92,6 +94,12 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 	if s.remoteCancel != nil {
 		defer s.remoteCancel()
 	}
+	s.metadata = s.beginRestartMetadata(ctx)
+	defer func() {
+		if err := s.metadata.stop(5 * time.Second); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}()
 	history := beginOptionalMetricsHistory(ctx, s.cfg)
 	defer func() {
 		if err := history.stop(5 * time.Second); err != nil {
@@ -127,6 +135,7 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 		return err
 	case <-ctx.Done():
 		history.cutoff()
+		s.metadata.cutoff()
 		// Cancel snapshot transfers before the HTTP shutdown grace period.
 		s.web.CloseStaging()
 		if s.remoteCancel != nil {
