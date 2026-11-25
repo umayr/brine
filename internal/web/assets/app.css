@@ -239,6 +239,34 @@
 .stack-panel-toggle[aria-expanded="false"] svg { transform: rotate(-90deg); }
 
 /* Configuration variables share the same panels, fields and type scale. */
+/* Stack workspace: preserve release controls, diff and shell. */
+.stack-overview { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); }
+.stack-overview > div { min-width:0; padding:var(--space-3) var(--space-4); }
+.stack-overview dd { margin-top:var(--space-1); overflow-wrap:anywhere; position:relative; }
+.stack-overview time { cursor:help; text-decoration:underline dotted var(--color-muted); text-underline-offset:3px; }
+.exact-time { position:absolute; z-index:3; right:0; top:100%; width:max-content; max-width:16rem; padding:var(--space-2); background:var(--color-panel); border:1px solid var(--color-line); border-radius:var(--radius-panel); }
+.stack-tabs { display:flex; gap:var(--space-1); flex-wrap:wrap; border-bottom:var(--border-width) solid var(--color-line); }
+.stack-tabs button { color:var(--color-muted); padding:var(--space-2) var(--space-3); font-size:var(--font-size-sm); border-bottom:2px solid transparent; }
+.stack-tabs button[aria-selected="true"] { color:var(--color-accent); border-color:currentColor; }
+.stack-loading { display:grid; grid-template-columns:1rem minmax(0,1fr); align-items:center; gap:var(--space-3); padding:var(--space-3) var(--space-5); margin:0; font-size:var(--font-size-sm); }
+.stack-loading .ui-spinner { width:1rem; height:1rem; margin:0; }
+@media (prefers-reduced-motion:reduce) { .stack-loading .ui-spinner { animation:none; } }
+.source-file-list { display:grid; gap:var(--space-2); overflow-wrap:anywhere; }
+.source-file-list li { border-top:1px solid var(--color-line); padding:var(--space-2) 0; }
+.source-excerpts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--space-3); }
+.source-excerpts pre { overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+#panel-Variables .variables-name { align-self:start; }
+@media (min-width:641px) {
+  #panel-Variables { --var-columns:minmax(0,1fr) minmax(0,1.3fr) 10rem; }
+  #panel-Variables :is(.variables-row,.variables-add-form) { grid-template-columns:var(--var-columns); }
+  #panel-Variables .variables-actions { justify-content:flex-start; }
+}
+@media (max-width:640px) {
+  .stack-overview { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .stack-tabs button { padding-inline:var(--space-2); }
+  .stack-overview > :nth-child(odd) .exact-time { left:0; right:auto; }
+  .source-excerpts { grid-template-columns:1fr; }
+}
 .variables-page { width: 100%; min-width: 0; }
 .variables-content { display: grid; gap: var(--space-5); max-width: 72rem; }
 .variables-panel { min-width: 0; overflow: hidden; }

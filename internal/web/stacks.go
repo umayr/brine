@@ -13,6 +13,7 @@ import (
 	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/pkl"
+	"github.com/umayr/brine/internal/planstate"
 	"github.com/umayr/brine/internal/store"
 )
 
@@ -477,11 +478,23 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "warning", alignment.Warning+" Update config.engine before planning or deploying.")
 		return
 	}
-	result, err := h.agent.Dill().Plan(r.Context(), stack.PklPath)
+	run := h.agent.Dill()
+	before, tagErr := planstate.Tag(stack, run.Variables)
+	result, err := run.Plan(r.Context(), stack.PklPath)
 	if err != nil {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
+	// This is a precondition on managed inputs, not a Dill apply receipt.
+	if !h.variableModeDisabled() && run.Variables != nil {
+		after, e := planstate.Tag(stack, run.Variables)
+		if tagErr != nil || e != nil || before != after {
+			http.Error(w, "Inputs changed or unavailable. Plan again.", http.StatusConflict)
+			return
+		}
+		w.Header().Set(planstate.Header, after)
+	}
+	w.Header().Set("Cache-Control", "no-store")
 	h.renderPartial(w, r, "plan-diff", result)
 }
 

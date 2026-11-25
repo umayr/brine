@@ -35,7 +35,8 @@
     }
     function fromURL() {
       const url = new URL(location.href);
-      const name = legacy[url.hash] || url.searchParams.get('tab')?.toLowerCase();
+      const name = list.dataset.initialTab || legacy[url.hash] || url.searchParams.get('tab')?.toLowerCase();
+      delete list.dataset.initialTab;
       select(tabs.find(item => item.dataset.stackTab.toLowerCase() === name));
     }
     list.addEventListener('click', event => {
@@ -55,60 +56,125 @@
     document.addEventListener('click', event => {
       if (!event.target.closest('[data-open-history]')) return;
       event.preventDefault();
+      if (active === tab('History')) document.getElementById('stack-history-content').dispatchEvent(new CustomEvent('load-history', {bubbles:true}));
       select(tab('History'), true);
     });
     window.addEventListener('hashchange', fromURL);
     window.addEventListener('popstate', fromURL);
 
     if (button && result && planTab) {
+      const deploy = document.getElementById('deploy-button');
+      const policyDisabled = deploy.disabled;
+      const stale = document.getElementById('plan-stale');
+      const tools = document.getElementById('plan-tools');
       const empty = () => !result.childElementCount && !result.textContent.trim();
-      function hidePlan() {
+      function dismiss() {
+        const xhr = pending;
+        pending = null;
+        xhr?.abort();
+        result.replaceChildren();
         planTab.hidden = true;
         if (active === planTab) select(tab('Compose'), true);
       }
-      function invalidate() {
+      function markStale(force) {
+        if (planTab.hidden && !force && !deploy.dataset.planInputs) return;
         const xhr = pending;
         pending = null;
-        result.replaceChildren();
-        result.removeAttribute('role');
-        hidePlan();
         xhr?.abort();
+        if (empty() || result.querySelector('.stack-loading')) result.textContent = 'No current plan was returned.';
+        planTab.hidden = false;
+        stale.hidden = false;
+        deploy.dataset.needsPlan = 'true';
+        deploy.disabled = true;
       }
-      // Emit from lifecycle/Git handlers that mutate state outside HTMX.
-      document.addEventListener('brine:invalidate-plan', invalidate);
-      if (!button.hasAttribute('hx-sync')) button.setAttribute('hx-sync', 'this:replace');
+      document.addEventListener('brine:stale-plan', () => { markStale(true); select(planTab, true); });
+      document.getElementById('dismiss-plan').addEventListener('click', dismiss);
+      // Returning to a cached document cannot attest that its inputs survived.
+      window.addEventListener('pageshow', e => { if (e.persisted) markStale(false); });
       document.addEventListener('htmx:beforeRequest', event => {
-        const { elt, xhr, requestConfig, target } = event.detail;
+        const { elt, xhr, requestConfig } = event.detail;
         if (elt !== button) {
-          const git = '#git-source-panel, #git-source-actions';
-          if (/^(post|put|patch|delete)$/i.test(requestConfig?.verb) && (elt?.closest(git) || target?.closest(git))) invalidate();
+          if (requestConfig?.verb !== 'get' && elt?.closest('#git-source-panel, #git-source-actions')) markStale(false);
           return;
         }
         if (button.disabled) { event.preventDefault(); return; }
         pending = xhr;
         result.setAttribute('role', 'status');
-        result.innerHTML = '<div class="stack-loading flex items-center gap-2"><span class="ui-spinner" aria-hidden="true"></span><span>Generating plan…</span></div>';
+        result.innerHTML = '<div class="stack-loading"><span class="ui-spinner" aria-hidden="true"></span><span>Generating plan…</span></div>';
+        tools.hidden = false;
         planTab.hidden = false;
         select(planTab, true);
       });
       document.addEventListener('htmx:beforeSwap', event => {
         const { target, xhr } = event.detail;
-        if (target === result && (xhr !== pending || xhr.status < 200 || xhr.status >= 300)) event.preventDefault();
+        if (target === result && (xhr !== pending || xhr.status !== 200 || new URL(xhr.responseURL).pathname === '/login')) {
+          event.detail.shouldSwap = false;
+        }
       });
       document.addEventListener('htmx:afterRequest', event => {
-        if (!pending || event.detail.xhr !== pending) return;
+        const xhr = event.detail.xhr;
+        if (!pending || xhr !== pending) return;
         pending = null;
         if (result.querySelector('.stack-loading') || empty()) {
-          result.setAttribute('role', 'status');
           result.textContent = 'Plan unavailable. No current plan was returned.';
-        } else result.removeAttribute('role');
+        } else if (!result.querySelector('.ui-notice-error,.ui-notice-warning')) {
+          const tag = xhr.getResponseHeader('X-Brine-Plan-Inputs');
+          if (tag && /^[0-9a-f]{64}$/.test(tag)) {
+            deploy.dataset.planInputs = tag;
+            delete deploy.dataset.needsPlan;
+            deploy.disabled = policyDisabled;
+            stale.hidden = true;
+          }
+          result.removeAttribute('role');
+        }
+        tools.hidden = !!result.querySelector('button[aria-label="Close plan"]');
       });
-      // The plan partial's native close removes its own panel.
-      new MutationObserver(() => { if (!pending && empty()) hidePlan(); }).observe(result, { childList: true });
-      new MutationObserver(() => { if (button.disabled) invalidate(); }).observe(button, { attributes: true, attributeFilter: ['disabled'] });
-      planTab.hidden = empty();
+      // Lifecycle handlers cancel outstanding reads and clear the diff; they
+      // do not grant authority through re-enabling originally disabled buttons.
+      new MutationObserver(() => { if (!pending && empty() && !planTab.hidden && stale.hidden) dismiss(); }).observe(result, { childList: true });
     }
 
+    // The History read/review is replaceable. Never leave an old Confirm
+    // button on-screen as though it came from a newer failed review.
+    const historyContent = document.getElementById('stack-history-content');
+    function historyTarget(event) {
+      const target = event.detail.target;
+      return target === historyContent || target?.id === 'stack-source-history';
+    }
+    function historyMessage(el, msg, loading = false) {
+      const row = document.createElement('div');
+      row.className = loading ? 'stack-loading' : 'ui-panel p-5';
+      row.setAttribute('role', loading ? 'status' : 'alert');
+      if (loading) {
+        const spinner = document.createElement('span');
+        spinner.className = 'ui-spinner'; spinner.setAttribute('aria-hidden', 'true'); row.append(spinner);
+      }
+      row.append(document.createTextNode(msg));
+      el.replaceChildren(row);
+    }
+    // beforeSend: HTMX already gathered and bound the original form controls.
+    document.addEventListener('htmx:beforeSend', event => {
+      if (!historyTarget(event)) return;
+      const {target, xhr} = event.detail;
+      const path = event.detail.requestConfig.path;
+      xhr.addEventListener('loadend', () => {
+        if (!target.isConnected) return;
+        if (xhr.status !== 200 || !xhr.responseURL || new URL(xhr.responseURL).pathname === '/login') {
+          historyMessage(target, 'History or review unavailable. Check your session and reopen History. No restore was requested.');
+        }
+      }, {once:true});
+      // Keep the HTMX request's source attached through its lifecycle.
+      if (target === historyContent) historyMessage(target, 'Loading history…', true);
+      else if (path.endsWith('/review')) {
+        target.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        const status = document.createElement('div');
+        historyMessage(status, 'Verifying source…', true); target.prepend(status);
+      }
+    });
+    historyContent?.addEventListener('htmx:beforeSwap', event => {
+      const xhr = event.detail.xhr;
+      if (historyTarget(event) && xhr.responseURL && new URL(xhr.responseURL).pathname === '/login') event.detail.shouldSwap = false;
+    });
     const timeSelector = 'time[data-relative][datetime]';
     const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'always' });
     const exact = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' });

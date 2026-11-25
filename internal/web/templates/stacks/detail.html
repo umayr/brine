@@ -20,7 +20,7 @@
   <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1></div></header>
   <div class="desk-stack-actions" role="group" aria-label="Stack actions">
     <!-- Primary action -->
-    <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
+    <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action id="deploy-button"
       onclick="runAction('up', '{{.Stack.Name}}')"
       {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
@@ -72,10 +72,10 @@
         Plan
       </button>
       {{if .QualifiedOperations}}<button class="ui-button ui-button-ghost ui-button-sm" data-stack-action
-        hx-post="/web/stacks/{{.Stack.Name}}/validate" hx-target="#plan-result" hx-swap="innerHTML">Validate saved</button>{{end}}
+        hx-post="/web/stacks/{{.Stack.Name}}/validate" hx-target="#saved-validation" hx-swap="innerHTML">Validate saved</button>{{end}}
     </div>
 
-    <button type="button" class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-open-history><i data-lucide="history" class="w-3.5 h-3.5" aria-hidden="true"></i>Restore</button>
+    <button type="button" class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action data-open-history><i data-lucide="history" class="w-3.5 h-3.5" aria-hidden="true"></i>Restore</button>
     <!-- Danger zone -->
     <div class="desk-danger flex flex-wrap items-center gap-1.5">
       <div id="action-status" role="status" aria-live="polite" class="hidden ui-status ui-status-neutral ui-status-sm font-mono mr-1">idle</div>
@@ -97,11 +97,12 @@
   </div>
 
   <p id="stack-delete-result" role="status"></p>
+  {{if .QualifiedOperations}}<div id="saved-validation" role="status"></div>{{end}}
 
   <dl class="ui-panel stack-overview" aria-label="Stack overview">
     <div><dt class="field-label">Engine</dt><dd class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</dd></div>
     <div><dt class="field-label">Source</dt><dd class="font-mono text-sm">{{if .Stack.Git}}Git{{else}}Workspace{{end}}</dd></div>
-    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm">{{if .Stack.RemoteGit}}Remote · {{.Stack.RemoteGit.Host}}{{else}}Local{{end}}</dd></div>
+    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm">Local{{if .Stack.RemoteGit}}<span class="block text-xs text-muted">Remote Git policy: {{.Stack.RemoteGit.Host}}</span>{{end}}</dd></div>
     <div><dt class="field-label">Entrypoint</dt><dd class="font-mono text-sm">{{.Stack.EffectiveEntrypoint}}</dd></div>
     <div><dt class="field-label">Created</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
     <div><dt class="field-label">Updated</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
@@ -131,7 +132,7 @@
     <div id="action-log" class="terminal h-64 overflow-y-auto whitespace-pre-wrap"></div>
   </div>
 
-  <div class="stack-tabs" role="tablist" aria-label="Stack sections">
+  <div class="stack-tabs" role="tablist" aria-label="Stack sections" data-stack="{{.Stack.Name}}"{{if .Variables.Error}} data-initial-tab="variables"{{end}}>
     <button type="button" id="tab-Compose" role="tab" aria-controls="panel-Compose" aria-selected="true" tabindex="0" data-stack-tab="Compose">Compose</button>
     <button type="button" id="tab-Containers" role="tab" aria-controls="panel-Containers" aria-selected="false" tabindex="-1" data-stack-tab="Containers">Containers</button>
     <button type="button" id="tab-Variables" role="tab" aria-controls="panel-Variables" aria-selected="false" tabindex="-1" data-stack-tab="Variables">Variables</button>
@@ -381,7 +382,7 @@
     </div>
   </section>
   <section id="panel-Plan" role="tabpanel" aria-labelledby="tab-Plan" tabindex="0" class="space-y-4" hidden>
-    <div class="flex items-center justify-between"><span class="field-label">Plan review</span><button type="button" id="dismiss-plan" class="ui-button ui-button-ghost ui-button-xs">Close plan</button></div>
+    <div id="plan-tools" class="flex items-center justify-between"><span class="field-label">Plan review</span><button type="button" id="dismiss-plan" class="ui-button ui-button-ghost ui-button-xs">Close plan</button></div>
     <p id="plan-stale" class="ui-notice ui-notice-warning" role="status" hidden>Inputs changed. Run Plan again before deploying.</p>
     <div id="plan-result" role="status" aria-live="polite"></div>
   <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
@@ -522,6 +523,9 @@ async function runAction(action, name, method, body, contentType) {
   const status = document.getElementById('action-status');
   const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
+  const deploy = document.getElementById('deploy-button');
+  if (action === 'up' && deploy.disabled) return;
+  const observed = action === 'up' ? deploy.dataset.planInputs : '';
   const lifecycle = ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
   const qualified = output.dataset?.qualifiedOperations === 'true' && lifecycle;
   const gitPush = action === 'git/push';
@@ -568,8 +572,13 @@ async function runAction(action, name, method, body, contentType) {
     const res = await fetch(`/api/stacks/${name}/${action}`, {
       method: method || 'POST',
       body: body,
-      headers: brineHeaders(contentType ? {'Content-Type': contentType} : {}),
+      headers: brineHeaders({...(contentType ? {'Content-Type': contentType} : {}), ...(observed ? {'X-Brine-Plan-Inputs': observed} : {})}),
     });
+    if (observed && res.status === 412 && res.headers.get('X-Brine-Plan-Stale') === 'true') {
+      log.textContent = 'Inputs changed. No deployment was started. Run Plan again.';
+      title.textContent = 'Plan out of date'; status.textContent = 'not started'; status.className = 'ui-status ui-status-warning';
+      document.dispatchEvent(new CustomEvent('brine:stale-plan')); return;
+    }
     const requestID = qualified ? (res.headers.get('X-Brine-Request-ID') || '') : '';
     if (qualified && /^br_[a-f0-9]{32}$/.test(requestID)) BrineUI.operationLookup(document, output.parentNode, requestID);
     if (!res.ok) {
@@ -639,7 +648,7 @@ async function runAction(action, name, method, body, contentType) {
     }
   } finally {
     if (action === 'git/push') htmx.trigger(document.body, 'git-refresh');
-    buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true');
+    buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true' || btn.dataset.needsPlan === 'true');
   }
 }
 

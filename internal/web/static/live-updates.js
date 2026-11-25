@@ -97,6 +97,10 @@
     document.addEventListener('htmx:beforeSwap', event => {
       if (!matches(event)) return;
       request.responding = true;
+      if (request.xhr.responseURL && new URL(request.xhr.responseURL).pathname === '/login') {
+        event.detail.shouldSwap = false;
+        return;
+      }
       if (request.automatic && (request.discard || !eligible() || (!request.initial && !prefs.enabled))) {
         event.detail.shouldSwap = false;
         if (request.initial) first = true;
@@ -109,7 +113,20 @@
       schedule();
     }
     document.addEventListener('htmx:afterSettle', finish);
-    document.addEventListener('htmx:afterRequest', event => { if (!request?.swapped) finish(event); });
+    document.addEventListener('htmx:afterRequest', event => {
+      if (!matches(event) || request.swapped) return;
+      if (!request.discard && (request.xhr.status !== 200 || !request.xhr.responseURL || new URL(request.xhr.responseURL).pathname === '/login')) {
+        // A failed read never leaves a previously running service presented as current.
+        // Keep an existing error/retry control (and its focus) through a failed retry.
+        if (!inventory.querySelector('[role="alert"]')) {
+          const error = document.createElement('p');
+          error.setAttribute('role','alert'); error.className = 'px-5 py-4 text-error';
+          error.textContent = 'Stack container inventory is unavailable. Use Refresh to read it again.';
+          inventory.replaceChildren(error);
+        }
+      }
+      finish(event);
+    });
     document.addEventListener('htmx:load', schedule);
     window.addEventListener('brine:stack-tab-change', schedule, true);
     document.addEventListener('visibilitychange', schedule);

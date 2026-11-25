@@ -22,6 +22,7 @@ import (
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/pkl"
+	"github.com/umayr/brine/internal/planstate"
 	"github.com/umayr/brine/internal/store"
 )
 
@@ -265,6 +266,14 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	if err != nil {
 		writeStackLookupError(w, name, err)
 		return
+	}
+	if observed := r.Header.Get(planstate.Header); action == "up" && observed != "" {
+		now, e := planstate.Tag(stack, h.agent.Dill().Variables)
+		if e != nil || now != observed {
+			w.Header().Set("X-Brine-Plan-Stale", "true")
+			writeError(w, http.StatusPreconditionFailed, "Inputs changed or unavailable. Plan again; deployment was not started.")
+			return
+		}
 	}
 	if checkEngine && !h.ensureRuntimeEngine(w, stack) {
 		return
