@@ -53,6 +53,7 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		// Full-page routes
 		r.Get("/", h.dashboard)
 		r.Get("/settings", h.settingsAppearance)
+		r.Get("/settings/live-updates", h.settingsLiveUpdates)
 		r.Get("/variables", h.variablesPage)
 		r.Post("/variables", h.variablesSave)
 		// Keep previously shared bookmarks and form submissions working.
@@ -82,6 +83,9 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			r.Get("/stacks/{name}/project-preview", h.projectPreview)
 			r.Post("/stacks/{name}/staging/prepare", h.stagingPrepare)
 			r.Post("/stacks/{name}/staging/confirm", h.stagingConfirm)
+			r.Get("/stacks/{name}/history", h.stackHistory)
+			r.Post("/stacks/{name}/history/review", h.stackSourceReview)
+			r.Post("/stacks/{name}/history/confirm", h.stackSourceConfirm)
 			r.Get("/stacks/{name}/plan", h.stackPlan)
 			r.Get("/stacks/{name}/containers", h.stackContainers)
 

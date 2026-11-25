@@ -30,6 +30,7 @@ type Handler struct {
 	stagingAdmission chan struct{}
 	stagingLifecycle *stagingLifecycle
 	remoteEnabled    bool
+	sourceHistory    *sourceHistoryAccess
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)

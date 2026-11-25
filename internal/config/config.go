@@ -25,6 +25,8 @@ type Config struct {
 	SecretTarget         string // operator-selected target ID, enables strict secret mode with SecretPolicy
 	SecretPolicy         string // absolute operator-controlled policy path
 	SecretPkl            string // optional absolute operator-installed Pkl binary
+	SourceHistoryDir     string // existing separately initialized private source-revision archive
+	SourceHistoryKey     string // pre-existing 32-byte key in a separate private directory
 	OperationStateDir    string // explicit S1 opt-in, private neutral request history
 	CoordinationStateDir string // preexisting private shared operator state, never stack data
 	CoordinationLayout   string // explicit native-local-docker-v1 operator assertion
@@ -82,6 +84,11 @@ func Default() *Config {
 func (c *Config) Validate() error {
 	validRevealPath := func(p string) bool {
 		return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
+	}
+	if c.SourceHistoryDir != "" || c.SourceHistoryKey != "" {
+		if !validRevealPath(c.SourceHistoryDir) || !validRevealPath(c.SourceHistoryKey) || c.NoAuth || c.RemoteEnabled || c.StagingSocket != "" {
+			return fmt.Errorf("source history requires explicit archive and key paths, authentication and a local-only manager without staging or remote workers")
+		}
 	}
 	if c.RemoteRevealEnabled {
 		if !c.RemoteEnabled || c.NoAuth || !validRevealPath(c.RemoteRevealSeedPath) || !validRevealPath(c.RemoteRevealAuditDir) {

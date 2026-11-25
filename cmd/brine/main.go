@@ -20,6 +20,7 @@ import (
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/server"
+	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 )
@@ -81,6 +82,9 @@ func run() error {
 	flag.StringVar(&cfg.RemoteRevealSeedPath, "remote-reveal-seed-path", "", "absolute path to operator-provisioned reveal signing seed")
 	flag.StringVar(&cfg.RemoteRevealAuditDir, "remote-reveal-audit-dir", "", "absolute path to pre-initialized private reveal audit directory")
 	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
+	flag.StringVar(&cfg.SourceHistoryDir, "source-history-dir", "", "pre-initialized private source-revision archive outside Brine data (opt-in)")
+	flag.StringVar(&cfg.SourceHistoryKey, "source-history-key", "", "separately provisioned private 32-byte source archive key file")
+	initSourceHistory := flag.Bool("init-source-history", false, "initialize an empty, externally provisioned source archive and exit; never generate keys")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
@@ -101,6 +105,18 @@ func run() error {
 		return nil
 	}
 
+	if *initSourceHistory {
+		if err := normalizeDataDir(cfg); err != nil {
+			return err
+		}
+		if cfg.SourceHistoryDir == "" || cfg.SourceHistoryKey == "" {
+			return fmt.Errorf("explicit source archive and key required")
+		}
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+		return snapshothistory.InitializeSourceArchive(cfg.SourceHistoryDir, cfg.SourceHistoryKey, cfg.DataDir)
+	}
 	if handled, err := quarantineAction(); handled {
 		return err
 	}

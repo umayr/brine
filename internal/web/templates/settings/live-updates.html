@@ -1,0 +1,28 @@
+{{template "layout.html" .}}
+{{define "title"}}Live Updates — Brine{{end}}
+{{define "header"}}Settings / Live Updates{{end}}
+{{define "content"}}
+<div class="appearance-page">
+  <div class="index-heading"><div><span class="section-code">CONTROL PLANE</span><h1>Live Updates</h1>
+    <p class="overview-subtitle">Choose how often Brine reads the container inventory while you view a stack.</p></div></div>
+  <nav class="appearance-tabs" aria-label="Settings sections">
+    <a href="/settings">Appearance</a>
+    <a href="/settings/live-updates" aria-current="page">Live Updates</a>
+  </nav>
+  <div class="appearance-stack">
+    <noscript><div class="ui-notice ui-notice-info">Live update preferences require JavaScript.</div></noscript>
+    <section class="ui-panel appearance-panel space-y-4" aria-labelledby="refresh-heading">
+      <h2 id="refresh-heading">Stack container inventory</h2>
+      <label class="flex items-center gap-2"><input class="ui-checkbox ui-checkbox-accent" type="checkbox" id="auto-refresh" checked>Auto-refresh</label>
+      <div id="interval-row" class="ui-field">
+        <label for="refresh-interval" class="ui-label-text">Refresh interval</label>
+        <select id="refresh-interval" class="ui-select"><option value="5">5 seconds</option><option value="10">10 seconds</option><option value="30">30 seconds</option><option value="60">60 seconds</option></select>
+      </div>
+      <p class="text-sm text-muted">Only the open Containers tab refreshes. Use Refresh at any time for a new reading. This preference does not change your stacks or other browsers.</p>
+      <button id="reset-live-updates" class="ui-button ui-button-outline ui-button-sm" type="button">Reset live updates</button>
+    </section>
+    <p id="refresh-feedback" class="appearance-feedback text-muted" role="status">Changes apply immediately in this browser.</p>
+  </div>
+</div>
+<script src="/static/live-updates.js" defer></script>
+{{end}}

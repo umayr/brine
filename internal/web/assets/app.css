@@ -262,7 +262,8 @@
 .appearance-page,.appearance-stack,.appearance-panel { min-width: 0; }
 .appearance-tabs { display: flex; gap: var(--space-6); margin-bottom: var(--space-6); border-bottom: var(--border-width) solid var(--color-line); }
 .appearance-tabs a { color: var(--color-accent); padding-bottom: var(--space-3); border-bottom: var(--border-emphasis) solid currentColor; font-size: var(--font-size-sm); }
-.appearance-tabs a:hover { text-decoration: none; }
+.appearance-tabs a:not([aria-current="page"]) { color: var(--color-muted); border-bottom-color: transparent; }
+.appearance-tabs a:hover { text-decoration: none; color: var(--color-accent); }
 .appearance-stack { display: grid; gap: var(--space-6); }
 .appearance-panel { padding: var(--space-6); }
 .appearance-panel h2 { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); }

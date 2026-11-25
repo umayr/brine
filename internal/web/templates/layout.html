@@ -7,7 +7,7 @@
   <title>{{block "title" .}}Brine{{end}}</title>
   <script src="/static/theme.js"></script>
   <link href="/static/theme.css" rel="stylesheet">
-  <link href="/static/vendor/app.css?v=stack-panels-4" rel="stylesheet">
+  <link href="/static/vendor/app.css?v=stack-workspace-1" rel="stylesheet">
   <link href="/static/operations-desk.css" rel="stylesheet">
   <script src="/static/inventory-view.js" defer></script>
   <script src="/static/vendor/htmx.min.js"></script>
@@ -51,7 +51,7 @@
           </summary>
           <div class="runtime-details-body">
             <div>Socket: <span class="font-mono">{{.Target.Socket}}</span></div>
-            <div>Profile: {{.Target.Profile}}</div>
+            {{if eq .Target.Profile "alpha"}}<div>Restricted operations</div>{{end}}
             {{if .Target.Status}}<div>{{.Target.Status}}</div>{{end}}
           </div>
         </details>

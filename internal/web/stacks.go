@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -97,7 +98,13 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		http.Error(w, "Stack not found", http.StatusNotFound)
+		if errors.Is(err, store.ErrStackNotFound) {
+			http.Error(w, "Stack not found", http.StatusNotFound)
+		} else if errors.Is(err, store.ErrSourceInterrupted) {
+			http.Error(w, store.ErrSourceInterrupted.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, "Stack metadata unavailable", http.StatusInternalServerError)
+		}
 		return
 	}
 

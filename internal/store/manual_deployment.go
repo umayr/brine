@@ -198,6 +198,34 @@ func (s *FSStore) SaveManualIntent(i ManualDeploymentIntent) error {
 		return nil
 	}, true)
 }
+
+// ExistingManualIntents does not create a ledger merely because a History
+// tab is opened. Incomplete initialization or loss is not an empty history.
+func (s *FSStore) ExistingManualIntents() ([]ManualDeploymentIntent, error) {
+	dir, err := unix.Open(s.dataDir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, ErrManualIntent
+	}
+	defer unix.Close(dir)
+	present := 0
+	for _, name := range []string{manualIntentFile, "manual-deployments.lock", "manual-deployments.initialized"} {
+		var st unix.Stat_t
+		err = unix.Fstatat(dir, name, &st, unix.AT_SYMLINK_NOFOLLOW)
+		if err == nil {
+			present++
+		} else if !errors.Is(err, unix.ENOENT) {
+			return nil, ErrManualIntent
+		}
+	}
+	if present == 0 {
+		return nil, nil
+	}
+	if present != 3 {
+		return nil, ErrManualIntent
+	}
+	return s.ListManualIntents()
+}
+
 func (s *FSStore) ListManualIntents() ([]ManualDeploymentIntent, error) {
 	var result []ManualDeploymentIntent
 	err := s.manualTransaction(func(rows *[]ManualDeploymentIntent) error {
