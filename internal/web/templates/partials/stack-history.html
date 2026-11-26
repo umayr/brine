@@ -7,8 +7,9 @@
   <p class="text-sm">Entrypoint: <code>{{.EntryBefore}}</code>{{if ne .EntryBefore .EntryAfter}} → <code>{{.EntryAfter}}</code>{{end}}</p>
   <ul class="source-file-list">{{range .Files}}<li><code>{{.Path}}</code> · {{if eq $.Review "retain"}}{{.AfterBytes}} bytes{{else}}{{.Change}} · {{.BeforeBytes}} → {{.AfterBytes}} bytes{{end}}
     {{if .Compare}}<details><summary>Source excerpt</summary><div class="source-excerpts"><div><b>Current</b><pre>{{.Before}}</pre></div><div><b>Retained</b><pre>{{.After}}</pre></div></div></details>{{end}}</li>{{end}}</ul>
+  {{if .SlotsNeeded}}<p class="text-sm">This change needs {{.SlotsNeeded}} archive slot(s).{{if .Capacity}} {{.Capacity.RemainingObjects}} available across all stacks.{{end}} Confirmation checks the final byte size and available capacity.</p>{{end}}
   {{if .Message}}<p role="status">{{.Message}}</p>{{end}}
-  {{if and (eq .Review "restore") .Confirm (not .Compare)}}<form method="post" action="/web/stacks/{{.Stack}}/history/review" hx-post="/web/stacks/{{.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML">
+  {{if and (eq .Review "restore") (not .Compare)}}<form method="post" action="/web/stacks/{{.Stack}}/history/review" hx-post="/web/stacks/{{.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML">
     <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="kind" value="restore"><input type="hidden" name="revision" value="{{.ID}}"><input type="hidden" name="compare" value="yes">
     <button type="submit" class="ui-button ui-button-outline ui-button-sm">Compare file contents</button> <span class="text-xs text-muted">May reveal sensitive source. Up to eight changed files; 2 KiB per excerpt.</span>
   </form>{{end}}
@@ -23,6 +24,7 @@
   <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="source-history-heading" class="font-semibold">Source revisions</h2>
     {{if .Enabled}}<form method="post" action="/web/stacks/{{.Stack}}/history/review" hx-post="/web/stacks/{{.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="kind" value="retain"><button class="ui-button ui-button-outline ui-button-sm" type="submit">Review checkpoint</button></form>{{end}}</div>
   {{if .Message}}<p class="text-sm" role="status">{{.Message}}</p>{{end}}
+  {{if .Enabled}}<p class="text-sm text-muted">{{if .Capacity}}Archive across all stacks: {{.Capacity.Objects}} / {{.Capacity.Limits.Objects}} objects ({{.Capacity.RemainingObjects}} slots remaining) · {{.Capacity.Bytes}} / {{.Capacity.Limits.Bytes}} sealed bytes ({{.Capacity.RemainingBytes}} remaining).{{else}}Archive capacity currently unavailable.{{end}}</p>{{end}}
   {{if .Enabled}}{{if not .Rows}}<p>No retained source revisions yet. Review a checkpoint to retain this stack’s current files.</p>{{else}}
   <ol class="source-file-list">{{range .Rows}}<li class="flex flex-wrap items-center justify-between gap-2"><div><strong>r{{.Number}}{{if .From}} ← r{{.From}}{{end}}</strong> · {{if .From}}Source restored{{else}}Checkpoint retained{{end}}<p class="text-xs text-muted">{{.Actor}} · {{.When}} · {{.Count}} file(s)</p></div>
   <form method="post" action="/web/stacks/{{$.Stack}}/history/review" hx-post="/web/stacks/{{$.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="kind" value="restore"><input type="hidden" name="revision" value="{{.ID}}"><button class="ui-button ui-button-outline ui-button-sm" type="submit" aria-label="Review restore from r{{.Number}}">Review restore</button></form></li>{{end}}</ol>

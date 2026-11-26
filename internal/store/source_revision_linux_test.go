@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -71,6 +72,21 @@ func sourceTestWrite(t *testing.T, dir, name, content string) {
 	p := filepath.Join(dir, name)
 	sourceTestOK(t, os.MkdirAll(filepath.Dir(p), 0700))
 	sourceTestOK(t, os.WriteFile(p, []byte(content), 0600))
+}
+
+func TestFSStoreSourceLineageBeyondOldLimit(t *testing.T) {
+	ctx := context.Background()
+	s, _, _ := sourceTestWorkspace(t)
+	for i := 1; i <= 101; i++ {
+		v := sourceTestReview(t, s)
+		id := fmt.Sprintf("%064x", i)
+		sourceTestOK(t, s.CommitSource(ctx, sourceTestName, v.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+			return store.SourceUpdate{NewRevisions: []string{id}}, nil
+		}))
+	}
+	if got := sourceTestReview(t, s); len(got.Revisions) != 101 || string(got.Files["compose.pkl"]) != sourceTestOriginal {
+		t.Fatal("the 101st checkpoint did not persist without changing source")
+	}
 }
 
 func TestFSStoreSourceCaptureBinding(t *testing.T) {

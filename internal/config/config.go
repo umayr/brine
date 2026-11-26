@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/target"
 )
 
@@ -27,6 +28,7 @@ type Config struct {
 	SecretPkl            string // optional absolute operator-installed Pkl binary
 	SourceHistoryDir     string // existing separately initialized private source-revision archive
 	SourceHistoryKey     string // pre-existing 32-byte key in a separate private directory
+	SourceHistoryLimits  snapshothistory.SourceArchiveLimits
 	OperationStateDir    string // explicit S1 opt-in, private neutral request history
 	CoordinationStateDir string // preexisting private shared operator state, never stack data
 	CoordinationLayout   string // explicit native-local-docker-v1 operator assertion
@@ -88,6 +90,14 @@ func (c *Config) Validate() error {
 	if c.SourceHistoryDir != "" || c.SourceHistoryKey != "" {
 		if !validRevealPath(c.SourceHistoryDir) || !validRevealPath(c.SourceHistoryKey) || c.NoAuth || c.RemoteEnabled || c.StagingSocket != "" {
 			return fmt.Errorf("source history requires explicit archive and key paths, authentication and a local-only manager without staging or remote workers")
+		}
+	}
+	if l := c.SourceHistoryLimits; l != (snapshothistory.SourceArchiveLimits{}) {
+		if c.SourceHistoryDir == "" {
+			return fmt.Errorf("source history limits require explicit archive and key paths")
+		}
+		if _, err := l.Resolve(); err != nil {
+			return fmt.Errorf("source history limits: objects must be 1–%d and bytes 1–%d (0 uses the default)", snapshothistory.MaxSourceArchiveObjects, snapshothistory.MaxSourceArchiveBytes)
 		}
 	}
 	if c.RemoteRevealEnabled {

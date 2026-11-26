@@ -86,7 +86,7 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 		return err
 	}
 	if s.cfg.SourceHistoryDir != "" {
-		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir)
+		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir, s.cfg.SourceHistoryLimits)
 		if err != nil {
 			return fmt.Errorf("open source history: %w", err)
 		}
