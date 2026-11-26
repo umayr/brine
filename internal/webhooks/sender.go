@@ -50,6 +50,12 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 			lastPrune = s.now()
 		}
+		if e := s.ReconcileMetadata(ctx); e != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return e
+		}
 		if e := s.reconcileOperations(ctx); e != nil {
 			if ctx.Err() != nil {
 				return nil

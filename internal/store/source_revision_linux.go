@@ -185,7 +185,7 @@ func (s *FSStore) CommitAutomaticCheckpoint(ctx context.Context, name, baseline 
 	return s.commitSource(ctx, name, baseline, true, build)
 }
 
-func (s *FSStore) commitSource(ctx context.Context, name, baseline string, automatic bool, build SourceChange) error {
+func (s *FSStore) commitSource(ctx context.Context, name, baseline string, automatic bool, build SourceChange) (resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	root, err := s.lockManualRoot()
@@ -283,6 +283,11 @@ func (s *FSStore) commitSource(ctx context.Context, name, baseline string, autom
 	st.Entrypoint = next.Entrypoint
 	st.PklPath = filepath.Join(s.stackDir(name), next.Entrypoint)
 	st.UpdatedAt = time.Now().UTC()
+	commit, observeErr := s.prepareMetadata(st, "restore", name)
+	if observeErr != nil {
+		return observeErr
+	}
+	defer func() { commit.Done(resultErr) }()
 	// Both directories are private siblings. A leftover stage is an explicit
 	// durable fence (also checked when the optional archive is no longer open).
 	stage := stageName(name)

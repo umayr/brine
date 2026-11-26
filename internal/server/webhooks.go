@@ -124,6 +124,10 @@ func (s *Server) prepareWebhooks(ctx context.Context) error {
 	if e != nil {
 		return errors.New("webhook storage unavailable or insecure")
 	}
+	if e = s.configureWebhookMetadata(ctx, svc); e != nil {
+		svc.Close()
+		return e
+	}
 	s.webhooks = svc
 	if s.webhookDispatcher == nil {
 		s.webhookDispatcher = &webhookDispatcher{s: s}

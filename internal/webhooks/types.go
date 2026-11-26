@@ -36,6 +36,7 @@ type Event struct {
 	Effects         string    `json:"effects,omitempty"`
 	ChangesDetected *bool     `json:"changes_detected,omitempty"`
 	Reason          string    `json:"reason,omitempty"`
+	Reconciled      bool      `json:"reconciled,omitempty"`
 }
 
 type Endpoint struct {

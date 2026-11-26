@@ -11,7 +11,7 @@ import (
 // CreateGitAttempt stages a complete stack privately, then publishes it without
 // replacing an existing path. clone must finish using its destination before returning.
 // Once publication starts, cancellation cannot roll it back.
-func (s *FSStore) CreateGitAttempt(ctx context.Context, name string, src *GitSource, entrypoint string, clone func(context.Context, string) error) (*Stack, error) {
+func (s *FSStore) CreateGitAttempt(ctx context.Context, name string, src *GitSource, entrypoint string, clone func(context.Context, string) error) (result *Stack, resultErr error) {
 	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
@@ -73,8 +73,22 @@ func (s *FSStore) CreateGitAttempt(ctx context.Context, name string, src *GitSou
 	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
+	commit, observeErr := s.prepareMetadata(stack, "write", name)
+	if observeErr != nil {
+		return nil, observeErr
+	}
+	defer func() { commit.Done(resultErr) }()
+	// Persist the commit marker in the staged metadata before atomic publication.
+	if commit.ID != "" {
+		if err := staging.writeMeta(stack); err != nil {
+			return nil, err
+		}
+	}
 	if err := renameNoReplace(staging.stackDir(name), s.stackDir(name)); err != nil {
 		return nil, fmt.Errorf("publish stack: %w", err)
+	}
+	if err := s.syncInventory(); err != nil {
+		return nil, err
 	}
 	return stack, nil
 }

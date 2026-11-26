@@ -15,6 +15,7 @@ import (
 
 	"github.com/umayr/brine/internal/auth"
 	"github.com/umayr/brine/internal/config"
+	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/webhooks"
 )
 
@@ -39,7 +40,11 @@ func webhookServer(t *testing.T) *Server {
 	if e != nil {
 		t.Fatal(e)
 	}
-	return New(cfg, nil, nil, nil, nil, a)
+	st, e := store.NewFSStore(cfg.DataDir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	return New(cfg, nil, st, nil, nil, a)
 }
 
 type deniedWebhookDispatcher struct{ validations atomic.Int32 }
