@@ -48,6 +48,9 @@ func newSecret() (string, error) {
 // SaveEndpoint returns a signing key only on creation. URL changes cancel old
 // queued deliveries; they can never leak historical payloads to a new receiver.
 func (s *Service) SaveEndpoint(ctx context.Context, ep Endpoint) (Endpoint, string, error) {
+	if ep.Stacks == nil {
+		ep.Stacks = []string{}
+	}
 	if !validEndpoint(ep) {
 		return Endpoint{}, "", ErrInvalid
 	}

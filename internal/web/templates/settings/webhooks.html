@@ -1,0 +1,18 @@
+{{template "layout.html" .}}
+{{define "title"}}Webhooks — Brine{{end}}
+{{define "header"}}Settings / Webhooks{{end}}
+{{define "content"}}
+<link rel="stylesheet" href="/static/webhooks.css">
+<div class="hooks-page">
+ <header class="index-heading"><div><span class="section-code">CONTROL PLANE / INTEGRATIONS</span><h1>Webhooks</h1><p class="overview-subtitle">Keep your tools in the loop. Let trusted automation request the next step.</p></div></header>
+ <nav class="appearance-tabs" aria-label="Settings sections"><a href="/settings/general">General</a><a href="/settings">Appearance</a><a href="/settings/live-updates">Live Updates</a><a href="/settings/source-history">Source History</a><a href="/settings/webhooks" aria-current="page">Webhooks</a></nav>
+ <noscript><p class="ui-notice ui-notice-info">Webhook management requires JavaScript. No configuration is changed by viewing this page.</p></noscript>
+ <div class="hooks-topline"><p>Instance-wide configuration · Signed JSON</p><button class="ui-button ui-button-outline ui-button-sm" id="hooks-refresh" type="button">Refresh</button></div>
+ <nav class="hooks-tabs" id="hooks-tabs" aria-label="Webhook sections"><a href="#outgoing">Outgoing notifications</a><a href="#incoming">Incoming triggers</a><a href="#deliveries">Delivery history</a><a href="#catalog">Event catalog</a></nav>
+ <p id="hooks-status" role="status" aria-live="polite"></p>
+ <div id="hooks-view" aria-busy="true"><p class="text-muted">Loading webhook configuration…</p></div>
+ <footer class="hooks-footer">Delivery failures never change a lifecycle outcome or retry an execution.</footer>
+</div>
+<dialog class="ui-dialog hooks-dialog" id="hooks-dialog" aria-labelledby="hooks-dialog-title"><div class="ui-dialog-panel"><div class="hooks-dialog-head"><span class="section-code">WEBHOOKS / REVIEW</span><button type="button" class="ui-button ui-button-ghost" id="hooks-dialog-close" aria-label="Close dialog">×</button></div><h2 id="hooks-dialog-title"></h2><div id="hooks-dialog-body"></div></div></dialog>
+<script src="/static/webhooks.js" defer></script>
+{{end}}

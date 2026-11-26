@@ -14,6 +14,7 @@ var staticFS embed.FS
 
 // Mount registers all web routes on r.
 func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
+	h.mountWebhooks(r)
 	// Static assets use the same source tree as templates in dev mode.
 	var source fs.FS = staticFS
 	if h.dev {
