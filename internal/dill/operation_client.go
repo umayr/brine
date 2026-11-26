@@ -278,6 +278,9 @@ func (r *Runner) operationMode(ctx context.Context, path, op string, w io.Writer
 			return terminal, e
 		}
 	}
+	if e = markLifecycleStarted(ctx); e != nil {
+		return terminal, ErrOperationContract
+	}
 	data, exit, e := r.operationCapture(ctx, maxOperationOutput, args...)
 	if exit != nil {
 		terminal.ExitCode = *exit

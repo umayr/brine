@@ -23,18 +23,19 @@ type Resource struct {
 // Event contains allowlisted metadata only. Never populate it with output,
 // credentials, environment values, source contents or receiver response bodies.
 type Event struct {
-	ID            string    `json:"id"`
-	SchemaVersion int       `json:"schema_version"`
-	Type          string    `json:"type"`
-	OccurredAt    time.Time `json:"occurred_at"`
-	OperationID   string    `json:"operation_id,omitempty"`
-	Stack         Resource  `json:"stack"`
-	Source        Resource  `json:"source"`
-	Target        Resource  `json:"target"`
-	Action        string    `json:"action,omitempty"`
-	Outcome       string    `json:"outcome,omitempty"`
-	Effects       string    `json:"effects,omitempty"`
-	Reason        string    `json:"reason,omitempty"`
+	ID              string    `json:"id"`
+	SchemaVersion   int       `json:"schema_version"`
+	Type            string    `json:"type"`
+	OccurredAt      time.Time `json:"occurred_at"`
+	OperationID     string    `json:"operation_id,omitempty"`
+	Stack           Resource  `json:"stack"`
+	Source          Resource  `json:"source"`
+	Target          Resource  `json:"target"`
+	Action          string    `json:"action,omitempty"`
+	Outcome         string    `json:"outcome,omitempty"`
+	Effects         string    `json:"effects,omitempty"`
+	ChangesDetected *bool     `json:"changes_detected,omitempty"`
+	Reason          string    `json:"reason,omitempty"`
 }
 
 type Endpoint struct {
@@ -89,7 +90,7 @@ type Publisher interface {
 var Catalog = []string{
 	"operation.accepted", "operation.started", "operation.completed", "operation.outcome_unknown", "operation.rejected",
 	"stack.created", "stack.updated", "stack.deleted", "source.revision_created", "source.restored",
-	"git.sync.started", "git.sync.completed", "git.sync.failed",
+	"git.sync.started", "git.sync.completed", "git.sync.failed", "git.sync.outcome_unknown",
 	"target.enrolled", "target.updated", "target.removed", "target.connectivity_changed", "target.capabilities_changed",
 	"container.state_changed", "container.health_changed", "stack.health_changed", "webhook.test",
 }

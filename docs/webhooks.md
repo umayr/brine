@@ -45,6 +45,8 @@ Pausing retains the existing backlog and stops queuing new matching events. Chan
 
 Event payloads carry allowlisted metadata, with Source independent of Target. They do not contain source contents, environment values, credentials, raw logs, or receiver bodies. Unknown and unavailable are not successful outcomes. A source Restore is not a deployment, volume restore, or secret restore.
 
+Lifecycle notifications are journaled on the existing local UI/API runner paths as well as incoming-trigger execution. Git synchronization uses `git.sync.started`, `git.sync.completed`, `git.sync.failed` (a definite admission failure), and `git.sync.outcome_unknown` (the source may have changed but confirmation is unavailable). The explicit unknown event extends the original proposal so subscribers never receive a false failure signal. Successful sync events retain the reported `changes_detected` boolean, including false; uncertain results leave it unavailable rather than inventing no change.
+
 ## Incoming requests
 
 A trigger grants one action on one immutable stack/target binding. It uses its own signing secret, not Brine's general API token. POST JSON to the exact `/hooks/{trigger_id}` URL:

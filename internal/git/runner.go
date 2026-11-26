@@ -12,7 +12,8 @@ import (
 
 // Runner shells out to the system git binary.
 type Runner struct {
-	Binary string // path to git, default "git"
+	Binary      string              // path to git, default "git"
+	ObservePull PullObserverFactory // optional startup-only event journal
 }
 
 // New returns a Runner using the system git binary.
@@ -39,7 +40,18 @@ func (r *Runner) Clone(ctx context.Context, url, branch, destDir string) error {
 
 // Pull fetches from origin and fast-forwards the current branch.
 // Returns true if the local HEAD changed (i.e. there were upstream commits).
-func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
+func (r *Runner) Pull(ctx context.Context, repoDir string) (changed bool, resultErr error) {
+	observer, _ := ctx.Value(pullObserverContextKey{}).(PullObserver)
+	if observer == nil && r.ObservePull != nil {
+		var e error
+		observer, e = r.ObservePull(ctx, repoDir)
+		if e != nil {
+			return false, e
+		}
+	}
+	if observer != nil {
+		defer func() { observer.Finished(changed, resultErr) }()
+	}
 	dirty, err := r.HasChanges(ctx, repoDir)
 	if err != nil {
 		return false, fmt.Errorf("check working tree: %w", err)
@@ -50,6 +62,11 @@ func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
 	before, err := r.HeadRef(ctx, repoDir)
 	if err != nil {
 		return false, fmt.Errorf("head ref before pull: %w", err)
+	}
+	if observer != nil {
+		if e := observer.Started(); e != nil {
+			return false, e
+		}
 	}
 	if err := r.run(ctx, repoDir, "pull", "--ff-only", "--quiet"); err != nil {
 		return false, err

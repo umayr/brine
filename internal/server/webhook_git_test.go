@@ -8,12 +8,14 @@ import (
 	"strings"
 	"testing"
 
+	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/webhooks"
 )
 
 func TestWebhookGitSyncUsesExistingFastForwardAndStatus(t *testing.T) {
 	s, st, _, logPath := dispatcherServer(t)
+	s.configureWebhookProducers()
 	home := t.TempDir()
 	origin := filepath.Join(t.TempDir(), "origin")
 	runGit := func(args ...string) {
@@ -60,5 +62,38 @@ func TestWebhookGitSyncUsesExistingFastForwardAndStatus(t *testing.T) {
 	}
 	if _, e := os.Stat(logPath); !os.IsNotExist(e) {
 		t.Fatal("source sync implicitly deployed")
+	}
+	if changed, _, e := gitpkg.PullAndRecord(context.Background(), s.git, st, "example", repo); e != nil || changed {
+		t.Fatal("normal no-change sync failed", e)
+	}
+	events := journalEvents(t, s)
+	if len(events) != 2 {
+		t.Fatalf("sync observer duplication/loss: %+v", events)
+	}
+	changedSeen, unchangedSeen := false, false
+	for _, event := range events {
+		if event.Action != "git-sync" || event.Source.Kind != "git" || event.ChangesDetected == nil {
+			t.Fatal("missing reported Git change metadata", event)
+		}
+		if *event.ChangesDetected {
+			changedSeen = true
+		} else {
+			unchangedSeen = true
+		}
+	}
+	if !changedSeen || !unchangedSeen {
+		t.Fatal("reported changed/unchanged values lost")
+	}
+	if e = os.WriteFile(filepath.Join(repo, "uncommitted.txt"), []byte("synthetic dirty source"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	dirtyResult := d.Execute(context.Background(), webhooks.Trigger{StackID: webhookStackID(stack), TargetID: d.localTargetID(), Action: "git-sync"}, webhooks.IncomingRequest{ID: "req_git_dirty"})
+	if dirtyResult.Status != "rejected" {
+		t.Fatal("dirty source was mislabeled as executing/unknown", dirtyResult)
+	}
+	for _, event := range journalEvents(t, s) {
+		if event.OperationID == "req_git_dirty" && (event.Type != "operation.rejected" || event.Effects != "none") {
+			t.Fatal("pre-pull denial acquired false execution effects", event)
+		}
 	}
 }

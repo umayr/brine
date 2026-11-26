@@ -10,6 +10,10 @@ import (
 
 const operationSchema = `CREATE TABLE IF NOT EXISTS lifecycle_records(id TEXT PRIMARY KEY,base BLOB NOT NULL,started INTEGER NOT NULL DEFAULT 0,terminal BLOB,accepted_sent INTEGER NOT NULL DEFAULT 0,started_sent INTEGER NOT NULL DEFAULT 0,terminal_sent INTEGER NOT NULL DEFAULT 0,updated INTEGER NOT NULL);`
 
+func NewOperationID() string { return newID("op_") }
+
+func (o *Operation) ID() string { return o.id }
+
 type Operation struct {
 	s  *Service
 	id string
@@ -64,6 +68,12 @@ func (o *Operation) Started(ctx context.Context) error {
 	return nil
 }
 func (o *Operation) Finish(ctx context.Context, kind, outcome, effects, reason string) error {
+	return o.finish(ctx, kind, outcome, effects, reason, nil)
+}
+func (o *Operation) FinishWithChanges(ctx context.Context, kind, outcome, effects, reason string, changed bool) error {
+	return o.finish(ctx, kind, outcome, effects, reason, &changed)
+}
+func (o *Operation) finish(ctx context.Context, kind, outcome, effects, reason string, changed *bool) error {
 	if !contains([]string{"operation.completed", "operation.outcome_unknown", "operation.rejected"}, kind) {
 		return ErrInvalid
 	}
@@ -80,6 +90,7 @@ func (o *Operation) Finish(ctx context.Context, kind, outcome, effects, reason s
 	event.Type = kind
 	event.Outcome = outcome
 	event.Effects = effects
+	event.ChangesDetected = changed
 	event.Reason = reason
 	event.OccurredAt = o.s.now()
 	if !validEvent(event) {
@@ -206,6 +217,26 @@ func (s *Service) reconcileOperations(ctx context.Context) error {
 					return nil
 				}
 				return e
+			}
+			if item.event.Action == "git-sync" && item.event.Type != "operation.accepted" {
+				derived := item.event
+				switch item.event.Type {
+				case "operation.started":
+					derived.Type = "git.sync.started"
+				case "operation.completed":
+					derived.Type = "git.sync.completed"
+				case "operation.outcome_unknown":
+					derived.Type = "git.sync.outcome_unknown"
+				case "operation.rejected":
+					derived.Type = "git.sync.failed"
+				}
+				derived.ID = item.event.ID + ":git"
+				if e = s.Publish(ctx, derived); e != nil {
+					if errors.Is(e, ErrCapacity) {
+						return nil
+					}
+					return e
+				}
 			}
 			if _, e = s.db.ExecContext(ctx, "UPDATE lifecycle_records SET "+item.column+"=1 WHERE id=?", r.id); e != nil {
 				return errStorage

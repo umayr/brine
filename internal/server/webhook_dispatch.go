@@ -211,9 +211,10 @@ func (d *webhookDispatcher) Execute(ctx context.Context, t webhooks.Trigger, req
 		finish("operation.rejected", "unavailable", "none", "interactive_review_required")
 		return result
 	}
-	if op.Started(ctx) != nil {
+	if t.Action != "git-sync" && op.Started(ctx) != nil {
 		return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
 	}
+	ctx = context.WithValue(ctx, webhookObservedOperationKey{}, true)
 	switch t.Action {
 	case "plan":
 		_, e = runner.Plan(ctx, st.PklPath)
@@ -226,11 +227,19 @@ func (d *webhookDispatcher) Execute(ctx context.Context, t webhooks.Trigger, req
 	case "restart":
 		e = runner.Restart(ctx, st.PklPath, io.Discard)
 	case "git-sync":
-		var repo string
-		repo, e = d.s.store.RepoDir(st.Name)
-		if e == nil {
-			_, _, e = gitpkg.PullAndRecord(ctx, d.s.git, d.s.store, st.Name, repo)
+		repo, repoErr := d.s.store.RepoDir(st.Name)
+		if repoErr != nil {
+			result.Reason = "source_unavailable"
+			finish("operation.rejected", "unavailable", "none", result.Reason)
+			return result
 		}
+		observed := &webhookLifecycleObserver{op: op, ctx: ctx}
+		pullCtx := gitpkg.WithPullObserver(ctx, &webhookPullObserver{observed})
+		_, _, e = gitpkg.PullAndRecord(pullCtx, d.s.git, d.s.store, st.Name, repo)
+		if observed.finished {
+			return observed.result
+		}
+		return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
 	default:
 		e = webhooks.ErrUnsupported
 	}
