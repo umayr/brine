@@ -54,6 +54,14 @@
       select(visible[(indices[event.key] + visible.length) % visible.length], true);
     });
     document.addEventListener('click', event => {
+      if (event.target.closest('[data-open-project-preview]')) {
+        event.preventDefault();
+        select(tab('Compose'));
+        const toggle = document.querySelector('[aria-controls="project-preview-content"]');
+        if (toggle.getAttribute('aria-expanded') === 'false') toggle.click();
+        toggle.focus();
+        return;
+      }
       if (!event.target.closest('[data-open-history]')) return;
       event.preventDefault();
       if (active === tab('History')) document.getElementById('stack-history-content').dispatchEvent(new CustomEvent('load-history', {bubbles:true}));
@@ -65,6 +73,7 @@
     if (button && result && planTab) {
       const deploy = document.getElementById('deploy-button');
       const policyDisabled = deploy.disabled;
+      deploy.dataset.policyDisabled = String(policyDisabled);
       const stale = document.getElementById('plan-stale');
       const tools = document.getElementById('plan-tools');
       const empty = () => !result.childElementCount && !result.textContent.trim();
@@ -126,7 +135,7 @@
           if (tag && /^[0-9a-f]{64}$/.test(tag)) {
             deploy.dataset.planInputs = tag;
             delete deploy.dataset.needsPlan;
-            deploy.disabled = policyDisabled;
+            deploy.disabled = policyDisabled || deploy.dataset.actionBusy === 'true';
             stale.hidden = true;
           }
           result.removeAttribute('role');

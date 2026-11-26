@@ -16,8 +16,8 @@
 
 {{define "project-inspection"}}
   <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
-    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
-    <div id="project-preview-content" class="space-y-3">
+    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="false" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
+    <div id="project-preview-content" class="space-y-3" hidden>
       <p>Preview project file names and sizes. Ignored and hidden files may be included; file contents can contain secrets. This preview is not an atomic snapshot and does not transfer files or authorize deployment.</p>
       <details class="text-sm text-muted">
       <summary class="cursor-pointer">Preview scope and limits</summary>
@@ -128,7 +128,7 @@
   <dl class="ui-panel stack-overview" aria-label="Stack overview">
     <div><dt class="field-label">Engine</dt><dd class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</dd></div>
     <div><dt class="field-label">Source</dt><dd class="font-mono text-sm">{{if .Stack.Git}}Git{{else}}Workspace{{end}}</dd></div>
-    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm" title="Configured selector: {{.Target.Socket}}; daemon identity is not verified">{{.Target.Location}}{{if .Stack.RemoteGit}}<span class="block text-xs text-muted">Remote Git policy: {{.Stack.RemoteGit.Host}}</span>{{end}}</dd></div>
+    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm" title="Configured transport; daemon identity is not verified">{{.Target.Location}}<span class="block text-xs text-muted">Configured only</span></dd></div>
     <div><dt class="field-label">Entrypoint</dt><dd class="font-mono text-sm">{{.Stack.EffectiveEntrypoint}}</dd></div>
     <div><dt class="field-label">Created</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
     <div><dt class="field-label">Updated</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
@@ -335,7 +335,8 @@
     </div>
   </div>
   {{end}}
-  {{if or .EngineAlignment.Blocked (and (eq .Target.Profile "alpha") (not .QualifiedOperations))}}{{template "project-inspection" .}}{{end}}
+  {{if .Stack.RemoteGit}}<p class="text-sm text-muted">Remote Git policy: {{.Stack.RemoteGit.Host}}. This does not select an execution target.</p>{{end}}
+  {{template "project-inspection" .}}
   </section>
   <section id="panel-Containers" role="tabpanel" aria-labelledby="tab-Containers" tabindex="0" class="space-y-4" hidden>
   <!-- Containers in this stack -->
@@ -412,7 +413,7 @@
     <div id="plan-tools" class="flex items-center justify-between"><span class="field-label">Plan review</span><button type="button" id="dismiss-plan" class="ui-button ui-button-ghost ui-button-xs">Close plan</button></div>
     <p id="plan-stale" class="ui-notice ui-notice-warning" role="status" hidden>Inputs changed. Run Plan again before deploying.</p>
     <div id="plan-result" role="status" aria-live="polite"></div>
-  {{if not (or .EngineAlignment.Blocked (and (eq .Target.Profile "alpha") (not .QualifiedOperations)))}}{{template "project-inspection" .}}{{end}}
+  <a class="ui-button ui-button-ghost ui-button-sm" href="?tab=compose#project-preview" data-open-project-preview>Inspect project files in Compose</a>
   </section>
   <script>
   // Panels start expanded; collapsing is presentation-only and never cancels
@@ -476,9 +477,9 @@ async function deleteStack(name, removeContainers) {
   const button = document.getElementById('stack-delete-button');
   if (button.disabled) return;
   const result = document.getElementById('stack-delete-result');
-  const enabled = document.querySelectorAll('[data-stack-action]:enabled');
   const restoreFocus = document.activeElement === button;
-  enabled.forEach(control => { control.disabled = true; });
+  const release = holdStackActions();
+  if (!release) return;
   result.textContent = 'Deleting stack…';
   let deleted = false;
   try {
@@ -497,7 +498,7 @@ async function deleteStack(name, removeContainers) {
   } finally {
     if (!deleted) {
       result.textContent = 'Delete could not be confirmed. Check stack inventory and inspect containers before retrying.';
-      enabled.forEach(control => { control.disabled = false; });
+      release();
       if (restoreFocus && document.activeElement === document.body) button.focus();
     }
   }
@@ -526,10 +527,11 @@ async function runAction(action, name, method, body, contentType) {
   const log = document.getElementById('action-log');
   const title = document.getElementById('action-title');
   const status = document.getElementById('action-status');
-  const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
   const deploy = document.getElementById('deploy-button');
-  if (action === 'up' && deploy.disabled) return;
+  if (action === 'up' && (deploy.disabled || deploy.dataset.needsPlan === 'true')) return;
+  const release = holdStackActions();
+  if (!release) return;
   const observed = action === 'up' ? deploy.dataset.planInputs : '';
   const lifecycle = ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
   const qualified = output.dataset?.qualifiedOperations === 'true' && lifecycle;
@@ -571,7 +573,6 @@ async function runAction(action, name, method, body, contentType) {
   status.textContent = 'running';
   status.className = 'ui-status ui-status-running ui-status-sm font-mono mr-1';
   status.classList.remove('hidden');
-  buttons.forEach(btn => { btn.dataset.initiallyDisabled = String(btn.disabled); btn.disabled = true; });
 
   try {
     const res = await fetch(`/api/stacks/${name}/${action}`, {
@@ -653,8 +654,23 @@ async function runAction(action, name, method, body, contentType) {
     }
   } finally {
     if (action === 'git/push') htmx.trigger(document.body, 'git-refresh');
-    buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true' || btn.dataset.needsPlan === 'true');
+    release();
   }
+}
+
+// In-flight actions, plan staleness and server-rendered policy are independent.
+function holdStackActions() {
+  const deploy = document.getElementById('deploy-button');
+  if (deploy.dataset.actionBusy === 'true') return null;
+  const policyDisabled = deploy.dataset.policyDisabled === undefined ? deploy.disabled : deploy.dataset.policyDisabled === 'true';
+  const controls = Array.from(document.querySelectorAll('[data-stack-action]'), btn => [btn, btn.disabled]);
+  deploy.dataset.actionBusy = 'true';
+  controls.forEach(([btn]) => { btn.disabled = true; });
+  return () => {
+    delete deploy.dataset.actionBusy;
+    controls.forEach(([btn, disabled]) => { btn.disabled = disabled; });
+    deploy.disabled = policyDisabled || deploy.dataset.needsPlan === 'true';
+  };
 }
 
 function actionLabel(action) {

@@ -34,6 +34,28 @@ test('a conflicted first plan blocks deployment until a fresh tagged response',a
  await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
  await expect(page.locator('#deploy-button')).toBeDisabled();await page.locator('#plan-button').click();await expect(page.locator('#deploy-button')).toBeEnabled();
 });
+test('an unconfirmed deletion cannot release a stale or busy Deploy control',async({page})=>{
+ let plan,del; const deploy=page.locator('#deploy-button');
+ await page.route('**/web/stacks/media/plan',r=>{plan=r});
+ await page.route('**/api/stacks/media',r=>{del=r});
+ await page.goto(base+'/stacks/media');
+ for (const conflict of [true,false]) {
+  plan=del=null;
+  await page.locator('#plan-button').click();
+  await expect.poll(()=>Boolean(plan)).toBe(true);
+  page.once('dialog',dialog=>dialog.accept('media'));
+  await page.locator('#stack-delete-button').click();
+  await expect.poll(()=>Boolean(del)).toBe(true);
+  await plan.fulfill(conflict?
+    {status:409,headers:{'X-Brine-Plan-Stale':'true'},body:'Replan'}:
+    {headers:{'Content-Type':'text/html','X-Brine-Plan-Inputs':'a'.repeat(64)},body:'<p>Fresh</p>'});
+  if(conflict)await expect(page.locator('#plan-stale')).toBeVisible();
+  else await expect(page.locator('#plan-stale')).toBeHidden();
+  await expect(deploy).toBeDisabled();
+  await del.abort();await expect(page.locator('#stack-delete-result')).toContainText('could not be confirmed');
+  if(conflict)await expect(deploy).toBeDisabled();else await expect(deploy).toBeEnabled();
+ }
+});
 test('an observed source change keeps the old diff marked stale and blocks Deploy until a fresh plan',async({page})=>{
  await page.route('**/web/stacks/media/plan',r=>r.fulfill({headers:{'Content-Type':'text/html','X-Brine-Plan-Inputs':'a'.repeat(64)},body:'<p>Prior snapshot</p>'}));
  await page.route('**/web/stacks/media/git/pull',r=>r.fulfill({contentType:'text/html',body:'Updated'}));

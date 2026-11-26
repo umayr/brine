@@ -25,7 +25,7 @@ func TestProjectInspectionReachableWithoutPlanning(t *testing.T) {
 		html := out.String()
 		pos := strings.Index(html, "<section id=\"project-preview\"")
 		endCompose := strings.Index(html, "<section id=\"panel-Containers\"")
-		if pos < 0 || strings.Count(html, "<section id=\"project-preview\"") != 1 || (pos < endCompose) != blocked {
+		if pos < 0 || strings.Count(html, "<section id=\"project-preview\"") != 1 || pos >= endCompose {
 			t.Fatalf("incorrect inspection panel position when blocked=%v", blocked)
 		}
 		if !strings.Contains(html[pos:], "Prepare local transfer review") {
