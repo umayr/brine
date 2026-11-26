@@ -89,7 +89,7 @@ func run() error {
 	initSourceHistory := flag.Bool("init-source-history", false, "initialize an empty, externally provisioned source archive and exit; never generate keys")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
 
-	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username")
+	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username (default: stored or admin)")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")
 	flag.StringVar(&cfg.APIToken, "api-token", cfg.APIToken, "bearer token for API clients (default: generated and persisted)")
 	flag.BoolVar(&cfg.NoAuth, "no-auth", false, "disable authentication (local development only)")
@@ -282,7 +282,13 @@ func buildAuth(cfg *config.Config) (*auth.Authenticator, error) {
 		return auth.New(auth.Config{NoAuth: true})
 	}
 
-	creds, created, path, err := auth.LoadOrCreate(cfg.DataDir, cfg.AuthUser, cfg.AuthPassword, cfg.APIToken)
+	authn, created, path, err := auth.NewWithCredentials(auth.Config{
+		User:          cfg.AuthUser,
+		Password:      cfg.AuthPassword,
+		APIToken:      cfg.APIToken,
+		SecureCookies: cfg.SecureCookies,
+		SessionTTL:    cfg.SessionTTL,
+	}, cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve credentials: %w", err)
 	}
@@ -295,11 +301,5 @@ func buildAuth(cfg *config.Config) (*auth.Authenticator, error) {
 		log.Printf("auth enabled: using credentials from flags/env")
 	}
 
-	return auth.New(auth.Config{
-		User:          creds.User,
-		Password:      creds.Password,
-		APIToken:      creds.APIToken,
-		SecureCookies: cfg.SecureCookies,
-		SessionTTL:    cfg.SessionTTL,
-	})
+	return authn, nil
 }

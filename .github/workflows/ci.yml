@@ -29,7 +29,9 @@ jobs:
       - name: Browser regression tests
         run: |
           npx playwright install --with-deps chromium
-          npm run test:ui
+          fixture=$(sudo mktemp -d /brine-browser-creds.XXXXXXXX)
+          sudo chown "$(id -u):$(id -g)" "$fixture"
+          BRINE_CREDENTIAL_FIXTURE_DIR="$fixture" npm run test:ui
       - name: Check formatting
         run: |
           unformatted=$(gofmt -l .)
