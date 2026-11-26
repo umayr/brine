@@ -225,6 +225,8 @@
     fromURL();
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
+  // This deferred script runs in the interactive state, before HTMX binds
+  // load-history during DOMContentLoaded. Do not lose the initial deep-link read.
+  if (document.readyState !== 'complete') document.addEventListener('DOMContentLoaded', init, { once: true });
   else init();
 })();

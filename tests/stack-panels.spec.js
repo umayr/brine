@@ -20,6 +20,14 @@ test('stack workspace separates source, runtime and variables without hiding act
  await page.keyboard.press('Home'); await expect(tab('Compose')).toBeFocused();
  await expect(page.locator('.pk-panel:visible')).toBeVisible();
 });
+test('a History deep link loads its evidence after navigation or reload',async({page})=>{
+ let count=0;
+ await page.route('**/web/stacks/media/history',route=>route.fulfill({contentType:'text/html',body:'<p>History read '+(++count)+'</p>'}));
+ await page.goto(base+'/stacks/media?tab=history');
+ await expect(page.getByRole('tab',{name:'History'})).toHaveAttribute('aria-selected','true');
+ await expect(page.locator('#stack-history-content')).toHaveText('History read 1');
+ await page.reload();await expect(page.locator('#stack-history-content')).toHaveText('History read 2');
+});
 test('Plan preserves the response while browsing and closing returns to Compose',async({page})=>{
  await page.route('**/web/stacks/media/plan',route=>route.fulfill({contentType:'text/html',body:'<p>Synthetic result</p>'}));
  await page.goto(base+'/stacks/media');await page.locator('#plan-button').click();
