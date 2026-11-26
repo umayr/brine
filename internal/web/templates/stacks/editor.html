@@ -6,7 +6,7 @@
 {{end}}
 
 {{define "content"}}
-{{if .CheckpointMissed}}<p class="ui-notice ui-notice-warning" role="status">Source saved, but the automatic checkpoint was not retained. Check History and archive capacity.</p>{{end}}
+{{if .CheckpointNotice}}<p class="ui-notice ui-notice-warning" role="status">{{.CheckpointNotice}}</p>{{end}}
 <div class="editor-layout flex gap-4 h-full">
 
   <!-- Editor panel -->

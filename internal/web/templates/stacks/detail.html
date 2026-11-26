@@ -37,7 +37,7 @@
 {{end}}
 
 {{define "content"}}
-{{if .CheckpointMissed}}<p class="ui-notice ui-notice-warning" role="status">Source saved, but the automatic checkpoint was not retained. Check History and archive capacity.</p>{{end}}
+{{if .CheckpointNotice}}<p class="ui-notice ui-notice-warning" role="status">{{.CheckpointNotice}}</p>{{end}}
 <div class="space-y-4">
 
   <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1></div></header>

@@ -85,6 +85,15 @@ type RevisionWorkspace interface {
 
 var ErrSourceCheckpointDisabled = errors.New("automatic source checkpoint disabled")
 
+// A source save can succeed independently of its automatic checkpoint.
+type SourceCheckpointStatus string
+
+const (
+	CheckpointNotRetained  SourceCheckpointStatus = "not-retained"
+	CheckpointUnconfirmed  SourceCheckpointStatus = "unknown"
+	SourceCheckpointHeader                        = "X-Brine-Source-Checkpoint"
+)
+
 func sourcePathOK(p string, dir bool) bool {
 	if !path.IsAbs(p) && path.Clean(p) == p && len(p) <= 1024 {
 		parts := strings.Split(p, "/")

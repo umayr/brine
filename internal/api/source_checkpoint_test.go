@@ -53,14 +53,14 @@ func TestSourceSaveObserversKeepSavedEditsAndReportMissedCheckpoint(t *testing.T
 	} {
 		called, released := false, false
 		r := chi.NewRouter()
-		MountObservingSourceSaves(r, nil, st, nil, nil, "docker", httpx.Timeouts{}, 0, func(*http.Request) (func(string) bool, func()) {
-			return func(name string) bool {
+		MountObservingSourceSaves(r, nil, st, nil, nil, "docker", httpx.Timeouts{}, 0, func(*http.Request) (func(string) store.SourceCheckpointStatus, func()) {
+			return func(name string) store.SourceCheckpointStatus {
 				if name != "demo" || released || called || tc.check == nil {
 					t.Fatal("unexpected checkpoint invocation")
 				}
 				called = true
 				tc.check()
-				return true
+				return store.CheckpointNotRetained
 			}, func() { released = true }
 		})
 		w := httptest.NewRecorder()

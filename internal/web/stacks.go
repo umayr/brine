@@ -150,7 +150,7 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 	}
 	h.render(w, r, "stacks/detail.html", &stackDetailData{
 		StagingEnabled:   h.stagingStore != nil,
-		CheckpointMissed: r.URL.Query().Get("checkpoint") == "not-retained",
+		CheckpointNotice: checkpointWarning(store.SourceCheckpointStatus(r.URL.Query().Get("checkpoint"))),
 		GitRevision:      revision,
 		GitState:         gitState,
 		pageData:         pageData{Page: "stacks"},
@@ -226,7 +226,7 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 		ActiveFile:         activeFile,
 		NestedFile:         strings.Contains(activeFile, "/"),
 		NestedListWarning:  nestedListWarning,
-		CheckpointMissed:   r.URL.Query().Get("checkpoint") == "not-retained",
+		CheckpointNotice:   checkpointWarning(store.SourceCheckpointStatus(r.URL.Query().Get("checkpoint"))),
 		PklContent:         content,
 		Files:              files,
 		Snippets:           byCategory,
@@ -356,7 +356,7 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.Header().Set("HX-Redirect", h.checkpointNotice(w, checkpoint(name), "/stacks/"+name))
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -568,7 +568,7 @@ func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Redirect to editor with the new file active.
-	w.Header().Set("HX-Redirect", h.checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit?file="+filename))
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit?file="+filename))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -591,9 +591,9 @@ func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
-	if checkpoint(name) {
-		h.checkpointNotice(w, true, "")
-		h.renderAlert(w, "warning", checkpointMissed)
+	if status := checkpoint(name); status != "" {
+		checkpointNotice(w, status, "")
+		h.renderAlert(w, "warning", checkpointWarning(status))
 		return
 	}
 	h.renderAlert(w, "success", "Saved")
@@ -613,7 +613,7 @@ func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
-	w.Header().Set("HX-Redirect", h.checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit"))
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit"))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -635,9 +635,9 @@ func (h *Handler) stackSetEntrypoint(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
-	if checkpoint(name) {
-		h.checkpointNotice(w, true, "")
-		h.renderAlert(w, "warning", checkpointMissed)
+	if status := checkpoint(name); status != "" {
+		checkpointNotice(w, status, "")
+		h.renderAlert(w, "warning", checkpointWarning(status))
 		return
 	}
 	h.renderAlert(w, "success", "Entrypoint set to "+filename)

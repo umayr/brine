@@ -27,7 +27,7 @@
   {{if .Message}}<p class="text-sm" role="status">{{.Message}}</p>{{end}}
   {{if .Enabled}}<p class="text-sm text-muted">{{if .Capacity}}Archive across all stacks: {{.Capacity.Objects}} / {{.Capacity.Limits.Objects}} objects ({{.Capacity.RemainingObjects}} slots remaining) · {{.Capacity.Bytes}} / {{.Capacity.Limits.Bytes}} sealed bytes ({{.Capacity.RemainingBytes}} remaining).{{else}}Archive capacity currently unavailable.{{end}}</p>{{end}}
   {{if .Enabled}}<details><summary class="cursor-pointer">Auto-Checkpoint <strong>{{.AutoCheckpointStatus}}</strong> <small class="text-muted">· {{.AutoCheckpointMode}}</small></summary>
-    <p class="text-sm text-muted">Retain source after browser saves. Only enable for files that may be retained, including any secrets written directly into them. If retention fails, the edit still saves and Brine warns you.</p>
+    <p class="text-sm text-muted">Enable Auto-Checkpoint retains the current source now if it is not already retained, then retains changes from browser saves. Only enable for files that may be retained, including secrets written directly into them. Retention failures do not undo saved edits.</p>
     <form method="post" action="/web/stacks/{{.Stack}}/history/auto-checkpoint" hx-post="/web/stacks/{{.Stack}}/history/auto-checkpoint" hx-target="#stack-source-history" hx-swap="outerHTML" hx-sync="#stack-history-content:drop" class="flex flex-wrap gap-2">
       <input type="hidden" name="_csrf" value="{{.CSRF}}">
       {{if ne .AutoCheckpointOverride "on"}}<button class="ui-button ui-button-outline ui-button-sm" type="submit" name="enabled" value="yes">Enable Auto-Checkpoint</button>{{end}}

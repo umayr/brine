@@ -101,7 +101,7 @@ func TestSourceAutoCheckpointSavesWithVisibleWarningWhenArchiveIsFull(t *testing
 	save := func(content string, missed bool) {
 		t.Helper()
 		w := req("PUT", "/web/stacks/demo", url.Values{"pkl_content": {content}, "active_file": {"compose.pkl"}, "_csrf": {csrf}}, cookie)
-		if w.Code != 200 || (w.Header().Get(checkpointHeader) == "not-retained") != missed || strings.Contains(w.Header().Get("HX-Redirect"), "checkpoint=not-retained") != missed {
+		if w.Code != 200 || (w.Header().Get(store.SourceCheckpointHeader) == "not-retained") != missed || strings.Contains(w.Header().Get("HX-Redirect"), "checkpoint=not-retained") != missed {
 			t.Fatalf("save status=%d headers=%v", w.Code, w.Header())
 		}
 		got, e := st.ReadPkl("demo")

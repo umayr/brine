@@ -89,7 +89,7 @@ type stackNewData struct {
 type stackDetailData struct {
 	pageData
 	StagingEnabled   bool
-	CheckpointMissed bool
+	CheckpointNotice string
 	Variables        stackVariablesData
 	GitRevision      string
 	GitState         string
@@ -103,7 +103,7 @@ type stackDetailData struct {
 type stackEditorData struct {
 	NestedFile        bool
 	NestedListWarning bool
-	CheckpointMissed  bool
+	CheckpointNotice  string
 	pageData
 	Stack              *store.Stack
 	ActiveFile         string

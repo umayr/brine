@@ -14,7 +14,7 @@ import (
 
 // SourceSaveObserver is started before stack admission. On a successful
 // source save its callback reports whether an automatic checkpoint was missed.
-type SourceSaveObserver func(*http.Request) (func(string) bool, func())
+type SourceSaveObserver func(*http.Request) (func(string) store.SourceCheckpointStatus, func())
 
 // Mount registers all /api/* routes on r.
 func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, histories ...*operationhistory.Store) {

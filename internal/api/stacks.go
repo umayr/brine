@@ -42,8 +42,8 @@ func (h *stackHandler) beginSourceSave(r *http.Request) (func(http.ResponseWrite
 	}
 	report, release := h.observeSourceSave(r)
 	return func(w http.ResponseWriter, name string) {
-		if report(name) {
-			w.Header().Set("X-Brine-Source-Checkpoint", "not-retained")
+		if status := report(name); status != "" {
+			w.Header().Set(store.SourceCheckpointHeader, string(status))
 		}
 	}, release
 }
