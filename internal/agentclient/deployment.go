@@ -35,7 +35,7 @@ func (c *Client) PreviewRemoval(ctx context.Context, epoch, stack string) (*Depl
 	return c.previewDeployment(ctx, epoch, stack, "/v1/deploy/remove-preview", "down", map[string]string{"stack": stack})
 }
 
-func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, action string, fields map[string]string) (*DeploymentPreview, error) {
+func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, action string, fields map[string]string, expectedJournal ...string) (*DeploymentPreview, error) {
 	session, err := c.httpsSession(epoch)
 	if ctx == nil || err != nil || len(stack) == 0 || len(stack) > dill.PreflightMaxNameBytes {
 		return nil, ErrProtocol
@@ -53,6 +53,12 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 		return nil, ErrProtocol
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if len(expectedJournal) > 0 {
+		if !canonicalHex(expectedJournal[0], 16) {
+			return nil, ErrProtocol
+		}
+		req.Header.Set(journalHeader, expectedJournal[0])
+	}
 	req.GetBody = nil // No implicit replay of target coordination metadata writes.
 	resp, err := c.do(req)
 	if err != nil {
@@ -72,7 +78,11 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 		return nil, ErrProtocol
 	}
 	mode, prior := resp.Header.Get("X-Dill-Deployment-Mode"), resp.Header.Get("X-Dill-Prior-Request")
-	if action == "down" {
+	if validLifecycleAction(action) {
+		if mode != action || !canonicalHex(prior, 16) {
+			return nil, ErrProtocol
+		}
+	} else if action == "down" {
 		if mode != "remove" || !canonicalHex(prior, 16) {
 			return nil, ErrProtocol
 		}
@@ -83,6 +93,9 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 		if mode == "" && resp.Header.Get("X-Dill-Create-Enabled") == "1" {
 			mode = "create"
 		}
+	}
+	if len(expectedJournal) > 0 && resp.Header.Get(journalHeader) != expectedJournal[0] {
+		return nil, ErrProtocol
 	}
 	j := resp.Header.Values(journalHeader)
 	if len(j) > 1 || (len(j) == 1 && !canonicalHex(j[0], 16)) {
