@@ -99,6 +99,14 @@ Settings → Webhooks manages endpoints and triggers, displays delivery/request 
 
 Configuration changes and secret display require a browser session and CSRF protection. Authenticated API reads do not expose signing keys. Keys are shown only once after creation/rebinding/rotation and are cleared from the page when dismissed. Worker liveness is reported separately; a stopped worker does not imply an empty queue or a failed deployment.
 
+### Remote lifecycle admission (new paired protocol; not bundled in Dill 0.11.0)
+
+Remote lifecycle bindings currently require an enabled, successfully deployed, reviewed remote Git owner, an exact active enrollment and separate deployment custody. Protected/attended-source workflows and unproven historical owners remain unavailable, not legacy fallbacks. Brine retains the last verified deployment request and journal in the Git policy; lifecycle preview must name that predecessor. A same-name deployment replaced outside Brine cannot inherit the trigger. Enrollment, credential or source changes invalidate the immutable ceiling. Trigger creation remains authenticated and CSRF-protected; execution creates no browser identity.
+
+The dispatcher shares the remote manual/Git admission lock and recovery ledger. It writes the immutable lifecycle recovery intent before dispatch, advances the verified deployment head only after a known successful response, and keeps uncertain/partial work blocking other callers. Target outcomes remain reported even if local recovery persistence fails. Authenticated inspection can reconcile a later known terminal result against the saved predecessor; it never replays the operation. Lifecycle recovery retains at most 128 resolved historical rows plus the newest intent; unresolved and existing manual deployment evidence are never evicted. Authoritative incoming deduplication and target replay protection remain in their separate durable journals.
+
+Remote plan, Git synchronization and reviewed deployment integration, full incoming operator-flow qualification, the new actual Dill release and bundle pin remain release-gate work; this branch is not a completed release.
+
 History and deduplication are bounded by configured retention. Unresolved unknown/awaiting-review incoming records are retained until inspection. Queue or journal exhaustion refuses new work explicitly rather than dropping it or inventing successful delivery.
 
 ## Verification boundaries

@@ -294,6 +294,7 @@ func gitOutcome(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.Dep
 		next.Reason = result.State
 		return next
 	case "succeeded":
+		next.DeploymentRequest, next.DeploymentJournal = p.Request, p.Journal
 		next.Phase, next.Reason = "succeeded", ""
 	case "failed":
 		next.Phase, next.Reason = "blocked", "failed"

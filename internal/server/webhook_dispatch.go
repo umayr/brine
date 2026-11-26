@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	gitpkg "github.com/umayr/brine/internal/git"
@@ -61,6 +62,9 @@ func (d *webhookDispatcher) findStack(ctx context.Context, id string) (*store.St
 // Validate grants no browser identity. Source, quarantine, protected-state and
 // engine checks remain the runner's real gates, never a duplicate Dill planner.
 func (d *webhookDispatcher) Validate(ctx context.Context, t webhooks.Trigger) error {
+	if strings.HasPrefix(t.TargetID, "remote_") {
+		return d.validateRemote(ctx, t)
+	}
 	if d.s.agent == nil || d.s.agent.Dill() == nil || t.TargetID == "" || t.TargetID != d.localTargetID() {
 		return webhooks.ErrUnsupported
 	}
@@ -138,6 +142,7 @@ func (d *webhookDispatcher) WebhookOptions(ctx context.Context) ([]web.WebhookOp
 			return nil, webhooks.ErrUnsupported
 		}
 		sid, tid := webhookStackID(st), d.localTargetID()
+		out = append(out, d.remoteOptions(ctx, sid, st.Name)...)
 		if sid == "" || tid == "" {
 			continue
 		}
@@ -156,6 +161,9 @@ func (d *webhookDispatcher) WebhookOptions(ctx context.Context) ([]web.WebhookOp
 	return out, nil
 }
 func (d *webhookDispatcher) Execute(ctx context.Context, t webhooks.Trigger, request webhooks.IncomingRequest) webhooks.TriggerResult {
+	if strings.HasPrefix(t.TargetID, "remote_") {
+		return d.executeRemote(ctx, t, request)
+	}
 	result := webhooks.TriggerResult{Status: "rejected", Reason: "admission_denied", OperationID: request.ID}
 	source := "unknown"
 	stackName := ""

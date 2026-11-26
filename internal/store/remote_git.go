@@ -12,16 +12,18 @@ import (
 // durably before the first submission. An unresolved request is never cleared
 // by disabling automation, restarting Brine, or re-pairing the target.
 type RemoteGitPolicy struct {
-	Enabled bool   `json:"enabled"`
-	Host    string `json:"host"`
-	Target  string `json:"target"`
-	Source  string `json:"source"`
-	Commit  string `json:"commit,omitempty"`
-	Seen    string `json:"seen,omitempty"`
-	Request string `json:"request,omitempty"`
-	Phase   string `json:"phase"`
-	Journal string `json:"journal,omitempty"`
-	Reason  string `json:"reason,omitempty"`
+	DeploymentRequest string `json:"deployment_request,omitempty"`
+	DeploymentJournal string `json:"deployment_journal,omitempty"`
+	Enabled           bool   `json:"enabled"`
+	Host              string `json:"host"`
+	Target            string `json:"target"`
+	Source            string `json:"source"`
+	Commit            string `json:"commit,omitempty"`
+	Seen              string `json:"seen,omitempty"`
+	Request           string `json:"request,omitempty"`
+	Phase             string `json:"phase"`
+	Journal           string `json:"journal,omitempty"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 type RemoteGitStore interface {
@@ -72,6 +74,9 @@ func remoteGitHex(s string, n int) bool {
 func (p *RemoteGitPolicy) valid() bool {
 	if p == nil {
 		return true
+	}
+	if (p.DeploymentRequest != "" || p.DeploymentJournal != "") && (!remoteGitHex(p.DeploymentRequest, 16) || !remoteGitHex(p.DeploymentJournal, 16)) {
+		return false
 	}
 	if p.Host == "" || len(p.Host) > 128 || !remoteGitHex(p.Target, 32) || !remoteGitHex(p.Source, 32) {
 		return false

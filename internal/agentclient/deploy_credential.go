@@ -53,6 +53,9 @@ func deploymentRoute(r *http.Request) bool {
 		}
 	}
 	if r.Method == http.MethodGet {
+		if path == "/v1/deploy/journal" {
+			return true
+		}
 		for _, prefix := range []string{"/v1/snapshots/", "/v1/deploy/operations/"} {
 			if id, ok := strings.CutPrefix(path, prefix); ok && canonicalHex(id, 16) {
 				return true

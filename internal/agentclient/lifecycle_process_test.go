@@ -73,7 +73,7 @@ func TestHTTPSRealManagedLifecycle(t *testing.T) {
 	reserve, _ := net.Listen("tcp", "127.0.0.1:0")
 	address := reserve.Addr().String()
 	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", socket, "--engine-id", "11111111-1111-4111-8111-111111111111", "--generation", "1", "--daemon-id", info.ID, "--https-deploy-token-file", tokenFile, "--https-staging-root", filepath.Join(dir, "stages"), "--https-staging-catalog", filepath.Join(dir, "catalog"), "--https-preview-state", filepath.Join(dir, "coordination"), "--https-preview-pkl", pkl, "--https-apply-state", filepath.Join(dir, "history")}
-	for _, grant := range []string{"stage", "manifest", "preview", "journal-apply", "start-preview", "start", "stop-preview", "stop", "restart-preview", "restart", "status", "fence"} {
+	for _, grant := range []string{"stage", "manifest", "preview", "journal", "journal-apply", "start-preview", "start", "stop-preview", "stop", "restart-preview", "restart", "status", "fence"} {
 		args = append(args, "--https-deploy-grant", grant)
 	}
 	raw, e := command(append(args, "--print-https-pairing")...).Output()
@@ -145,6 +145,10 @@ config {
 	}
 	if !preview.CreateEnabled || preview.JournalID == "" || preview.SelectionDigest == nil {
 		t.Fatal("unqualified creation preview")
+	}
+	discovered, err := c.DeploymentJournal(ctx, epoch)
+	if err != nil || discovered != preview.JournalID {
+		t.Fatal("separately granted current journal discovery", err)
 	}
 	id := fmt.Sprintf("%032x", 1)
 	result, e := c.ApplyJournalDeployment(ctx, epoch, stage, digest, stack, *preview.SelectionDigest, id, "create", preview.JournalID)
