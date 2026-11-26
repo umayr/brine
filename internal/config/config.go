@@ -49,6 +49,13 @@ type Config struct {
 	MetricsHistoryDir      string
 	MetricsHistoryMaxPages int
 
+	WebhooksEnabled           bool
+	WebhooksDir               string
+	WebhooksKeyFile           string
+	WebhooksAllowPrivateCIDRs []string
+	WebhooksMaxPending        int
+	WebhooksRetention         time.Duration
+
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
 	AuthUser      string
@@ -84,6 +91,9 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	if err := c.validateWebhooks(); err != nil {
+		return err
+	}
 	validRevealPath := func(p string) bool {
 		return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
 	}

@@ -205,7 +205,7 @@ func (h *Handler) hooksInventory(w http.ResponseWriter, r *http.Request) {
 			options = []WebhookOption{}
 		}
 	}
-	hooksReply(w, 200, map[string]any{"endpoints": endpoints, "triggers": triggers, "deliveries": deliveries, "requests": requests, "catalog": webhooks.Catalog, "actions": webhooks.Actions, "options": options, "options_available": optionsAvailable, "can_manage": auth.CookieAuthenticated(r)})
+	hooksReply(w, 200, map[string]any{"endpoints": endpoints, "triggers": triggers, "deliveries": deliveries, "requests": requests, "catalog": webhooks.Catalog, "actions": webhooks.Actions, "options": options, "options_available": optionsAvailable, "can_manage": auth.CookieAuthenticated(r), "health": h.webhooks.Health()})
 }
 func (h *Handler) hooksSaveEndpoint(w http.ResponseWriter, r *http.Request) {
 	var ep webhooks.Endpoint

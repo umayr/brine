@@ -33,6 +33,7 @@ type Trigger struct {
 }
 
 type IncomingRequest struct {
+	Binding        Trigger   `json:"binding"`
 	ID             string    `json:"id"`
 	TriggerID      string    `json:"trigger_id"`
 	IdempotencyKey string    `json:"idempotency_key"`

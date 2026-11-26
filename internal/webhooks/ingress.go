@@ -25,7 +25,7 @@ func (s *Service) Ingress(dispatcher TriggerDispatcher) http.Handler {
 			json.NewEncoder(w).Encode(map[string]string{"error": message})
 		}
 		id := strings.TrimPrefix(r.URL.Path, "/hooks/")
-		if r.Method != http.MethodPost || !strings.HasPrefix(id, "trg_") || !validID(id) || r.URL.Path != "/hooks/"+id || r.URL.RawPath != "" || r.URL.RawQuery != "" {
+		if r.Method != http.MethodPost || !strings.HasPrefix(id, "trg_") || !validID(id) || r.URL.Path != "/hooks/"+id || r.URL.RawPath != "" || r.URL.RawQuery != "" || r.URL.ForceQuery {
 			fail(404, "not found")
 			return
 		}
@@ -195,7 +195,7 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 	if count >= 100000 {
 		return zero, ErrCapacity
 	}
-	accepted := IncomingRequest{ID: newID("req_"), TriggerID: id, IdempotencyKey: input.ID, Status: "accepted", CreatedAt: now, UpdatedAt: now}
+	accepted := IncomingRequest{ID: newID("req_"), TriggerID: id, IdempotencyKey: input.ID, Status: "accepted", Binding: trigger, CreatedAt: now, UpdatedAt: now}
 	if _, e = tx.ExecContext(ctx, "INSERT INTO incoming_requests(id,trigger_id,idempotency_key,digest,binding,record,status,created,updated) VALUES(?,?,?,?,?,?,'accepted',?,?)", accepted.ID, id, input.ID, digest, config, marshal(accepted), encodeTime(now), encodeTime(now)); e != nil {
 		return zero, errStorage
 	}

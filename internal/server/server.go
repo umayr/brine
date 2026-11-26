@@ -22,6 +22,7 @@ import (
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 	"github.com/umayr/brine/internal/web"
+	"github.com/umayr/brine/internal/webhooks"
 )
 
 // Server is the brine HTTP server.
@@ -36,6 +37,8 @@ type Server struct {
 	authn             *auth.Authenticator
 	remoteCancel      context.CancelFunc
 	remoteDeploy      *remoteui.Deployment
+	webhooks          *webhooks.Service
+	webhookDispatcher webhooks.TriggerDispatcher
 	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
@@ -69,7 +72,11 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 	}
 	web.Mount(r, h, timeouts)
 
-	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, router: r, web: h, authn: authn}
+	s := &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, router: r, web: h, authn: authn}
+	if cfg.WebhooksEnabled {
+		s.router = s.withWebhookIngress(r)
+	}
+	return s
 }
 
 // Run starts HTTP and any configured remote Git worker until ctx is cancelled.
@@ -110,6 +117,16 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 	// Do not start background mutations until the configuration is validated.
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
+	if err := s.prepareWebhooks(workerCtx); err != nil {
+		return err
+	}
+	defer func() {
+		if s.webhooks != nil {
+			if err := s.webhooks.Close(); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		}
+	}()
 	// Local Git auto-deploy is paused until it can apply a reviewed candidate.
 	if s.remoteDeploy != nil {
 		go s.remoteDeploy.RunGit(workerCtx)

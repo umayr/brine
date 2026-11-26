@@ -121,6 +121,11 @@ func Open(cfg Config) (*Service, error) {
 			return nil, errStorage
 		}
 	}
+	_, lockErr := os.Lstat(filepath.Join(dir, "webhooks.lock"))
+	dbInfo, dbErr := os.Lstat(filepath.Join(dir, "webhooks.db"))
+	if os.IsNotExist(lockErr) != os.IsNotExist(dbErr) || (dbErr == nil && dbInfo.Size() == 0) {
+		return nil, errStorage
+	}
 	lock, e := os.OpenFile(filepath.Join(dir, "webhooks.lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if e != nil {
 		return nil, errStorage

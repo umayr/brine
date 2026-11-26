@@ -88,6 +88,16 @@ func run() error {
 	flag.Int64Var(&cfg.SourceHistoryLimits.Bytes, "source-history-max-bytes", 0, fmt.Sprintf("maximum logical sealed source archive bytes (0: %d MiB, maximum %d MiB)", snapshothistory.DefaultSourceArchiveBytes>>20, snapshothistory.MaxSourceArchiveBytes>>20))
 	initSourceHistory := flag.Bool("init-source-history", false, "initialize an empty, externally provisioned source archive and exit; never generate keys")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
+	initWebhooks := flag.Bool("init-webhooks", false, "initialize new webhook state using a pre-provisioned external key, then exit; never repair missing state")
+	flag.BoolVar(&cfg.WebhooksEnabled, "webhooks-enabled", false, "enable authenticated webhook management and signed event delivery")
+	flag.StringVar(&cfg.WebhooksDir, "webhooks-dir", "", "absolute private directory for durable webhook state")
+	flag.StringVar(&cfg.WebhooksKeyFile, "webhooks-key-file", "", "separately provisioned private file containing exactly 32 raw key bytes, outside Brine data")
+	flag.IntVar(&cfg.WebhooksMaxPending, "webhooks-max-pending", 0, "maximum pending webhook deliveries (0: 10000, maximum 100000)")
+	flag.DurationVar(&cfg.WebhooksRetention, "webhooks-retention", 0, "webhook event/delivery retention (0: 168h; range 24h–2160h)")
+	flag.Func("webhooks-allow-private-cidr", "explicit private receiver subnet; repeatable; metadata, loopback and link-local remain forbidden", func(value string) error {
+		cfg.WebhooksAllowPrivateCIDRs = append(cfg.WebhooksAllowPrivateCIDRs, value)
+		return nil
+	})
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username (default: stored or admin)")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")
@@ -107,6 +117,12 @@ func run() error {
 		return nil
 	}
 
+	if *initWebhooks {
+		if err := normalizeDataDir(cfg); err != nil {
+			return err
+		}
+		return server.InitializeWebhooks(cfg)
+	}
 	if *initSourceHistory {
 		if err := normalizeDataDir(cfg); err != nil {
 			return err
