@@ -87,20 +87,21 @@ type revisionRow struct {
 	ID, Actor, When     string
 }
 type sourceDiff struct {
-	Path, Change, Before, After string
-	BeforeBytes, AfterBytes     int
-	Compare                     bool
+	Path, Change, Unavailable string
+	BeforeBytes, AfterBytes   int
+	Lines                     []sourceLine
 }
 type historyPage struct {
-	Stack, CSRF, Message, Review, ID, Proof string
-	Rows                                    []revisionRow
-	Requests                                []requestEvidence
-	RequestError, Enabled, Compare, Confirm bool
-	From, Page, Next, Prev, Total           int
-	Files                                   []sourceDiff
-	EntryBefore, EntryAfter                 string
-	Capacity                                *snapshothistory.SourceArchiveUsage
-	SlotsNeeded                             int
+	Stack, CSRF, Message, Review, ID, Proof               string
+	Rows                                                  []revisionRow
+	Requests                                              []requestEvidence
+	RequestError, ShowRequests, Enabled, Compare, Confirm bool
+	AutoCheckpoint                                        bool
+	From, Previous, Page, Next, Prev, Total               int
+	Files                                                 []sourceDiff
+	EntryBefore, EntryAfter                               string
+	Capacity                                              *snapshothistory.SourceArchiveUsage
+	SlotsNeeded                                           int
 }
 
 func (h *Handler) manualRows(name string) ([]requestEvidence, bool, error) {
@@ -170,6 +171,7 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 	var pending bool
 	p.Requests, pending, e = h.manualRows(name)
 	p.RequestError = e != nil
+	p.ShowRequests = len(p.Requests) > 0 || (h.remoteEnabled && p.RequestError)
 	switch {
 	case h.sourceHistory == nil:
 		p.Message = "Source revisions are not enabled. Restore requires a private source archive; a deployment receipt alone cannot restore files."
@@ -204,6 +206,7 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 			p.Next = p.Page + 1
 		}
 		p.Enabled = true
+		p.AutoCheckpoint = st.AutoCheckpoint
 		for i := p.Total - 1 - 10*(p.Page-1); i >= max(0, p.Total-10*p.Page); i-- {
 			if r.Context().Err() != nil {
 				http.Error(w, "Session or request expired", 403)
@@ -251,14 +254,68 @@ func (s *sourceHistoryAccess) verifyProof(proof, session, name, kind, id, base s
 	now := time.Now().Unix()
 	return ok && e == nil && until >= now && until <= now+300 && hmac.Equal([]byte(proof), []byte(s.proof(session, name, kind, id, base, until)))
 }
-func displaySource(b []byte) string {
-	if !utf8.Valid(b) {
-		return "[non-text content]"
+
+type sourceLine struct {
+	Kind         string
+	Prefix       string
+	Text         string
+	Unterminated bool
+}
+
+const sourceDiffFiles = 8
+const sourceDiffLines = 256
+const sourceDiffBytes = 16 << 10
+
+// Bound both the rendered input and the quadratic LCS table. Always keep
+// file-level change status, even for files too large for an inline text diff.
+func sourceLines(a, b []byte) ([]sourceLine, string) {
+	if len(a) > sourceDiffBytes || len(b) > sourceDiffBytes {
+		return nil, "File is too large for an inline diff."
 	}
-	if len(b) > 2048 {
-		return strings.ToValidUTF8(string(b[:2048]), "…") + "\n[excerpt ends]"
+	if !utf8.Valid(a) || !utf8.Valid(b) || bytes.ContainsRune(a, 0) || bytes.ContainsRune(b, 0) {
+		return nil, "This file is not text."
 	}
-	return string(b)
+	split := func(raw []byte) []string {
+		s := strings.SplitAfter(string(raw), "\n")
+		if s[len(s)-1] == "" {
+			s = s[:len(s)-1]
+		}
+		return s
+	}
+	old, next := split(a), split(b)
+	if len(old) > sourceDiffLines || len(next) > sourceDiffLines {
+		return nil, "File has too many lines for an inline diff."
+	}
+	width := len(next) + 1
+	sub := make([]uint16, (len(old)+1)*width)
+	for i := len(old) - 1; i >= 0; i-- {
+		for j := len(next) - 1; j >= 0; j-- {
+			if old[i] == next[j] {
+				sub[i*width+j] = 1 + sub[(i+1)*width+j+1]
+			} else {
+				sub[i*width+j] = max(sub[(i+1)*width+j], sub[i*width+j+1])
+			}
+		}
+	}
+	add := func(lines []sourceLine, text, kind, prefix string) []sourceLine {
+		return append(lines, sourceLine{kind, prefix, strings.TrimSuffix(text, "\n"), !strings.HasSuffix(text, "\n")})
+	}
+	out := make([]sourceLine, 0, len(old)+len(next))
+	for i, j := 0, 0; i < len(old) || j < len(next); {
+		switch {
+		case i < len(old) && j < len(next) && old[i] == next[j]:
+			out = add(out, old[i], "same", " ")
+			i++
+			j++
+		case i < len(old) && (j == len(next) || sub[(i+1)*width+j] >= sub[i*width+j+1]):
+			out = add(out, old[i], "remove", "-")
+			i++
+		default:
+			out = add(out, next[j], "add", "+")
+			j++
+		}
+	}
+	return out, ""
 }
 func diffSource(current, candidate map[string][]byte, compare bool) []sourceDiff {
 	all := map[string]bool{}
@@ -284,11 +341,13 @@ func diffSource(current, candidate map[string][]byte, compare bool) []sourceDiff
 		default:
 			d.Change = "Unchanged"
 		}
-		if compare && d.Change != "Unchanged" && shown < 8 {
-			d.Compare = true
-			d.Before = displaySource(a)
-			d.After = displaySource(b)
-			shown++
+		if compare && d.Change != "Unchanged" {
+			if shown < sourceDiffFiles {
+				d.Lines, d.Unavailable = sourceLines(a, b)
+				shown++
+			} else {
+				d.Unavailable = "Inline diff omitted after the first eight changed files."
+			}
 		}
 		rows = append(rows, d)
 	}
@@ -318,7 +377,8 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 		return
 	}
 	kind, id := r.PostForm.Get("kind"), r.PostForm.Get("revision")
-	if kind != "retain" && kind != "restore" || kind == "retain" && id != "" || kind == "restore" && len(id) != 64 {
+	if (kind != "retain" && kind != "restore" && kind != "diff") ||
+		(kind == "retain" && id != "") || (kind != "retain" && len(id) != 64) || (confirm && kind == "diff") {
 		http.Error(w, "Invalid revision selection", 400)
 		return
 	}
@@ -346,6 +406,31 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 	csrf := h.auth.CSRFFor(r)
 	p := historyPage{Stack: name, CSRF: csrf, Review: kind, ID: id, EntryBefore: v.Entrypoint, EntryAfter: v.Entrypoint, Confirm: true, Compare: r.PostForm.Get("compare") == "yes"}
 	var candidate snapshothistory.SourceRevision
+	if kind == "diff" {
+		i := slices.Index(v.Revisions, id)
+		candidate, err = s.record(v, i)
+		if err != nil {
+			http.Error(w, "Revision not retained or unverifiable for this stack", 409)
+			return
+		}
+		var previous snapshothistory.SourceRevision
+		if i > 0 {
+			previous, err = s.record(v, i-1)
+			if err != nil {
+				http.Error(w, "Previous revision unavailable", 409)
+				return
+			}
+		}
+		p.From, p.Previous = i+1, i
+		p.EntryBefore, p.EntryAfter = previous.Entrypoint, candidate.Entrypoint
+		p.Files, p.Confirm, p.Compare = diffSource(previous.Files, candidate.Files, true), false, true
+		if r.Context().Err() != nil {
+			http.Error(w, "Session or request expired", 403)
+			return
+		}
+		h.renderPartial(w, r, "stack-history", p)
+		return
+	}
 	if kind == "restore" {
 		i := slices.Index(v.Revisions, id)
 		candidate, err = s.record(v, i)

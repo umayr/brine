@@ -210,22 +210,30 @@ func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build
 	if v.Baseline != baseline {
 		return ErrSourceStale
 	}
-	if st.SourceHistory == nil {
-		st.SourceHistory, e = newLineage()
+	lineage := st.SourceHistory
+	if lineage == nil {
+		lineage, e = newLineage()
 		if e != nil {
 			return e
 		}
-		v.Scope = revisionScope(st, st.SourceHistory.Identity)
+		v.Scope = revisionScope(st, lineage.Identity)
 	}
 	next, e := build(v)
 	if e != nil {
 		return e
 	}
-	if len(next.NewRevisions) < 1 || len(next.NewRevisions) > 2 {
+	if len(next.NewRevisions) > 2 || (len(next.NewRevisions) == 0 && (next.AutoCheckpoint == nil || next.Files != nil)) ||
+		(next.AutoCheckpoint != nil && next.Files != nil) {
 		return ErrSourceUnavailable
 	}
-	st.SourceHistory.Revisions = append(st.SourceHistory.Revisions, next.NewRevisions...)
-	if !st.SourceHistory.valid() {
+	if len(next.NewRevisions) > 0 {
+		lineage.Revisions = append(lineage.Revisions, next.NewRevisions...)
+		st.SourceHistory = lineage
+	}
+	if next.AutoCheckpoint != nil {
+		st.AutoCheckpoint = *next.AutoCheckpoint
+	}
+	if !st.SourceHistory.valid() || (st.AutoCheckpoint && st.SourceHistory == nil) {
 		return ErrSourceUnavailable
 	}
 	// Nothing is published in the workspace until the exact object(s) are durable.

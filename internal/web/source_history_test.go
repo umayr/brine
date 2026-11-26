@@ -57,7 +57,7 @@ func TestSourceHistoryPostsRequireBrowserSessionAndCSRF(t *testing.T) {
 		t.Fatalf("authenticated CSRF lookup: status %d, token present %t", response.Code, csrf != "")
 	}
 
-	for _, action := range []string{"review", "confirm"} {
+	for _, action := range []string{"review", "confirm", "auto-checkpoint"} {
 		for _, tc := range []struct {
 			name, token, wantBody string
 			local, bearer, cookie bool
@@ -92,6 +92,9 @@ func TestSourceHistoryPostsRequireBrowserSessionAndCSRF(t *testing.T) {
 				}
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
+				if action == "auto-checkpoint" && tc.wantStatus == http.StatusBadRequest {
+					tc.wantBody = "Invalid checkpoint setting"
+				}
 				if w.Code != tc.wantStatus || !strings.Contains(w.Body.String(), tc.wantBody) {
 					t.Errorf("status %d, body %q; want %d containing %q", w.Code, w.Body.String(), tc.wantStatus, tc.wantBody)
 				}
@@ -131,7 +134,7 @@ func TestSourceHistoryReviewProof(t *testing.T) {
 	}
 }
 
-func TestSourceHistoryComparisonExcerpts(t *testing.T) {
+func TestSourceHistoryComparisonDiff(t *testing.T) {
 	const before = "private-before-marker"
 	const after = "<script>private-after-marker</script>"
 	current := map[string][]byte{"project.pkl": []byte(before)}
@@ -150,10 +153,10 @@ func TestSourceHistoryComparisonExcerpts(t *testing.T) {
 		}
 		if compare {
 			if !strings.Contains(body, before) || !strings.Contains(body, "&lt;script&gt;private-after-marker&lt;/script&gt;") || strings.Contains(body, after) {
-				t.Error("opted-in comparison must render both excerpts with HTML escaped")
+				t.Error("opted-in comparison must render the line-by-line diff with HTML escaping")
 			}
 		} else if strings.Contains(body, before) || strings.Contains(body, "private-after-marker") {
-			t.Error("comparison exposed source excerpts without opt-in")
+			t.Error("comparison exposed source without opt-in")
 		}
 	}
 }

@@ -68,9 +68,10 @@ type SourceView struct {
 	Files                       map[string][]byte
 }
 type SourceUpdate struct {
-	NewRevisions []string
-	Entrypoint   string
-	Files        map[string][]byte
+	NewRevisions   []string
+	AutoCheckpoint *bool // nil leaves the registration's preference unchanged.
+	Entrypoint     string
+	Files          map[string][]byte
 } // nil Files: retain only, do not rewrite source.
 type SourceChange func(SourceView) (SourceUpdate, error)
 type RevisionWorkspace interface {

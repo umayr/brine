@@ -156,6 +156,38 @@ func TestFSStoreSourceCaptureBinding(t *testing.T) {
 	}
 }
 
+func TestFSStoreSourceAutoCheckpointPreferenceDoesNotRewriteSource(t *testing.T) {
+	ctx := context.Background()
+	s, dir, stage := sourceTestWorkspace(t)
+	initial := sourceTestReview(t, s)
+	enabled := true
+	if err := s.CommitSource(ctx, sourceTestName, initial.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+		return store.SourceUpdate{AutoCheckpoint: &enabled}, nil
+	}); !errors.Is(err, store.ErrSourceUnavailable) {
+		t.Fatalf("enabled with no retained baseline: %v", err)
+	}
+	id := strings.Repeat("a", 64)
+	sourceTestOK(t, s.CommitSource(ctx, sourceTestName, initial.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+		return store.SourceUpdate{AutoCheckpoint: &enabled, NewRevisions: []string{id}}, nil
+	}))
+	stack, err := s.Get(sourceTestName)
+	sourceTestOK(t, err)
+	if !stack.AutoCheckpoint || len(stack.SourceHistory.Revisions) != 1 {
+		t.Fatal("missing preference or baseline")
+	}
+	latest := sourceTestReview(t, s)
+	enabled = false
+	sourceTestOK(t, s.CommitSource(ctx, sourceTestName, latest.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+		return store.SourceUpdate{AutoCheckpoint: &enabled}, nil
+	}))
+	stack, err = s.Get(sourceTestName)
+	sourceTestOK(t, err)
+	if stack.AutoCheckpoint || !slices.Equal(stack.SourceHistory.Revisions, []string{id}) || string(sourceTestRead(t, filepath.Join(dir, "compose.pkl"))) != sourceTestOriginal {
+		t.Fatal("disabling modified lineage or source")
+	}
+	sourceTestAbsent(t, stage)
+}
+
 func TestFSStoreSourceRestoreReplacesTreeAndAppendsHistory(t *testing.T) {
 	ctx := context.Background()
 	s, dir, stage := sourceTestWorkspace(t)

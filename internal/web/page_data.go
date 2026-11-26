@@ -88,20 +88,22 @@ type stackNewData struct {
 
 type stackDetailData struct {
 	pageData
-	StagingEnabled  bool
-	Variables       stackVariablesData
-	GitRevision     string
-	GitState        string
-	Stack           *store.Stack
-	Files           []string
-	ActiveFile      string
-	FileContents    map[string]string
-	EngineAlignment engineAlignment
+	StagingEnabled   bool
+	CheckpointMissed bool
+	Variables        stackVariablesData
+	GitRevision      string
+	GitState         string
+	Stack            *store.Stack
+	Files            []string
+	ActiveFile       string
+	FileContents     map[string]string
+	EngineAlignment  engineAlignment
 }
 
 type stackEditorData struct {
 	NestedFile        bool
 	NestedListWarning bool
+	CheckpointMissed  bool
 	pageData
 	Stack              *store.Stack
 	ActiveFile         string

@@ -8,7 +8,7 @@ test('attended transfer reviews captured bytes before a separate confirmation', 
   await page.locator('input[name="password"]').fill('fixture-only-not-a-secret');
   await page.getByRole('button', { name: /sign in/i }).click();
   await page.goto(`${base}/stacks/homepage`);
-  await page.getByRole('button', { name: 'Project snapshot preview (read-only)' }).click();
+  await page.getByRole('button', { name: 'Project transfer' }).click();
   const audit = async () => (await (await page.request.get(`${base}/fixture-staging-audit`)).json()) || [];
   const before = (await audit()).length;
   await page.getByRole('button', { name: 'Prepare local transfer review' }).click();

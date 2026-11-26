@@ -86,6 +86,7 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			r.Get("/stacks/{name}/history", h.stackHistory)
 			r.Post("/stacks/{name}/history/review", h.stackSourceReview)
 			r.Post("/stacks/{name}/history/confirm", h.stackSourceConfirm)
+			r.Post("/stacks/{name}/history/auto-checkpoint", h.stackAutoCheckpoint)
 			r.Get("/stacks/{name}/plan", h.stackPlan)
 			r.Get("/stacks/{name}/containers", h.stackContainers)
 

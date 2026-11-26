@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -11,9 +12,17 @@ import (
 	"github.com/umayr/brine/internal/store"
 )
 
+// SourceSaveObserver is started before stack admission. On a successful
+// source save its callback reports whether an automatic checkpoint was missed.
+type SourceSaveObserver func(*http.Request) (func(string) bool, func())
+
 // Mount registers all /api/* routes on r.
 func Mount(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, histories ...*operationhistory.Store) {
-	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout}
+	MountObservingSourceSaves(r, ag, st, rs, gr, runtimeEngine, timeouts, deployTimeout, nil, histories...)
+}
+
+func MountObservingSourceSaves(r chi.Router, ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runner, runtimeEngine string, timeouts httpx.Timeouts, deployTimeout time.Duration, observer SourceSaveObserver, histories ...*operationhistory.Store) {
+	sh := &stackHandler{agent: ag, store: st, git: gr, runtimeEngine: runtimeEngine, deployTimeout: deployTimeout, observeSourceSave: observer}
 	if len(histories) > 0 {
 		sh.history = histories[0]
 	}
