@@ -149,16 +149,17 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 		}
 	}
 	h.render(w, r, "stacks/detail.html", &stackDetailData{
-		StagingEnabled:  h.stagingStore != nil,
-		GitRevision:     revision,
-		GitState:        gitState,
-		pageData:        pageData{Page: "stacks"},
-		Stack:           stack,
-		Files:           files,
-		ActiveFile:      activeFile,
-		FileContents:    fileContents,
-		EngineAlignment: h.engineAlignmentFor(stack, fileContents),
-		Variables:       h.stackVariables(name, variableError),
+		StagingEnabled:   h.stagingStore != nil,
+		CheckpointNotice: checkpointWarning(store.SourceCheckpointStatus(r.URL.Query().Get("checkpoint"))),
+		GitRevision:      revision,
+		GitState:         gitState,
+		pageData:         pageData{Page: "stacks"},
+		Stack:            stack,
+		Files:            files,
+		ActiveFile:       activeFile,
+		FileContents:     fileContents,
+		EngineAlignment:  h.engineAlignmentFor(stack, fileContents),
+		Variables:        h.stackVariables(name, variableError),
 	})
 }
 
@@ -225,6 +226,7 @@ func (h *Handler) stackEditor(w http.ResponseWriter, r *http.Request) {
 		ActiveFile:         activeFile,
 		NestedFile:         strings.Contains(activeFile, "/"),
 		NestedListWarning:  nestedListWarning,
+		CheckpointNotice:   checkpointWarning(store.SourceCheckpointStatus(r.URL.Query().Get("checkpoint"))),
 		PklContent:         content,
 		Files:              files,
 		Snippets:           byCategory,
@@ -329,6 +331,8 @@ func (h *Handler) stackCreate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.BeginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -352,7 +356,7 @@ func (h *Handler) stackUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	w.Header().Set("HX-Redirect", "/stacks/"+name)
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -542,6 +546,8 @@ func (h *Handler) stackContainers(w http.ResponseWriter, r *http.Request) {
 // --- Stack file HTMX partials ---
 
 func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.BeginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -562,11 +568,13 @@ func (h *Handler) stackFileCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Redirect to editor with the new file active.
-	w.Header().Set("HX-Redirect", "/stacks/"+name+"/edit?file="+filename)
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit?file="+filename))
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.BeginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -583,10 +591,17 @@ func (h *Handler) stackFileUpdate(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
+	if status := checkpoint(name); status != "" {
+		checkpointNotice(w, status, "")
+		h.renderAlert(w, "warning", checkpointWarning(status))
+		return
+	}
 	h.renderAlert(w, "success", "Saved")
 }
 
 func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.BeginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -598,11 +613,13 @@ func (h *Handler) stackFileDelete(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
-	w.Header().Set("HX-Redirect", "/stacks/"+name+"/edit")
+	w.Header().Set("HX-Redirect", checkpointNotice(w, checkpoint(name), "/stacks/"+name+"/edit"))
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) stackSetEntrypoint(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.BeginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -616,6 +633,11 @@ func (h *Handler) stackSetEntrypoint(w http.ResponseWriter, r *http.Request) {
 	filename := r.FormValue("filename")
 	if err := h.store.SetEntrypoint(name, filename); err != nil {
 		h.renderAlert(w, "error", err.Error())
+		return
+	}
+	if status := checkpoint(name); status != "" {
+		checkpointNotice(w, status, "")
+		h.renderAlert(w, "warning", checkpointWarning(status))
 		return
 	}
 	h.renderAlert(w, "success", "Entrypoint set to "+filename)

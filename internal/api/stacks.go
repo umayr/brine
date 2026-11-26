@@ -27,12 +27,25 @@ import (
 )
 
 type stackHandler struct {
-	history       *operationhistory.Store
-	agent         agent.Agent
-	store         store.StackStore
-	git           *gitpkg.Runner
-	runtimeEngine string
-	deployTimeout time.Duration
+	history           *operationhistory.Store
+	agent             agent.Agent
+	store             store.StackStore
+	git               *gitpkg.Runner
+	runtimeEngine     string
+	deployTimeout     time.Duration
+	observeSourceSave SourceSaveObserver
+}
+
+func (h *stackHandler) beginSourceSave(r *http.Request) (func(http.ResponseWriter, string), func()) {
+	if h.observeSourceSave == nil {
+		return func(http.ResponseWriter, string) {}, func() {}
+	}
+	report, release := h.observeSourceSave(r)
+	return func(w http.ResponseWriter, name string) {
+		if status := report(name); status != "" {
+			w.Header().Set(store.SourceCheckpointHeader, string(status))
+		}
+	}, release
 }
 
 // Defense in depth for mounted API routers: a configured qualified client must
@@ -141,6 +154,8 @@ type updateRequest struct {
 }
 
 func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.beginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -164,6 +179,7 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	checkpoint(w, name)
 	writeJSON(w, http.StatusOK, stackReadMetadata(stack))
 }
 
@@ -472,6 +488,8 @@ func (h *stackHandler) getFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.beginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -490,10 +508,13 @@ func (h *stackHandler) writeFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	checkpoint(w, name)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.beginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -505,10 +526,13 @@ func (h *stackHandler) deleteFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	checkpoint(w, name)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *stackHandler) setEntrypoint(w http.ResponseWriter, r *http.Request) {
+	checkpoint, release := h.beginSourceSave(r)
+	defer release()
 	name := chi.URLParam(r, "name")
 	unlock, admitted := h.admitStack(w, r, name)
 	if !admitted {
@@ -526,6 +550,7 @@ func (h *stackHandler) setEntrypoint(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	checkpoint(w, name)
 	w.WriteHeader(http.StatusNoContent)
 }
 

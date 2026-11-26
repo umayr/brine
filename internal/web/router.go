@@ -56,6 +56,8 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		r.Get("/settings/general", h.settingsGeneral)
 		r.Post("/settings/general", h.settingsCredentials)
 		r.Get("/settings/live-updates", h.settingsLiveUpdates)
+		r.Get("/settings/source-history", h.settingsSourceHistory)
+		r.Post("/settings/source-history", h.saveSourceHistorySettings)
 		r.Get("/variables", h.variablesPage)
 		r.Post("/variables", h.variablesSave)
 		// Keep previously shared bookmarks and form submissions working.
@@ -88,6 +90,7 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 			r.Get("/stacks/{name}/history", h.stackHistory)
 			r.Post("/stacks/{name}/history/review", h.stackSourceReview)
 			r.Post("/stacks/{name}/history/confirm", h.stackSourceConfirm)
+			r.Post("/stacks/{name}/history/auto-checkpoint", h.stackAutoCheckpoint)
 			r.Get("/stacks/{name}/plan", h.stackPlan)
 			r.Get("/stacks/{name}/containers", h.stackContainers)
 

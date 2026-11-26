@@ -16,22 +16,18 @@
 
 {{define "project-inspection"}}
   <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
-    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="false" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
+    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="false" aria-controls="project-preview-content">Project transfer <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
     <div id="project-preview-content" class="space-y-3" hidden>
-      <p>Preview project file names and sizes. Ignored and hidden files may be included; file contents can contain secrets. This preview is not an atomic snapshot and does not transfer files or authorize deployment.</p>
+      <p>Inspect files before preparing a local transfer. Hidden and ignored files may be included.</p>
       <details class="text-sm text-muted">
-      <summary class="cursor-pointer">Preview scope and limits</summary>
-      <p>Local projects include Brine's meta.json; Git projects use the repository root. Git subfolder previews are unavailable.</p>
-      <p>Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the entire preview.</p>
-      <ul>
-        <li>Entries named .git are omitted. Symlinks and special files are rejected.</li>
-        <li>Ignored, untracked and hidden files are included; .gitignore is not honored. Files such as .env and keys may be included.</li>
-        <li>Regular files with hard links and files under mounted subdirectories are included; these are not detected or filtered.</li>
-        <li>Project root ancestors and other processes running as the same user must be trusted; this is not a filesystem sandbox.</li>
-        <li>Empty directories and file modes are not preserved.</li>
-        <li>Concurrent changes mean this is not an atomic snapshot; a later preview may differ.</li>
-        <li>Preview does not transfer files or authorize deployment; it does not confirm immutable snapshot bytes.</li>
-      </ul>
+        <summary class="cursor-pointer">Preview scope and limits</summary>
+        <p>This read-only list is not an atomic snapshot and does not include file contents. It neither transfers files nor authorizes deployment.</p>
+        <ul>
+          <li>Local previews include Brine metadata. Git previews use the repository root; subfolders are not supported.</li>
+          <li>Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the preview.</li>
+          <li>Files such as <code>.env</code> and keys may be included. <code>.git</code> is omitted; symlinks and special files are rejected.</li>
+          <li>Hard links and mounted directories can be included. Trust the project root and processes running as the same user.</li>
+        </ul>
       </details>
       <button type="button" class="ui-button ui-button-outline ui-button-sm" hx-get="/web/stacks/{{.Stack.Name}}/project-preview" hx-target="#project-preview-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('project-preview-result').textContent = 'Project preview unavailable. Check project files, file types and size limits, then retry.'">Preview project files</button>
       <div id="project-preview-result" aria-live="polite"></div>
@@ -41,6 +37,7 @@
 {{end}}
 
 {{define "content"}}
+{{if .CheckpointNotice}}<p class="ui-notice ui-notice-warning" role="status">{{.CheckpointNotice}}</p>{{end}}
 <div class="space-y-4">
 
   <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1></div></header>
@@ -128,7 +125,7 @@
   <dl class="ui-panel stack-overview" aria-label="Stack overview">
     <div><dt class="field-label">Engine</dt><dd class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</dd></div>
     <div><dt class="field-label">Source</dt><dd class="font-mono text-sm">{{if .Stack.Git}}Git{{else}}Workspace{{end}}</dd></div>
-    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm" title="Configured transport; daemon identity is not verified">{{.Target.Location}}<span class="block text-xs text-muted">Configured only</span></dd></div>
+    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm">{{.Target.Location}}</dd></div>
     <div><dt class="field-label">Entrypoint</dt><dd class="font-mono text-sm">{{.Stack.EffectiveEntrypoint}}</dd></div>
     <div><dt class="field-label">Created</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
     <div><dt class="field-label">Updated</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
@@ -336,7 +333,7 @@
   </div>
   {{end}}
   {{if .Stack.RemoteGit}}<p class="text-sm text-muted">Remote Git policy: {{.Stack.RemoteGit.Host}}. This does not select an execution target.</p>{{end}}
-  {{template "project-inspection" .}}
+  {{if .StagingEnabled}}{{template "project-inspection" .}}{{end}}
   </section>
   <section id="panel-Containers" role="tabpanel" aria-labelledby="tab-Containers" tabindex="0" class="space-y-4" hidden>
   <!-- Containers in this stack -->
@@ -413,7 +410,6 @@
     <div id="plan-tools" class="flex items-center justify-between"><span class="field-label">Plan review</span><button type="button" id="dismiss-plan" class="ui-button ui-button-ghost ui-button-xs">Close plan</button></div>
     <p id="plan-stale" class="ui-notice ui-notice-warning" role="status" hidden>Inputs changed. Run Plan again before deploying.</p>
     <div id="plan-result" role="status" aria-live="polite"></div>
-  <a class="ui-button ui-button-ghost ui-button-sm" href="?tab=compose#project-preview" data-open-project-preview>Inspect project files in Compose</a>
   </section>
   <script>
   // Panels start expanded; collapsing is presentation-only and never cancels

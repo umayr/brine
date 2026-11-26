@@ -54,14 +54,6 @@
       select(visible[(indices[event.key] + visible.length) % visible.length], true);
     });
     document.addEventListener('click', event => {
-      if (event.target.closest('[data-open-project-preview]')) {
-        event.preventDefault();
-        select(tab('Compose'));
-        const toggle = document.querySelector('[aria-controls="project-preview-content"]');
-        if (toggle.getAttribute('aria-expanded') === 'false') toggle.click();
-        toggle.focus();
-        return;
-      }
       if (!event.target.closest('[data-open-history]')) return;
       event.preventDefault();
       if (active === tab('History')) document.getElementById('stack-history-content').dispatchEvent(new CustomEvent('load-history', {bubbles:true}));
@@ -171,20 +163,21 @@
       const {target, xhr} = event.detail;
       const path = event.detail.requestConfig.path;
       const confirm = path.endsWith('/confirm');
+      const setting = path.endsWith('/auto-checkpoint');
       xhr.addEventListener('loadend', () => {
         if (!target.isConnected) return;
-        if (confirm && xhr.status === 204 && xhr.getResponseHeader('HX-Redirect')) return;
+        if ((confirm || setting) && xhr.status === 204 && xhr.getResponseHeader('HX-Redirect')) return;
         if (confirm || xhr.status !== 200 || !xhr.responseURL || new URL(xhr.responseURL).pathname === '/login') {
           const detail = xhr.status === 409 && xhr.getResponseHeader('Content-Type')?.startsWith('text/plain') ? xhr.responseText.trim().slice(0, 300) : '';
-          historyMessage(target, detail || (confirm ? 'Source publication was not confirmed. Inspect current source and History. Do not resubmit.' : 'History or review unavailable. Check your session and reopen History. No restore was requested.'));
+          historyMessage(target, detail || (confirm ? 'Source publication was not confirmed. Inspect current source and History. Do not resubmit.' : setting ? 'Auto-checkpoint setting could not be confirmed. Reopen History to check it.' : 'History or review unavailable. Check your session and reopen History. No restore was requested.'));
         }
       }, {once:true});
       // Keep the HTMX request's source attached through its lifecycle.
       if (target === historyContent) historyMessage(target, 'Loading history…', true);
-      else if (confirm || path.endsWith('/review')) {
+      else if (confirm || setting || path.endsWith('/review')) {
         target.querySelectorAll('button').forEach(b => { b.disabled = true; });
         const status = document.createElement('div');
-        historyMessage(status, confirm ? 'Publishing source revision…' : 'Verifying source…', true); target.prepend(status);
+        historyMessage(status, confirm ? 'Publishing source revision…' : setting ? 'Saving checkpoint setting…' : 'Verifying source…', true); target.prepend(status);
       }
     });
     historyContent?.addEventListener('htmx:beforeSwap', event => {

@@ -179,6 +179,13 @@ func (s *FSStore) ReviewSource(ctx context.Context, name string) (SourceView, er
 // ledger transactions from the admission check through workspace publication.
 // External concurrent workspace writers are unsupported.
 func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build SourceChange) error {
+	return s.commitSource(ctx, name, baseline, false, build)
+}
+func (s *FSStore) CommitAutomaticCheckpoint(ctx context.Context, name, baseline string, build SourceChange) error {
+	return s.commitSource(ctx, name, baseline, true, build)
+}
+
+func (s *FSStore) commitSource(ctx context.Context, name, baseline string, automatic bool, build SourceChange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	root, err := s.lockManualRoot()
@@ -210,22 +217,44 @@ func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build
 	if v.Baseline != baseline {
 		return ErrSourceStale
 	}
-	if st.SourceHistory == nil {
-		st.SourceHistory, e = newLineage()
+	if automatic {
+		var enabled bool
+		if st.AutoCheckpoint != nil {
+			enabled = *st.AutoCheckpoint
+		} else {
+			enabled, e = readSourceCheckpointDefault(root)
+			if e != nil {
+				return e
+			}
+		}
+		if !enabled {
+			return ErrSourceCheckpointDisabled
+		}
+	}
+	lineage := st.SourceHistory
+	if lineage == nil {
+		lineage, e = newLineage()
 		if e != nil {
 			return e
 		}
-		v.Scope = revisionScope(st, st.SourceHistory.Identity)
+		v.Scope = revisionScope(st, lineage.Identity)
 	}
 	next, e := build(v)
 	if e != nil {
 		return e
 	}
-	if len(next.NewRevisions) < 1 || len(next.NewRevisions) > 2 {
+	if len(next.NewRevisions) > 2 || (len(next.NewRevisions) == 0 && (!next.SetAutoCheckpoint || next.Files != nil)) ||
+		(next.SetAutoCheckpoint && next.Files != nil) || (automatic && (next.SetAutoCheckpoint || next.Files != nil || len(next.NewRevisions) != 1)) {
 		return ErrSourceUnavailable
 	}
-	st.SourceHistory.Revisions = append(st.SourceHistory.Revisions, next.NewRevisions...)
-	if !st.SourceHistory.valid() {
+	if len(next.NewRevisions) > 0 {
+		lineage.Revisions = append(lineage.Revisions, next.NewRevisions...)
+		st.SourceHistory = lineage
+	}
+	if next.SetAutoCheckpoint {
+		st.AutoCheckpoint = next.AutoCheckpoint
+	}
+	if !st.SourceHistory.valid() || (st.AutoCheckpoint != nil && *st.AutoCheckpoint && st.SourceHistory == nil) {
 		return ErrSourceUnavailable
 	}
 	// Nothing is published in the workspace until the exact object(s) are durable.

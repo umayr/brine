@@ -61,11 +61,9 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 		Lifecycle: cfg.DeployTimeout + time.Minute,
 	}
 
-	// API routes
-	api.Mount(r, ag, st, rs, gr, cfg.Engine, timeouts, cfg.DeployTimeout)
-
-	// Web / HTMX routes
+	// Web / HTMX routes and shared source-save policy for the API.
 	h := web.New(ag, st, rs, gr, cfg.Engine, cfg.Dev, authn, cfg.DeployTimeout)
+	api.MountObservingSourceSaves(r, ag, st, rs, gr, cfg.Engine, timeouts, cfg.DeployTimeout, h.BeginSourceSave)
 	if cfg.StagingSocket != "" && cfg.StagingIdentity != "" {
 		h.EnableLocalStaging(cfg)
 	}
