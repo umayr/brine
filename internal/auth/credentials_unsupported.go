@@ -11,6 +11,9 @@ type credentialState struct{}
 func openCredentialState(string) (*credentialState, error) {
 	return nil, errors.New("file-backed credentials unsupported on this platform")
 }
+func lockCredentialState(path string, _ bool) (*credentialState, error) {
+	return openCredentialState(path)
+}
 func (*credentialState) close() {}
 func (*credentialState) read() ([]byte, bool, error) {
 	return nil, false, errors.New("credential state unavailable")

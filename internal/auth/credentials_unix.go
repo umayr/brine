@@ -37,6 +37,11 @@ func credentialDirSafe(fd int, private bool) bool {
 }
 
 func openCredentialState(path string) (*credentialState, error) {
+	return lockCredentialState(path, true)
+}
+
+// Live requests never create credential state or wait for another process's lock.
+func lockCredentialState(path string, startup bool) (*credentialState, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil || abs == "/" {
 		return nil, errCredentialState
@@ -52,7 +57,7 @@ func openCredentialState(path string) (*credentialState, error) {
 	parts := strings.Split(strings.TrimPrefix(abs, "/"), "/")
 	for i, part := range parts {
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-		if e == unix.ENOENT {
+		if startup && e == unix.ENOENT {
 			if e = unix.Mkdirat(fd, part, 0700); e == nil || e == unix.EEXIST {
 				next, e = unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 			}
@@ -69,7 +74,11 @@ func openCredentialState(path string) (*credentialState, error) {
 	}
 	// Lock the already validated descriptor, not a path or attacker-planted lock
 	// file. Closing it releases the lock, including all failure paths.
-	if unix.Flock(fd, unix.LOCK_EX) != nil || !credentialDirSafe(fd, true) {
+	mode := unix.LOCK_EX
+	if !startup {
+		mode |= unix.LOCK_NB
+	}
+	if unix.Flock(fd, mode) != nil || !credentialDirSafe(fd, true) {
 		unix.Close(fd)
 		return nil, errCredentialState
 	}
@@ -158,7 +167,7 @@ func (s *credentialState) write(data []byte) error {
 		return errCredentialState
 	}
 	if unix.Fsync(dir) != nil {
-		return errCredentialState
+		return errCredentialDurability
 	}
 	return nil
 }
