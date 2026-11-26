@@ -7,7 +7,8 @@ const { chromium } = require('playwright');
 const base = process.env.PILOT_BRINE_URL;
 const name = `${process.env.PILOT_RESOURCE_PREFIX}-manual`;
 const api = { Authorization: `Bearer ${process.env.BRINE_API_TOKEN}` };
-const project = marker => `amends "package://pkg.ushd.ca/dill@0.8.1#/dill.pkl"
+const schema = fs.readFileSync(process.env.PILOT_SCHEMA, 'utf8');
+const project = marker => `amends "dill.pkl"
 config {
   name = "${name}"
   engine = "docker"
@@ -44,6 +45,11 @@ async function createWorkspace() {
     body: JSON.stringify({ name, pkl_content: project('pilot-v1') }),
   });
   assert.ok(created.ok, `create fixture workspace: HTTP ${created.status}`);
+  const added = await fetch(`${base}/api/stacks/${name}/files/dill.pkl`, {
+    method: 'PUT', headers: { ...api, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: schema }),
+  });
+  assert.equal(added.status, 204, 'add released schema to fixture workspace');
 }
 
 async function exercise(page) {
@@ -218,7 +224,8 @@ async function verifyGitPause(page, deployURL) {
 
   // A fresh valid commit must not implicitly clear the existing pause.
   fs.writeFileSync(`${source}/compose.pkl`, project('git-next').replace(name, stack));
-  git('add', 'compose.pkl');
+  fs.writeFileSync(`${source}/dill.pkl`, schema);
+  git('add', 'compose.pkl', 'dill.pkl');
   git('-c', 'user.name=Pilot', '-c', 'user.email=pilot@example.invalid', 'commit', '-qm', 'Synthetic valid successor');
   const successor = git('rev-parse', 'HEAD');
   const advertised = git('ls-remote', '--exit-code', process.env.PILOT_GIT_URL, 'refs/heads/main');

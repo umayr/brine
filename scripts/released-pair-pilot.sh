@@ -40,18 +40,32 @@ pkl_sha=618f13955d755cafbfe8c9cba1d27635848cd49dbc6abffd398d2751db1231bf
 curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.8.1/dill-linux-amd64 -o "$root/dill"
 curl -fsSL --retry 3 https://github.com/apple/pkl/releases/download/0.31.1/pkl-linux-amd64 -o "$root/pkl"
 printf '%s  %s\n%s  %s\n' "$dill_sha" "$root/dill" "$pkl_sha" "$root/pkl" | sha256sum --check
+# Use the checked release schema locally: an unavailable public package
+# registry must not mask the remote agent compatibility test.
+curl -fsSL --retry 3 'https://github.com/umayr/dill/releases/download/v0.8.1/dill%400.8.1.zip' -o "$root/schema.zip"
+printf '%s  %s\n' 47a8dbdc127e947238308cb7a863122e6de128ee6d2e893c677d3117f36f0948 "$root/schema.zip" | sha256sum --check
+export PILOT_SCHEMA="$root/dill.pkl"
+unzip -p "$root/schema.zip" dill.pkl > "$PILOT_SCHEMA"
+test -s "$PILOT_SCHEMA"
 chmod 700 "$root/dill" "$root/pkl"
 [[ $("$root/dill" version) == v0.8.1 ]]
-echo "Brine fixture image: $image; Dill asset sha256:$dill_sha"
+# Keep the remote agent and historical image on the qualified v0.8.1 pair.
+# The candidate must test its actual bundled local CLI, not override the pin.
+echo "Brine fixture image: $image; remote Dill agent sha256:$dill_sha"
+bundled_version=0.8.1
+bundled_sha=$dill_sha
 if [[ ${PILOT_CANDIDATE:-} == true ]]; then
   image=brine-hardening-candidate:local
-  d build --build-arg DILL_VERSION=0.8.1 -t "$image" .
+  bundled_version=0.11.0
+  bundled_sha=698a531ba60663d03c08309f7caba5ef0192aaa8b830f2398d440919d88b5c1d
+  grep -qx "ARG DILL_VERSION=$bundled_version" Dockerfile
+  d build -t "$image" .
   echo "Candidate image: $(d image inspect --format '{{.Id}}' "$image"); source: $(git rev-parse HEAD)"
 else
   d pull "$image"
 fi
-[[ $(d run --rm --entrypoint /usr/local/bin/dill "$image" version) == v0.8.1 ]]
-[[ $(d run --rm --entrypoint sha256sum "$image" /usr/local/bin/dill | awk '{print $1}') == "$dill_sha" ]]
+[[ $(d run --rm --entrypoint /usr/local/bin/dill "$image" version) == "v$bundled_version" ]]
+[[ $(d run --rm --entrypoint sha256sum "$image" /usr/local/bin/dill | awk '{print $1}') == "$bundled_sha" ]]
 d pull docker.io/library/alpine:3.22
 mkdir -m 700 "$root"/{stages,catalog,coordination,operations}
 d run --rm --entrypoint /bin/mkdir -v "$volume:/data" "$image" -m 0700 /data/remote

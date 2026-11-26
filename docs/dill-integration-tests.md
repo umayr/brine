@@ -1,22 +1,22 @@
 # Released Dill integration tests
 
-`TestReleasedDill` runs Brine's local Dill runner against v0.8.0, the release bundled in the Brine image. It does not start Brine or connect to a container engine. The test is opt-in: `go test ./...` skips it unless `BRINE_TEST_DILL` is set. Once enabled, missing prerequisites and a mismatched release version are errors.
+`TestReleasedDill` runs Brine's local Dill runner against v0.11.0, the release bundled in the Brine image. It does not start Brine or connect to a container engine. The test is opt-in: `go test ./...` skips it unless `BRINE_TEST_DILL` is set. Once enabled, missing prerequisites and a mismatched release version are errors.
 
 ## Setup
 
 Use the Go version in `go.mod` and install [Pkl 0.31.1](https://github.com/apple/pkl/releases/tag/0.31.1), the version bundled in Brine. The test checks the Pkl executable on `PATH` or uses `DILL_PKL_PATH` if set. It passes the resolved path to Dill so the test does not use Dill's downloader or cache.
 
-Download the matching binary and schema archive from the [Dill v0.8.0 release](https://github.com/umayr/dill/releases/tag/v0.8.0). For macOS arm64:
+Download the matching binary and schema archive from the [Dill v0.11.0 release](https://github.com/umayr/dill/releases/tag/v0.11.0). For macOS arm64:
 
 ```sh
 mkdir -p /tmp/brine-dill-test
 cd /tmp/brine-dill-test
-curl -fL -o dill https://github.com/umayr/dill/releases/download/v0.8.0/dill-darwin-arm64
-curl -fL -o schema.zip 'https://github.com/umayr/dill/releases/download/v0.8.0/dill%400.8.0.zip'
+curl -fL -o dill https://github.com/umayr/dill/releases/download/v0.11.0/dill-darwin-arm64
+curl -fL -o schema.zip 'https://github.com/umayr/dill/releases/download/v0.11.0/dill%400.11.0.zip'
 shasum -a 256 dill schema.zip
 # Compare both digests below before running Dill or extracting the schema.
 chmod +x dill
-./dill version  # v0.8.0
+./dill version  # v0.11.0
 unzip -p schema.zip dill.pkl > dill.pkl
 ```
 
@@ -24,11 +24,11 @@ Use the binary and SHA-256 digest for your platform:
 
 | Release asset | SHA-256 |
 | --- | --- |
-| `dill-darwin-arm64` | `16ea97d6514bf99ca632d515beabf906793489ae8bbcf15128fdae998227ce42` |
-| `dill-darwin-amd64` | `ef16d200e701b4d2c4c3701b743d2f7ca175c81d67f1654e938e8b677ad7431b` |
-| `dill-linux-amd64` | `71858cada246f3af21f0c29101db9e801d88ab27a05758c3c9f37182e0fe4aee` |
-| `dill-linux-arm64` | `76f0537bc18c8588d1c54b61dc874eecfe39972ad214c1638861ea469f0f27d9` |
-| `dill@0.8.0.zip` | `47a8dbdc127e947238308cb7a863122e6de128ee6d2e893c677d3117f36f0948` |
+| `dill-darwin-arm64` | `9d2286d351d4bd214973c8aa92534176141a529f3d837cac383d8485759ef635` |
+| `dill-darwin-amd64` | `7f8db5729ee1c99aff415b889e17dacaff2eacc7da9c9d7cf8f1ff8032196bac` |
+| `dill-linux-amd64` | `698a531ba60663d03c08309f7caba5ef0192aaa8b830f2398d440919d88b5c1d` |
+| `dill-linux-arm64` | `8da85f879ad8782dcde1a7113ae00fc929adeebb1f060ee5af3c6579c6f95eca` |
+| `dill@0.11.0.zip` | `2f2c1c622b9aa7f386c7d401bd912abe289a68554e1974da1bde0b6cceb6b413` |
 
 From the Brine checkout, run:
 
