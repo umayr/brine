@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 )
+
+const TargetRegistryScope = "registry:"
 
 const metadataSchema = `CREATE TABLE IF NOT EXISTS metadata_mutations(id TEXT PRIMARY KEY,name TEXT NOT NULL,stack_id TEXT NOT NULL,before_head TEXT NOT NULL,kind TEXT NOT NULL,events BLOB NOT NULL,state TEXT NOT NULL,created INTEGER NOT NULL,updated INTEGER NOT NULL);CREATE INDEX IF NOT EXISTS metadata_pending ON metadata_mutations(state,created);`
 
@@ -29,7 +32,7 @@ func (s *Service) ConfigureMetadataObservation(observe MetadataObservationFunc) 
 // The previous metadata head proves its predecessor committed, closing the
 // callback/crash window before another mutation can replace that evidence.
 func (s *Service) BeginMetadataMutation(ctx context.Context, name, stackID, beforeHead, kind string, events []Event) (string, error) {
-	if !validID(name) || !validID(stackID) || (beforeHead != "" && !validID(beforeHead)) || !contains([]string{"write", "delete", "restore"}, kind) || len(events) == 0 || len(events) > 8 {
+	if !validID(name) || !validID(stackID) || (beforeHead != "" && !validID(beforeHead)) || !contains([]string{"write", "delete", "restore", "registry"}, kind) || len(events) == 0 || len(events) > 8 {
 		return "", ErrInvalid
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
@@ -64,7 +67,11 @@ func (s *Service) BeginMetadataMutation(ctx context.Context, name, stackID, befo
 	id := newID("meta_")
 	now := s.now()
 	for i := range events {
-		if events[i].Stack.ID != stackID || (events[i].Stack.Name != "" && events[i].Stack.Name != name) {
+		if kind == "registry" {
+			if !strings.HasPrefix(name, TargetRegistryScope) || len(name) != len(TargetRegistryScope)+64 || stackID != name || events[i].Stack.ID != "" || !validID(events[i].Target.ID) || !contains([]string{"target.enrolled", "target.updated", "target.removed"}, events[i].Type) {
+				return "", ErrInvalid
+			}
+		} else if events[i].Stack.ID != stackID || (events[i].Stack.Name != "" && events[i].Stack.Name != name) {
 			return "", ErrInvalid
 		}
 		events[i].ID = id + ":" + string(rune('0'+i))

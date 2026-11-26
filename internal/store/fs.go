@@ -19,6 +19,7 @@ type FSStore struct {
 	dataDir          string
 	mu               sync.RWMutex
 	metadataObserver MetadataObserver
+	metadataSync     func(int) error // test-only directory sync fault injection
 }
 
 // NewFSStore creates an FSStore rooted at dataDir, creating the stacks

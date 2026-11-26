@@ -28,6 +28,7 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 		return errors.New("remote registry unavailable or insecure")
 	}
 	transport := remoteagent.Config{LocalDir: s.cfg.RemoteForwardDir, Timeout: s.cfg.RemoteTimeout}
+	s.targetRegistry = registry
 	if provider == nil {
 		provider, err = remoteui.NewRegistryLeaseProvider(registry, transport)
 		if err != nil {

@@ -56,6 +56,22 @@ func (s *FSStore) prepareMetadata(after *Stack, kind string, name string) (Metad
 			return noop, nil
 		}
 	}
+	// The prior head may be visible after a failed directory sync. Do not
+	// acknowledge it in the journal until its metadata entry is durable.
+	if before != nil {
+		fd, e := s.stackFD(name)
+		if e != nil {
+			return noop, e
+		}
+		e = s.syncMetadataDirectory(fd)
+		unix.Close(fd)
+		if e != nil {
+			return noop, e
+		}
+		if e = s.syncInventory(); e != nil {
+			return noop, e
+		}
+	}
 	commit, e := s.metadataObserver(MetadataChange{Before: before, After: after, Kind: kind})
 	if e != nil {
 		return noop, e
@@ -111,13 +127,20 @@ func (s *FSStore) ObserveMetadata(name string) (*Stack, bool, error) {
 	return st, true, nil
 }
 
+func (s *FSStore) syncMetadataDirectory(fd int) error {
+	if s.metadataSync != nil {
+		return s.metadataSync(fd)
+	}
+	return unix.Fsync(fd)
+}
+
 func (s *FSStore) syncInventory() error {
 	fd, e := s.stacksFD()
 	if e != nil {
 		return e
 	}
 	defer unix.Close(fd)
-	return unix.Fsync(fd)
+	return s.syncMetadataDirectory(fd)
 }
 
 func metadataJSON(st *Stack) []byte { b, _ := json.Marshal(st); return b }

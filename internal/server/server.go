@@ -27,19 +27,21 @@ import (
 
 // Server is the brine HTTP server.
 type Server struct {
-	cfg               *config.Config
-	agent             agent.Agent
-	store             store.StackStore
-	recipes           store.RecipeStore
-	git               *git.Runner
-	router            http.Handler
-	web               *web.Handler
-	authn             *auth.Authenticator
-	remoteCancel      context.CancelFunc
-	remoteDeploy      *remoteui.Deployment
-	webhooks          *webhooks.Service
-	webhookDispatcher webhooks.TriggerDispatcher
-	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
+	cfg                *config.Config
+	agent              agent.Agent
+	store              store.StackStore
+	recipes            store.RecipeStore
+	git                *git.Runner
+	router             http.Handler
+	web                *web.Handler
+	authn              *auth.Authenticator
+	remoteCancel       context.CancelFunc
+	remoteDeploy       *remoteui.Deployment
+	targetRegistry     *targetregistry.Registry
+	targetJournalScope string
+	webhooks           *webhooks.Service
+	webhookDispatcher  webhooks.TriggerDispatcher
+	testRevealFactory  func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
 // New wires up all dependencies and returns a ready-to-run server.

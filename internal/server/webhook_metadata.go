@@ -18,9 +18,24 @@ func (s *Server) configureWebhookMetadata(ctx context.Context, svc *webhooks.Ser
 	if !ok {
 		return errors.New("webhook source observation requires an authoritative metadata store")
 	}
+	if e := s.configureWebhookTargets(ctx, svc); e != nil {
+		return e
+	}
 	if e := svc.ConfigureMetadataObservation(func(ctx context.Context, name string) (webhooks.MetadataObservation, error) {
 		if ctx.Err() != nil {
 			return webhooks.MetadataObservation{}, ctx.Err()
+		}
+		if name == s.targetJournalScope && s.targetJournalScope != "" {
+			if s.targetRegistry == nil {
+				return webhooks.MetadataObservation{}, webhooks.ErrInvalid
+			}
+			readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			head, e := s.targetRegistry.CommitHead(readCtx)
+			if e != nil {
+				return webhooks.MetadataObservation{}, webhooks.ErrInvalid
+			}
+			return webhooks.MetadataObservation{Exists: true, StackID: s.targetJournalScope, Head: head}, nil
 		}
 		st, exists, e := observed.ObserveMetadata(name)
 		if e != nil {
