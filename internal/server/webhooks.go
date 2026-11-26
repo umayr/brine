@@ -133,8 +133,8 @@ func (s *Server) prepareWebhooks(ctx context.Context) error {
 		s.webhookDispatcher = &webhookDispatcher{s: s}
 	}
 	s.configureWebhookProducers()
-	if s.agent != nil && s.agent.Engine() != nil && (&webhookDispatcher{s: s}).localTargetID() != "" {
-		if e = svc.ConfigureSampling(s.sampleLocalRuntime); e != nil {
+	if (s.agent != nil && s.agent.Engine() != nil && (&webhookDispatcher{s: s}).localTargetID() != "") || s.remoteReadLeases != nil {
+		if e = svc.ConfigureSampling(s.sampleRuntime); e != nil {
 			svc.Close()
 			return e
 		}

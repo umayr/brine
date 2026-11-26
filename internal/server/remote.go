@@ -35,6 +35,7 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 			return err
 		}
 	}
+	s.remoteReadLeases = provider
 	if observer == nil {
 		observer = remoteui.PinnedObserver{Config: transport}
 	}

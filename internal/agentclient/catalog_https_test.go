@@ -43,6 +43,13 @@ func TestHTTPSCatalogVerifiedSession(t *testing.T) {
 			reply(w, r, string(wire))
 			return
 		}
+		if r.URL.Path == "/v1/capabilities" {
+			if r.Method != http.MethodGet {
+				t.Error("capabilities used mutation method")
+			}
+			fmt.Fprint(w, `{"schema":"dill.agent.capabilities.v1","monitor":["session","capabilities","inventory"],"deployment_grants":[]}`)
+			return
+		}
 		calls.Add(1)
 		if r.Method != http.MethodGet || r.URL.Path != "/v1/snapshots/"+id {
 			t.Error("wrong request")
@@ -64,6 +71,13 @@ func TestHTTPSCatalogVerifiedSession(t *testing.T) {
 	epoch, err := c.Session(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, e := c.Capabilities(ctx, "wrong-epoch"); e == nil {
+		t.Fatal("capabilities accepted stale proof")
+	}
+	caps, e := c.Capabilities(ctx, epoch)
+	if e != nil || len(caps) != 3 {
+		t.Fatal("verified capability report unavailable", caps, e)
 	}
 	if _, err = c.Snapshot(ctx, "bad", id); err != ErrProtocol || calls.Load() != 0 {
 		t.Fatal("accepted invalid session")

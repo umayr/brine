@@ -2,12 +2,37 @@ package remoteui
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/umayr/brine/internal/remoteagent"
 	"github.com/umayr/brine/internal/targetregistry"
 )
+
+// ObservationSession exposes only the exact leased owner digest, never pins
+// or pairing credentials. Its read methods remain on the same verified session.
+type ObservationSession interface {
+	ReadSession
+	ObservationBinding() string
+	Capabilities(context.Context) ([]string, error)
+}
+type observationReadSession struct {
+	ReadSession
+	binding string
+}
+
+func (s observationReadSession) ObservationBinding() string { return s.binding }
+func (s observationReadSession) Capabilities(ctx context.Context) ([]string, error) {
+	c, ok := s.ReadSession.(interface {
+		Capabilities(context.Context) ([]string, error)
+	})
+	if !ok {
+		return nil, errors.New("capabilities unavailable")
+	}
+	return c.Capabilities(ctx)
+}
 
 type ownedReadSession interface {
 	ReadSession
@@ -63,5 +88,9 @@ func (p *RegistryLeaseProvider) Acquire(ctx context.Context, id string) (context
 		once.Do(func() { cancel(); closeErr = cleanupFailure(errors.Join(session.Close(), lease.Close())) })
 		return closeErr
 	}
-	return lifetime, session, release, nil
+	binding := ""
+	if record.HTTPSAddress != "" {
+		binding = fmt.Sprintf("%x", sha256.Sum256([]byte(record.HTTPSAddress+"\x00"+string(record.HTTPSPairing))))
+	}
+	return lifetime, observationReadSession{ReadSession: session, binding: binding}, release, nil
 }

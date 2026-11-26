@@ -21,7 +21,7 @@ type ObservationChange struct {
 }
 
 func validObservation(v Observation) bool {
-	return contains([]string{"reported", "unavailable", "not_configured", "empty"}, v.Availability) && ((v.Availability == "reported" && v.Value != nil && len(*v.Value) <= 128) || (v.Availability != "reported" && v.Value == nil))
+	return contains([]string{"reported", "unavailable", "not_configured", "empty"}, v.Availability) && ((v.Availability == "reported" && v.Value != nil && len(*v.Value) <= 1024) || (v.Availability != "reported" && v.Value == nil))
 }
 
 // Observe atomically advances a baseline and journals its transition. First

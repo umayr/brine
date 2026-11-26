@@ -38,6 +38,8 @@ type Server struct {
 	remoteCancel       context.CancelFunc
 	remoteDeploy       *remoteui.Deployment
 	targetRegistry     *targetregistry.Registry
+	remoteReadLeases   remoteui.ReadLeaseProvider
+	remoteSampleOffset int
 	targetJournalScope string
 	webhooks           *webhooks.Service
 	webhookDispatcher  webhooks.TriggerDispatcher
