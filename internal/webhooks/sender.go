@@ -50,6 +50,12 @@ func (s *Service) Run(ctx context.Context) error {
 			}
 			lastPrune = s.now()
 		}
+		if e := s.reconcileOperations(ctx); e != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return e
+		}
 		sent, e := s.sendOne(ctx)
 		if e != nil {
 			if ctx.Err() != nil {

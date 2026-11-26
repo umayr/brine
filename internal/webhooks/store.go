@@ -153,7 +153,7 @@ func Open(cfg Config) (*Service, error) {
 	crypt, _ := cipher.NewGCM(block)
 	cfg.EncryptionKey = nil // Do not retain an additional cleartext copy.
 	s := &Service{db: db, lock: lock, crypt: crypt, client: client, cfg: cfg, now: func() time.Time { return time.Now().UTC() }, incomingAdmission: make(chan struct{}, 1)}
-	if _, e = db.Exec(schema + triggerSchema); e != nil {
+	if _, e = db.Exec(schema + triggerSchema + operationSchema); e != nil {
 		s.Close()
 		return nil, errStorage
 	}
@@ -161,7 +161,7 @@ func Open(cfg Config) (*Service, error) {
 	e = db.QueryRow("SELECT value FROM metadata WHERE key='key-check'").Scan(&verifier)
 	if errors.Is(e, sql.ErrNoRows) {
 		var populated int
-		if db.QueryRow("SELECT (SELECT COUNT(*) FROM endpoints)+(SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM triggers)+(SELECT COUNT(*) FROM incoming_requests)").Scan(&populated) != nil || populated != 0 {
+		if db.QueryRow("SELECT (SELECT COUNT(*) FROM endpoints)+(SELECT COUNT(*) FROM events)+(SELECT COUNT(*) FROM triggers)+(SELECT COUNT(*) FROM incoming_requests)+(SELECT COUNT(*) FROM lifecycle_records)").Scan(&populated) != nil || populated != 0 {
 			s.Close()
 			return nil, errStorage
 		}
@@ -184,6 +184,10 @@ func Open(cfg Config) (*Service, error) {
 	if e = s.recoverClaims(context.Background()); e != nil {
 		s.Close()
 		return nil, errStorage
+	}
+	if e = s.recoverOperations(context.Background()); e != nil {
+		s.Close()
+		return nil, e
 	}
 	if e = s.recoverIncoming(context.Background()); e != nil {
 		s.Close()
@@ -297,6 +301,9 @@ func (s *Service) prune(ctx context.Context) error {
 	}
 	// Dedupe is guaranteed for the configured journal retention window.
 	if _, e = tx.ExecContext(ctx, "DELETE FROM events WHERE created<? AND NOT EXISTS(SELECT 1 FROM deliveries WHERE event_id=events.id)", cutoff); e != nil {
+		return errStorage
+	}
+	if _, e = tx.ExecContext(ctx, "DELETE FROM lifecycle_records WHERE terminal_sent=1 AND updated<?", cutoff); e != nil {
 		return errStorage
 	}
 	if _, e = tx.ExecContext(ctx, "DELETE FROM incoming_requests WHERE updated<? AND status NOT IN ('accepted','running','unknown','awaiting_review')", cutoff); e != nil {

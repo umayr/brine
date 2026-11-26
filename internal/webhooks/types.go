@@ -33,6 +33,7 @@ type Event struct {
 	Target        Resource  `json:"target"`
 	Action        string    `json:"action,omitempty"`
 	Outcome       string    `json:"outcome,omitempty"`
+	Effects       string    `json:"effects,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
 }
 

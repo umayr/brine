@@ -195,7 +195,9 @@ func (h *Handler) hooksInventory(w http.ResponseWriter, r *http.Request) {
 	options := []WebhookOption{}
 	optionsAvailable := false
 	if provider, ok := h.webhookDispatcher.(WebhookOptions); ok {
-		options, e = provider.WebhookOptions(ctx)
+		optionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		options, e = provider.WebhookOptions(optionCtx)
+		cancel()
 		if e == nil {
 			optionsAvailable = true
 		} else {

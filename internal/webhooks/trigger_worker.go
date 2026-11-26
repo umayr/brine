@@ -39,6 +39,33 @@ func (s *Service) recoverIncoming(ctx context.Context) error {
 		return errStorage
 	}
 	for _, r := range out {
+		var terminalBytes []byte
+		e = tx.QueryRowContext(ctx, "SELECT terminal FROM lifecycle_records WHERE id=?", r.ID).Scan(&terminalBytes)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return errStorage
+		}
+		if len(terminalBytes) > 0 {
+			var terminal Event
+			if json.Unmarshal(terminalBytes, &terminal) != nil || !validEvent(terminal) || terminal.OperationID != r.ID {
+				return errStorage
+			}
+			r.OperationID = terminal.OperationID
+			r.Outcome = terminal.Outcome
+			r.Reason = terminal.Reason
+			switch terminal.Type {
+			case "operation.completed":
+				r.Status = "completed"
+			case "operation.rejected":
+				r.Status = "rejected"
+				if terminal.Reason == "interactive_review_required" {
+					r.Status = "awaiting_review"
+				}
+			case "operation.outcome_unknown":
+				r.Status = "unknown"
+			default:
+				return errStorage
+			}
+		}
 		if _, e = tx.ExecContext(ctx, "UPDATE incoming_requests SET record=?,status=?,updated=? WHERE id=?", marshal(r), r.Status, encodeTime(r.UpdatedAt), r.ID); e != nil {
 			return errStorage
 		}
@@ -183,6 +210,9 @@ func (s *Service) executeOne(ctx context.Context, d TriggerDispatcher) (bool, er
 	_, e = s.db.ExecContext(saveCtx, "UPDATE incoming_requests SET status=?,record=?,updated=? WHERE id=? AND status='running'", r.Status, marshal(r), encodeTime(r.UpdatedAt), r.ID)
 	if e != nil {
 		return true, errStorage
+	}
+	if r.Status == "rejected" {
+		_ = s.recordRejectedRequest(saveCtx, r, t)
 	}
 	return true, nil
 }
