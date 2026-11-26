@@ -1,6 +1,6 @@
 # Private snapshot history (standalone v1)
 
-`internal/snapshothistory` is a deliberately unmounted local archive primitive. It
+The provider snapshot primitive described below is deliberately unmounted. It is **not** the [stack source archive](../../docs/source-history.md), which shares its private filesystem and encryption helpers but uses a separate identity, keys, object format and publication protocol. The provider primitive
 has **no** configuration, startup, route, sender, provider, approval, restore,
 retention-deletion, metrics, or Dill-engine integration. Calling it does not
 make a provider request or establish that one was admitted, rejected, completed,

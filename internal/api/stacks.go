@@ -22,6 +22,7 @@ import (
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/operationhistory"
 	"github.com/umayr/brine/internal/pkl"
+	"github.com/umayr/brine/internal/planstate"
 	"github.com/umayr/brine/internal/store"
 )
 
@@ -53,10 +54,11 @@ type stackResponse struct {
 
 // stackReadMetadata reports the effective entrypoint without changing stored metadata.
 func stackReadMetadata(stack *store.Stack) *store.Stack {
-	if stack == nil || stack.Entrypoint != "" {
+	if stack == nil || (stack.Entrypoint != "" && stack.SourceHistory == nil) {
 		return stack
 	}
 	metadata := *stack
+	metadata.SourceHistory = nil // private reachability information is browser-History-only
 	metadata.Entrypoint = stack.EffectiveEntrypoint()
 	return &metadata
 }
@@ -162,7 +164,7 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, stack)
+	writeJSON(w, http.StatusOK, stackReadMetadata(stack))
 }
 
 const maxStackActionOptionsBytes = 4096
@@ -265,6 +267,14 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 	if err != nil {
 		writeStackLookupError(w, name, err)
 		return
+	}
+	if observed := r.Header.Get(planstate.Header); action == "up" && observed != "" {
+		now, e := planstate.Tag(stack, h.agent.Dill())
+		if e != nil || now != observed {
+			w.Header().Set("X-Brine-Plan-Stale", "true")
+			writeError(w, http.StatusPreconditionFailed, "Inputs changed or unavailable. Plan again; deployment was not started.")
+			return
+		}
 	}
 	if checkEngine && !h.ensureRuntimeEngine(w, stack) {
 		return

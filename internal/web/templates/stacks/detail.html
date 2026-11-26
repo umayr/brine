@@ -14,15 +14,39 @@
 {{end}}
 {{end}}
 
+{{define "project-inspection"}}
+  <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
+    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="false" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
+    <div id="project-preview-content" class="space-y-3" hidden>
+      <p>Preview project file names and sizes. Ignored and hidden files may be included; file contents can contain secrets. This preview is not an atomic snapshot and does not transfer files or authorize deployment.</p>
+      <details class="text-sm text-muted">
+      <summary class="cursor-pointer">Preview scope and limits</summary>
+      <p>Local projects include Brine's meta.json; Git projects use the repository root. Git subfolder previews are unavailable.</p>
+      <p>Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the entire preview.</p>
+      <ul>
+        <li>Entries named .git are omitted. Symlinks and special files are rejected.</li>
+        <li>Ignored, untracked and hidden files are included; .gitignore is not honored. Files such as .env and keys may be included.</li>
+        <li>Regular files with hard links and files under mounted subdirectories are included; these are not detected or filtered.</li>
+        <li>Project root ancestors and other processes running as the same user must be trusted; this is not a filesystem sandbox.</li>
+        <li>Empty directories and file modes are not preserved.</li>
+        <li>Concurrent changes mean this is not an atomic snapshot; a later preview may differ.</li>
+        <li>Preview does not transfer files or authorize deployment; it does not confirm immutable snapshot bytes.</li>
+      </ul>
+      </details>
+      <button type="button" class="ui-button ui-button-outline ui-button-sm" hx-get="/web/stacks/{{.Stack.Name}}/project-preview" hx-target="#project-preview-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('project-preview-result').textContent = 'Project preview unavailable. Check project files, file types and size limits, then retry.'">Preview project files</button>
+      <div id="project-preview-result" aria-live="polite"></div>
+      {{if .StagingEnabled}}<div class="space-y-2"><p>Local transfer is opt-in and requires a separate review and confirmation. Remote/SSH staging is unsupported.</p><button type="button" class="ui-button ui-button-outline ui-button-sm" hx-post="/web/stacks/{{.Stack.Name}}/staging/prepare" hx-target="#staging-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('staging-result').textContent = event.detail.xhr.responseText">Prepare local transfer review</button><div id="staging-result" aria-live="polite"></div></div>{{end}}
+    </div>
+  </section>
+{{end}}
+
 {{define "content"}}
 <div class="space-y-4">
 
-  <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1><p>{{if .Stack.Git}}Git · {{.Stack.Git.Branch}}{{else}}Local source{{end}}</p></div></header>
-  <nav class="desk-object-nav" aria-label="Stack sections"><a href="#stack-containers-heading">Runtime</a>{{if not (and .Stack.Git .Stack.Git.ReadOnly)}}<a href="/stacks/{{.Stack.Name}}/edit">Source</a>{{else}}<a href="#git-source-panel">Source</a>{{end}}<a href="#plan-button">Plan and requests</a></nav>
-
-  <div class="desk-stack-actions">
+  <header class="index-heading"><div><span class="section-code">01 / STACK</span><h1>{{.Stack.Name}}</h1></div></header>
+  <div class="desk-stack-actions" role="group" aria-label="Stack actions">
     <!-- Primary action -->
-    <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action
+    <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action id="deploy-button"
       onclick="runAction('up', '{{.Stack.Name}}')"
       {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
@@ -67,18 +91,17 @@
         hx-target="#plan-result"
         hx-swap="innerHTML"
         hx-sync="this:replace"
-        hx-on::before-request="document.getElementById('plan-result').textContent = 'Generating plan…'"
-        hx-on::send-error="document.getElementById('plan-result').textContent = 'Plan unavailable. No current plan was returned.'"
-        hx-on::response-error="document.getElementById('plan-result').textContent = 'Plan unavailable. No current plan was returned.'"
+        hx-request='{"timeout":30000}'
         {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
         Plan
       </button>
       {{if .QualifiedOperations}}<button class="ui-button ui-button-ghost ui-button-sm" data-stack-action
-        hx-post="/web/stacks/{{.Stack.Name}}/validate" hx-target="#plan-result" hx-swap="innerHTML">Validate saved</button>{{end}}
+        hx-post="/web/stacks/{{.Stack.Name}}/validate" hx-target="#saved-validation" hx-swap="innerHTML">Validate saved</button>{{end}}
     </div>
 
+    <button type="button" class="ui-button ui-button-ghost ui-button-sm gap-1.5" data-stack-action data-open-history><i data-lucide="history" class="w-3.5 h-3.5" aria-hidden="true"></i>Restore</button>
     <!-- Danger zone -->
     <div class="desk-danger flex flex-wrap items-center gap-1.5">
       <div id="action-status" role="status" aria-live="polite" class="hidden ui-status ui-status-neutral ui-status-sm font-mono mr-1">idle</div>
@@ -100,7 +123,16 @@
   </div>
 
   <p id="stack-delete-result" role="status"></p>
+  {{if .QualifiedOperations}}<div id="saved-validation" role="status"></div>{{end}}
 
+  <dl class="ui-panel stack-overview" aria-label="Stack overview">
+    <div><dt class="field-label">Engine</dt><dd class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</dd></div>
+    <div><dt class="field-label">Source</dt><dd class="font-mono text-sm">{{if .Stack.Git}}Git{{else}}Workspace{{end}}</dd></div>
+    <div><dt class="field-label">Target</dt><dd class="font-mono text-sm" title="Configured transport; daemon identity is not verified">{{.Target.Location}}<span class="block text-xs text-muted">Configured only</span></dd></div>
+    <div><dt class="field-label">Entrypoint</dt><dd class="font-mono text-sm">{{.Stack.EffectiveEntrypoint}}</dd></div>
+    <div><dt class="field-label">Created</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.CreatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.CreatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
+    <div><dt class="field-label">Updated</dt><dd class="font-mono text-sm"><time data-relative datetime="{{.Stack.UpdatedAt.Format "2006-01-02T15:04:05Z07:00"}}">{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</time><span class="exact-time" hidden>{{.Stack.UpdatedAt.UTC.Format "2006-01-02 15:04:05 UTC"}}</span></dd></div>
+  </dl>
   {{if .EngineAlignment.HasWarning}}
   <div class="ui-notice ui-notice-warning rounded-panel shadow-sm items-start">
     <div>
@@ -110,102 +142,10 @@
   </div>
   {{end}}
 
-  <div class="ui-panel px-5 py-4 mb-4 text-sm" role="status">
-    <div>Configured target: <span class="font-mono">{{.Target.Engine}} · {{.Target.Socket}}</span> ({{.Target.Profile}})</div>
-    <div class="text-muted">{{.Target.Status}}.</div>
+  {{if eq .Target.Profile "alpha"}}<div class="ui-panel px-5 py-4 text-sm" role="status">
+    <div>Configured target: <span class="font-mono">{{.Target.Engine}} · {{.Target.Socket}}</span></div>
     {{if .QualifiedOperations}}<div>Qualified operation client configured, not yet qualified by a received receipt. Manual deploy/start/restart/stop/down use the operator-selected Dill contract without fallback. Plan and saved-source validation are read-only. Teardown, secrets, stdin validation, background pull/auto-deploy and direct container/image writes remain disabled.</div><p>Partial, unknown or interrupted operations require offline <code>dill coordination inspect</code> and independent resource inspection. Exact operation acknowledgement is operator-only; Brine never retries, deletes journals or acknowledges automatically.</p>{{else if eq .Target.Profile "alpha"}}<div>Alpha deploy/start/restart/plan/teardown, background deploy and direct container/image writes are disabled pending explicit qualified operation configuration. Pinned stack stop/down cleanup remains available.</div>{{end}}
-  </div>
-
-  <!-- Meta -->
-  <div class="stack-metadata ui-panel divide-x divide-line flex">
-    <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Runtime engine</div>
-      <div class="font-mono text-sm">{{.EngineAlignment.RuntimeEngine}}</div>
-    </div>
-    <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Pkl engine</div>
-      <div class="font-mono text-sm">{{if .EngineAlignment.DeclaredEngine}}{{.EngineAlignment.DeclaredEngine}}{{else}}not declared{{end}}</div>
-    </div>
-    <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Created</div>
-      <div class="font-mono text-sm">{{.Stack.CreatedAt.Format "2006-01-02 15:04"}}</div>
-    </div>
-    <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Last updated</div>
-      <div class="font-mono text-sm">{{.Stack.UpdatedAt.Format "2006-01-02 15:04"}}</div>
-    </div>
-    <div class="flex-1 px-5 py-4">
-      <div class="field-label mb-1">Entrypoint</div>
-      <div class="font-mono text-sm">{{.Stack.Entrypoint}}</div>
-    </div>
-  </div>
-
-  <!-- Plan result (populated on demand) -->
-  <div id="plan-result" role="status" aria-live="polite"></div>
-
-  <section id="project-preview" class="ui-panel p-5 space-y-3" aria-labelledby="project-preview-title">
-    <h2 id="project-preview-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="project-preview-content">Project snapshot preview (read-only) <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
-    <div id="project-preview-content" class="space-y-3">
-      <p>Preview project file names and sizes. Ignored and hidden files may be included; file contents can contain secrets. This preview is not an atomic snapshot and does not transfer files or authorize deployment.</p>
-      <details class="text-sm text-muted">
-      <summary class="cursor-pointer">Preview scope and limits</summary>
-      <p>Local projects include Brine's meta.json; Git projects use the repository root. Git subfolder previews are unavailable.</p>
-      <p>Limits: 1,000 files, 2,000 entries, 32 levels, 4 MiB per file and 16 MiB total. Exceeding a limit fails the entire preview.</p>
-      <ul>
-        <li>Entries named .git are omitted. Symlinks and special files are rejected.</li>
-        <li>Ignored, untracked and hidden files are included; .gitignore is not honored. Files such as .env and keys may be included.</li>
-        <li>Regular files with hard links and files under mounted subdirectories are included; these are not detected or filtered.</li>
-        <li>Project root ancestors and other processes running as the same user must be trusted; this is not a filesystem sandbox.</li>
-        <li>Empty directories and file modes are not preserved.</li>
-        <li>Concurrent changes mean this is not an atomic snapshot; a later preview may differ.</li>
-        <li>Preview does not transfer files or authorize deployment; it does not confirm immutable snapshot bytes.</li>
-      </ul>
-      </details>
-      <button type="button" class="ui-button ui-button-outline ui-button-sm" hx-get="/web/stacks/{{.Stack.Name}}/project-preview" hx-target="#project-preview-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('project-preview-result').textContent = 'Project preview unavailable. Check project files, file types and size limits, then retry.'">Preview project files</button>
-      <div id="project-preview-result" aria-live="polite"></div>
-      {{if .StagingEnabled}}<div class="space-y-2"><p>Local transfer is opt-in and requires a separate review and confirmation. Remote/SSH staging is unsupported.</p><button type="button" class="ui-button ui-button-outline ui-button-sm" hx-post="/web/stacks/{{.Stack.Name}}/staging/prepare" hx-target="#staging-result" hx-swap="innerHTML" hx-on::response-error="document.getElementById('staging-result').textContent = event.detail.xhr.responseText">Prepare local transfer review</button><div id="staging-result" aria-live="polite"></div></div>{{end}}
-    </div>
-  </section>
-
-  <section id="variables" class="ui-panel variables-panel" aria-labelledby="stack-variables-title">
-    <div class="variables-panel-header">
-      <div><h2 id="stack-variables-title" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="stack-variables-content">Variables <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2><p class="text-sm text-muted">Effective configuration for this stack. Stack values override shared values.</p></div>
-      <a href="/variables" class="ui-button ui-button-ghost ui-button-sm">Manage shared variables</a>
-    </div>
-    <div id="stack-variables-content">
-    {{if .Variables.Unavailable}}
-    <div class="variables-empty" role="alert">Variables could not be loaded. No empty configuration has been confirmed.</div>
-    {{else}}
-      {{if .Variables.Disabled}}<div class="ui-notice ui-notice-warning mx-5 mb-4" role="status"><span>Variables are unavailable for Alpha and strict secret operations; the saved values below are not supplied to those operations.</span></div>{{end}}
-      {{if .Variables.Error}}<div class="ui-notice ui-notice-error mx-5 mb-4" role="alert"><span>{{.Variables.Error}}</span></div>{{end}}
-      {{range .Variables.Rows}}
-        {{if .Local}}
-        <form method="post" action="/stacks/{{$.Stack.Name}}/variables" class="variables-row">
-          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
-          <div class="variables-name"><span class="field-label">{{if .HasShared}}Stack override{{else}}Stack variable{{end}}</span><code>BRINE_VAR_{{.Name}}</code>{{if .HasShared}}<span class="text-xs text-muted">Shared value: {{if .SharedValue}}{{.SharedValue}}{{else}}(empty){{end}}</span>{{end}}</div>
-          <label class="ui-field"><span class="field-label">Value</span><input class="ui-input ui-input-sm font-mono" aria-label="Value for {{.Name}}" name="value" value="{{.Value}}" {{if $.Variables.Disabled}}disabled{{end}}></label>
-          <div class="variables-actions"><button class="ui-button ui-button-outline ui-button-sm" name="action" value="save" {{if $.Variables.Disabled}}disabled{{end}}>Save</button><button class="ui-button ui-button-ghost ui-button-sm" name="action" value="delete" aria-label="Delete stack value for {{.Name}}" {{if .HasShared}}title="Delete this stack value and use the shared value"{{end}} {{if $.Variables.Disabled}}disabled{{end}}>Delete</button></div>
-        </form>
-        {{else}}
-        <div class="variables-row">
-          <div class="variables-name"><span class="field-label">Inherited from shared</span><code>BRINE_VAR_{{.Name}}</code></div>
-          <label class="ui-field" title="Inherited value is disabled. Edit the shared variable or add a stack override."><span class="field-label">Value</span><input class="ui-input ui-input-sm font-mono" aria-label="Inherited value for {{.Name}}" value="{{.Value}}" title="Inherited value is disabled. Edit the shared variable or add a stack override." disabled></label>
-          <div class="variables-actions"><span class="ui-status ui-status-neutral">Shared</span></div>
-        </div>
-        {{end}}
-      {{else}}<div class="variables-empty"><p>No variables for this stack yet.</p><p class="text-sm text-muted">Add a stack value below or create a shared variable.</p></div>{{end}}
-      <form method="post" action="/stacks/{{.Stack.Name}}/variables" class="variables-add-form">
-        <input type="hidden" name="_csrf" value="{{.CSRF}}">
-        <label class="ui-field"><span class="ui-label-text">Name</span><input class="ui-input font-mono" name="name" required pattern="[A-Z][A-Z0-9_]{0,63}" placeholder="APP_DOMAIN" {{if .Variables.Disabled}}disabled{{end}}><span class="ui-label-hint">Omit BRINE_VAR_; use a shared name to override it.</span></label>
-        <label class="ui-field"><span class="ui-label-text">Stack value</span><input class="ui-input font-mono" name="value" placeholder="example.test" {{if .Variables.Disabled}}disabled{{end}}></label>
-        <button class="ui-button ui-button-primary" name="action" value="save" {{if .Variables.Disabled}}disabled{{end}}>Add stack variable</button>
-      </form>
-      <div class="variables-panel-footer text-sm text-muted"><strong>Non-secret values only.</strong> Use <code>read("env:BRINE_VAR_APP_DOMAIN")</code> in Pkl. Changes apply on the next operation; re-plan before deploying. Values may appear in plans, logs and container inspection.</div>
-    {{end}}
-    </div>
-  </section>
-
-
+  </div>{{end}}
   <!-- Action output terminal -->
   <div id="action-output" data-qualified-operations="{{.QualifiedOperations}}" data-operation-history="{{.OperationHistory}}" class="hidden rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
     <div class="terminal-header flex items-center justify-between px-4 py-2">
@@ -218,32 +158,35 @@
     <div id="action-log" class="terminal h-64 overflow-y-auto whitespace-pre-wrap"></div>
   </div>
 
-  <!-- Containers in this stack -->
-  <div class="ui-panel">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
-      <h2 id="stack-containers-heading" class="font-semibold"><button type="button" class="stack-panel-toggle" data-panel-toggle aria-expanded="true" aria-controls="stack-containers-panel">Containers <i data-lucide="chevron-down" class="w-4 h-4" aria-hidden="true"></i></button></h2>
-      <button
-        hx-get="/web/stacks/{{.Stack.Name}}/containers"
-        hx-target="#stack-containers"
-        hx-swap="innerHTML"
-        class="ui-button ui-button-ghost ui-button-xs gap-1.5"
-        id="stack-containers-refresh"
-      >
-        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
-        Refresh
-      </button>
-    </div>
-    <div id="stack-containers-panel">
-    <div id="stack-containers"
-      hx-get="/web/stacks/{{.Stack.Name}}/containers"
-      hx-trigger="load, every 5s"
-      hx-swap="innerHTML"
-    >
-      <div class="px-5 py-6 text-center text-dim">
-        <span class="ui-spinner ui-spinner-sm"></span>
+  <div class="stack-tabs" role="tablist" aria-label="Stack sections" data-stack="{{.Stack.Name}}"{{if .Variables.Error}} data-initial-tab="variables"{{end}}>
+    <button type="button" id="tab-Compose" role="tab" aria-controls="panel-Compose" aria-selected="true" tabindex="0" data-stack-tab="Compose">Compose</button>
+    <button type="button" id="tab-Containers" role="tab" aria-controls="panel-Containers" aria-selected="false" tabindex="-1" data-stack-tab="Containers">Containers</button>
+    <button type="button" id="tab-Variables" role="tab" aria-controls="panel-Variables" aria-selected="false" tabindex="-1" data-stack-tab="Variables">Variables</button>
+    <button type="button" id="tab-History" role="tab" aria-controls="panel-History" aria-selected="false" tabindex="-1" data-stack-tab="History">History</button>
+    <button type="button" id="tab-Plan" role="tab" aria-controls="panel-Plan" aria-selected="false" tabindex="-1" data-stack-tab="Plan" hidden>Plan</button>
+  </div>
+  <section id="panel-Compose" role="tabpanel" aria-labelledby="tab-Compose" tabindex="0" class="space-y-4">
+  <!-- PKL source -->
+  <div class="rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
+    <div class="terminal-header flex items-center justify-between px-2 py-1.5">
+      <div class="flex items-center gap-0.5 overflow-x-auto">
+        {{range .Files}}
+        <button type="button"
+          class="pk-tab px-3 py-1 text-xs font-mono rounded transition-colors whitespace-nowrap"
+          data-file="{{.}}"
+          onclick="pkSwitchTab(this)"
+        >{{if eq . $.Stack.Entrypoint}}<span class="w-1.5 h-1.5 rounded-full bg-accent/70 inline-block mr-1 mb-0.5"></span>{{end}}{{.}}</button>
+        {{end}}
       </div>
+      {{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
+      <a href="/stacks/{{.Stack.Name}}/edit" class="shrink-0 text-xs text-muted hover:text-muted transition-colors flex items-center gap-1 ml-2">
+        <i data-lucide="pencil" class="w-3 h-3"></i> edit
+      </a>
+      {{end}}
     </div>
-    </div>
+    {{range .Files}}
+    <pre class="pk-panel terminal p-4 overflow-x-auto language-pkl {{if ne . $.ActiveFile}}hidden{{end}}" data-file="{{.}}" style="min-height: var(--space-16);"><code class="language-pkl">{{index $.FileContents .}}</code></pre>
+    {{end}}
   </div>
 
   <!-- Git source panel (shown only for git-backed stacks) -->
@@ -392,30 +335,86 @@
     </div>
   </div>
   {{end}}
-
-  <!-- PKL source -->
-  <div class="rounded-panel overflow-hidden shadow-sm" style="border: var(--border-width) solid var(--editor-border);">
-    <div class="terminal-header flex items-center justify-between px-2 py-1.5">
-      <div class="flex items-center gap-0.5 overflow-x-auto">
-        {{range .Files}}
-        <button type="button"
-          class="pk-tab px-3 py-1 text-xs font-mono rounded transition-colors whitespace-nowrap"
-          data-file="{{.}}"
-          onclick="pkSwitchTab(this)"
-        >{{if eq . $.Stack.Entrypoint}}<span class="w-1.5 h-1.5 rounded-full bg-accent/70 inline-block mr-1 mb-0.5"></span>{{end}}{{.}}</button>
-        {{end}}
-      </div>
-      {{if not (and .Stack.Git .Stack.Git.ReadOnly)}}
-      <a href="/stacks/{{.Stack.Name}}/edit" class="shrink-0 text-xs text-muted hover:text-muted transition-colors flex items-center gap-1 ml-2">
-        <i data-lucide="pencil" class="w-3 h-3"></i> edit
-      </a>
-      {{end}}
+  {{if .Stack.RemoteGit}}<p class="text-sm text-muted">Remote Git policy: {{.Stack.RemoteGit.Host}}. This does not select an execution target.</p>{{end}}
+  {{template "project-inspection" .}}
+  </section>
+  <section id="panel-Containers" role="tabpanel" aria-labelledby="tab-Containers" tabindex="0" class="space-y-4" hidden>
+  <!-- Containers in this stack -->
+  <div class="ui-panel">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-line">
+      <h2 id="stack-containers-heading" class="font-semibold">Containers</h2>
+      <button
+        hx-get="/web/stacks/{{.Stack.Name}}/containers"
+        hx-target="#stack-containers"
+        hx-swap="innerHTML"
+        class="ui-button ui-button-ghost ui-button-xs gap-1.5"
+        id="stack-containers-refresh"
+      >
+        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+        Refresh
+      </button>
     </div>
-    {{range .Files}}
-    <pre class="pk-panel terminal p-4 overflow-x-auto language-pkl {{if ne . $.ActiveFile}}hidden{{end}}" data-file="{{.}}" style="min-height: var(--space-16);"><code class="language-pkl">{{index $.FileContents .}}</code></pre>
-    {{end}}
+    <div id="stack-containers-panel">
+    <div id="stack-containers"
+      hx-get="/web/stacks/{{.Stack.Name}}/containers"
+      hx-trigger="stack-inventory" hx-request='{"timeout":10000}'
+      hx-swap="innerHTML"
+    >
+      <div role="status" class="stack-loading"><span class="ui-spinner" aria-hidden="true"></span>Loading containers…</div>
+    </div>
+    </div>
   </div>
-
+  </section>
+  <section id="panel-Variables" role="tabpanel" aria-labelledby="tab-Variables" tabindex="0" class="space-y-4" hidden>
+  <section id="variables" class="ui-panel variables-panel" aria-labelledby="stack-variables-title">
+    <div class="variables-panel-header">
+      <div><h2 id="stack-variables-title" class="font-semibold">Variables</h2><p class="text-sm text-muted">Effective configuration for this stack. Stack values override shared values.</p></div>
+      <a href="/variables" class="ui-button ui-button-ghost ui-button-sm">Manage shared variables</a>
+    </div>
+    <div id="stack-variables-content">
+    {{if .Variables.Unavailable}}
+    <div class="variables-empty" role="alert">Variables could not be loaded. No empty configuration has been confirmed.</div>
+    {{else}}
+      {{if .Variables.Disabled}}<div class="ui-notice ui-notice-warning mx-5 mb-4" role="status"><span>Variables are unavailable for Alpha and strict secret operations; the saved values below are not supplied to those operations.</span></div>{{end}}
+      {{if .Variables.Error}}<div class="ui-notice ui-notice-error mx-5 mb-4" role="alert"><span>{{.Variables.Error}}</span></div>{{end}}
+      {{range .Variables.Rows}}
+        {{if .Local}}
+        <form method="post" action="/stacks/{{$.Stack.Name}}/variables" class="variables-row">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="name" value="{{.Name}}">
+          <div class="variables-name"><span class="field-label">{{if .HasShared}}Stack override{{else}}Stack variable{{end}}</span><code>BRINE_VAR_{{.Name}}</code>{{if .HasShared}}<span class="text-xs text-muted">Shared value: {{if .SharedValue}}{{.SharedValue}}{{else}}(empty){{end}}</span>{{end}}</div>
+          <label class="ui-field"><span class="field-label">Value</span><input class="ui-input ui-input-sm font-mono" aria-label="Value for {{.Name}}" name="value" value="{{.Value}}" {{if $.Variables.Disabled}}disabled{{end}}></label>
+          <div class="variables-actions"><button class="ui-button ui-button-outline ui-button-sm" name="action" value="save" {{if $.Variables.Disabled}}disabled{{end}}>Save</button><button class="ui-button ui-button-ghost ui-button-sm" name="action" value="delete" aria-label="Delete stack value for {{.Name}}" {{if .HasShared}}title="Delete this stack value and use the shared value"{{end}} {{if $.Variables.Disabled}}disabled{{end}}>Delete</button></div>
+        </form>
+        {{else}}
+        <div class="variables-row">
+          <div class="variables-name"><span class="field-label">Inherited from shared</span><code>BRINE_VAR_{{.Name}}</code></div>
+          <label class="ui-field" title="Inherited value is disabled. Edit the shared variable or add a stack override."><span class="field-label">Value</span><input class="ui-input ui-input-sm font-mono" aria-label="Inherited value for {{.Name}}" value="{{.Value}}" title="Inherited value is disabled. Edit the shared variable or add a stack override." disabled></label>
+          <div class="variables-actions"><span class="ui-status ui-status-neutral">Shared</span></div>
+        </div>
+        {{end}}
+      {{else}}<div class="variables-empty"><p>No variables for this stack yet.</p><p class="text-sm text-muted">Add a stack value below or create a shared variable.</p></div>{{end}}
+      <form method="post" action="/stacks/{{.Stack.Name}}/variables" class="variables-add-form">
+        <input type="hidden" name="_csrf" value="{{.CSRF}}">
+        <label class="ui-field"><span class="ui-label-text">Name</span><input class="ui-input font-mono" name="name" required pattern="[A-Z][A-Z0-9_]{0,63}" placeholder="APP_DOMAIN" {{if .Variables.Disabled}}disabled{{end}}><span class="ui-label-hint">Omit BRINE_VAR_; use a shared name to override it.</span></label>
+        <label class="ui-field"><span class="ui-label-text">Stack value</span><input class="ui-input font-mono" name="value" placeholder="example.test" {{if .Variables.Disabled}}disabled{{end}}></label>
+        <button class="ui-button ui-button-primary" name="action" value="save" {{if .Variables.Disabled}}disabled{{end}}>Add stack variable</button>
+      </form>
+      <div class="variables-panel-footer text-sm text-muted"><strong>Non-secret values only.</strong> Use <code>read("env:BRINE_VAR_APP_DOMAIN")</code> in Pkl. Changes apply on the next operation; re-plan before deploying. Values may appear in plans, logs and container inspection.</div>
+    {{end}}
+    </div>
+  </section>
+  </section>
+  <section id="panel-History" role="tabpanel" aria-labelledby="tab-History" tabindex="0" class="space-y-4" hidden>
+    <div id="stack-history-content" hx-get="/web/stacks/{{.Stack.Name}}/history" hx-trigger="load-history" hx-swap="innerHTML" hx-sync="this:drop" hx-history="false" hx-request='{"timeout":15000}'>
+      <div class="stack-loading" role="status"><span class="ui-spinner" aria-hidden="true"></span>Loading history…</div>
+    </div>
+  </section>
+  <section id="panel-Plan" role="tabpanel" aria-labelledby="tab-Plan" tabindex="0" class="space-y-4" hidden>
+    <div id="plan-tools" class="flex items-center justify-between"><span class="field-label">Plan review</span><button type="button" id="dismiss-plan" class="ui-button ui-button-ghost ui-button-xs">Close plan</button></div>
+    <p id="plan-stale" class="ui-notice ui-notice-warning" role="status" hidden>Inputs changed. Run Plan again before deploying.</p>
+    <div id="plan-result" role="status" aria-live="polite"></div>
+  <a class="ui-button ui-button-ghost ui-button-sm" href="?tab=compose#project-preview" data-open-project-preview>Inspect project files in Compose</a>
+  </section>
   <script>
   // Panels start expanded; collapsing is presentation-only and never cancels
   // an operation or prevents updates inside the panel.
@@ -467,6 +466,8 @@
   <form method="dialog" class="ui-dialog-backdrop"><button tabindex="-1" aria-label="Close dialog">close</button></form>
 </dialog>
 
+<script src="/static/live-updates.js" defer></script>
+<script src="/static/stack-workspace.js" defer></script>
 <script>
 function reportGitSettingsUnconfirmed() {
   document.getElementById('git-settings-result').textContent = 'Git settings save could not be confirmed. Check the saved settings in another tab before retrying.';
@@ -476,9 +477,9 @@ async function deleteStack(name, removeContainers) {
   const button = document.getElementById('stack-delete-button');
   if (button.disabled) return;
   const result = document.getElementById('stack-delete-result');
-  const enabled = document.querySelectorAll('[data-stack-action]:enabled');
   const restoreFocus = document.activeElement === button;
-  enabled.forEach(control => { control.disabled = true; });
+  const release = holdStackActions();
+  if (!release) return;
   result.textContent = 'Deleting stack…';
   let deleted = false;
   try {
@@ -497,7 +498,7 @@ async function deleteStack(name, removeContainers) {
   } finally {
     if (!deleted) {
       result.textContent = 'Delete could not be confirmed. Check stack inventory and inspect containers before retrying.';
-      enabled.forEach(control => { control.disabled = false; });
+      release();
       if (restoreFocus && document.activeElement === document.body) button.focus();
     }
   }
@@ -526,8 +527,12 @@ async function runAction(action, name, method, body, contentType) {
   const log = document.getElementById('action-log');
   const title = document.getElementById('action-title');
   const status = document.getElementById('action-status');
-  const buttons = document.querySelectorAll('[data-stack-action]');
   const started = Date.now();
+  const deploy = document.getElementById('deploy-button');
+  if (action === 'up' && (deploy.disabled || deploy.dataset.needsPlan === 'true')) return;
+  const release = holdStackActions();
+  if (!release) return;
+  const observed = action === 'up' ? deploy.dataset.planInputs : '';
   const lifecycle = ['up', 'down', 'stop', 'start', 'restart', 'teardown'].includes(action);
   const qualified = output.dataset?.qualifiedOperations === 'true' && lifecycle;
   const gitPush = action === 'git/push';
@@ -552,13 +557,10 @@ async function runAction(action, name, method, body, contentType) {
     status.className = 'ui-status ui-status-success ui-status-sm font-mono mr-1';
     showToast(`${action} complete`, 'success');
     const refresh = document.getElementById('stack-containers-refresh');
-    if (refresh) htmx.trigger(refresh, 'click');
-    if (action === 'teardown') {
-      htmx.trigger(document.getElementById('stack-containers'), 'refresh');
-    }
+    if (refresh && !document.getElementById('panel-Containers').hidden) htmx.trigger(refresh, 'click');
   }
 
-  if (lifecycle) {
+  if (lifecycle || gitPush) {
     // Lifecycle actions can invalidate a plan even if they fail partway through.
     // Cancel any in-flight plan so its response cannot restore stale results.
     htmx.trigger(document.getElementById('plan-button'), 'htmx:abort');
@@ -571,14 +573,18 @@ async function runAction(action, name, method, body, contentType) {
   status.textContent = 'running';
   status.className = 'ui-status ui-status-running ui-status-sm font-mono mr-1';
   status.classList.remove('hidden');
-  buttons.forEach(btn => { btn.dataset.initiallyDisabled = String(btn.disabled); btn.disabled = true; });
 
   try {
     const res = await fetch(`/api/stacks/${name}/${action}`, {
       method: method || 'POST',
       body: body,
-      headers: brineHeaders(contentType ? {'Content-Type': contentType} : {}),
+      headers: brineHeaders({...(contentType ? {'Content-Type': contentType} : {}), ...(observed ? {'X-Brine-Plan-Inputs': observed} : {})}),
     });
+    if (observed && res.status === 412 && res.headers.get('X-Brine-Plan-Stale') === 'true') {
+      log.textContent = 'Inputs changed. No deployment was started. Run Plan again.';
+      title.textContent = 'Plan out of date'; status.textContent = 'not started'; status.className = 'ui-status ui-status-warning';
+      document.dispatchEvent(new CustomEvent('brine:stale-plan')); return;
+    }
     const requestID = qualified ? (res.headers.get('X-Brine-Request-ID') || '') : '';
     if (qualified && /^br_[a-f0-9]{32}$/.test(requestID)) BrineUI.operationLookup(document, output.parentNode, requestID);
     if (!res.ok) {
@@ -612,7 +618,7 @@ async function runAction(action, name, method, body, contentType) {
       showToast(`${action} ${result}`, complete ? 'success' : 'error');
       if (complete) {
         const refresh = document.getElementById('stack-containers-refresh');
-        if (refresh) htmx.trigger(refresh, 'click');
+        if (refresh && !document.getElementById('panel-Containers').hidden) htmx.trigger(refresh, 'click');
       }
     } else if ((lifecycle || gitPush) && !stream.status.error && !stream.status.done) {
       showUnknownAction();
@@ -648,8 +654,23 @@ async function runAction(action, name, method, body, contentType) {
     }
   } finally {
     if (action === 'git/push') htmx.trigger(document.body, 'git-refresh');
-    buttons.forEach(btn => btn.disabled = btn.dataset.initiallyDisabled === 'true');
+    release();
   }
+}
+
+// In-flight actions, plan staleness and server-rendered policy are independent.
+function holdStackActions() {
+  const deploy = document.getElementById('deploy-button');
+  if (deploy.dataset.actionBusy === 'true') return null;
+  const policyDisabled = deploy.dataset.policyDisabled === undefined ? deploy.disabled : deploy.dataset.policyDisabled === 'true';
+  const controls = Array.from(document.querySelectorAll('[data-stack-action]'), btn => [btn, btn.disabled]);
+  deploy.dataset.actionBusy = 'true';
+  controls.forEach(([btn]) => { btn.disabled = true; });
+  return () => {
+    delete deploy.dataset.actionBusy;
+    controls.forEach(([btn, disabled]) => { btn.disabled = disabled; });
+    deploy.disabled = policyDisabled || deploy.dataset.needsPlan === 'true';
+  };
 }
 
 function actionLabel(action) {

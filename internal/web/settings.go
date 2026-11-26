@@ -7,3 +7,7 @@ import "net/http"
 func (h *Handler) settingsAppearance(w http.ResponseWriter, r *http.Request) {
 	h.render(w, r, "settings/appearance.html", &pageData{Page: "settings"})
 }
+
+func (h *Handler) settingsLiveUpdates(w http.ResponseWriter, r *http.Request) {
+	h.render(w, r, "settings/live-updates.html", &pageData{Page: "settings"})
+}

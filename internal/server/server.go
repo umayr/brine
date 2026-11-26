@@ -18,6 +18,7 @@ import (
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/remoteui"
+	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 	"github.com/umayr/brine/internal/web"
@@ -83,6 +84,16 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 	}()
 	if err := s.cfg.Validate(); err != nil {
 		return err
+	}
+	if s.cfg.SourceHistoryDir != "" {
+		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir)
+		if err != nil {
+			return fmt.Errorf("open source history: %w", err)
+		}
+		defer archive.Close()
+		if err = s.web.EnableSourceHistory(archive); err != nil {
+			return err
+		}
 	}
 	if s.cfg.RemoteEnabled {
 		if err := s.prepareRemote(nil, nil); err != nil {

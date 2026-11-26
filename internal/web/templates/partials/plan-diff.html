@@ -27,7 +27,7 @@
         {{if .Summary.Noop}}<span class="ui-status ui-status-neutral ui-status-sm">{{.Summary.Noop}} unchanged</span>{{end}}
       </div>
     </div>
-    <button onclick="this.closest('.bg-panel').remove()" class="ui-button ui-button-ghost ui-button-xs">
+    <button type="button" aria-label="Close plan" onclick="this.closest('.bg-panel').remove()" class="ui-button ui-button-ghost ui-button-xs">
       <i data-lucide="x" class="w-3.5 h-3.5"></i>
     </button>
   </div>
@@ -116,7 +116,7 @@
 <div class="bg-panel rounded-panel shadow-sm px-5 py-4 flex items-center gap-2">
   <i data-lucide="check-circle" class="w-4 h-4 text-success"></i>
   <span class="text-sm">No changes — stack is up to date</span>
-  <button onclick="this.closest('.bg-panel').remove()" class="ui-button ui-button-ghost ui-button-xs ml-auto">
+  <button type="button" aria-label="Close plan" onclick="this.closest('.bg-panel').remove()" class="ui-button ui-button-ghost ui-button-xs ml-auto">
     <i data-lucide="x" class="w-3.5 h-3.5"></i>
   </button>
 </div>

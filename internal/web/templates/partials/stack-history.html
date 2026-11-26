@@ -1,0 +1,35 @@
+<div id="stack-source-history" class="source-history space-y-4" hx-history="false">
+{{if .Review}}
+<section class="ui-panel p-5 space-y-4" aria-labelledby="source-review-heading">
+  <h2 id="source-review-heading" class="font-semibold" tabindex="-1">{{if eq .Review "restore"}}Review source restore · r{{.From}}{{else}}Review source checkpoint{{end}}</h2>
+  <p>{{if eq .Review "restore"}}Compare the current source for <strong>{{.Stack}}</strong> with the retained files. Confirmation writes a new revision and preserves the current one.{{else}}Retain these project files from <strong>{{.Stack}}</strong> in the private, encrypted archive. Only confirm if their contents may be retained, including any credentials written directly into source.{{end}}</p>
+  <p class="text-sm text-muted">No deployment or Git push. Containers, volumes, databases, secret stores and configuration variables are outside this operation.</p>
+  <p class="text-sm">Entrypoint: <code>{{.EntryBefore}}</code>{{if ne .EntryBefore .EntryAfter}} → <code>{{.EntryAfter}}</code>{{end}}</p>
+  <ul class="source-file-list">{{range .Files}}<li><code>{{.Path}}</code> · {{if eq $.Review "retain"}}{{.AfterBytes}} bytes{{else}}{{.Change}} · {{.BeforeBytes}} → {{.AfterBytes}} bytes{{end}}
+    {{if .Compare}}<details><summary>Source excerpt</summary><div class="source-excerpts"><div><b>Current</b><pre>{{.Before}}</pre></div><div><b>Retained</b><pre>{{.After}}</pre></div></div></details>{{end}}</li>{{end}}</ul>
+  {{if .Message}}<p role="status">{{.Message}}</p>{{end}}
+  {{if and (eq .Review "restore") .Confirm (not .Compare)}}<form method="post" action="/web/stacks/{{.Stack}}/history/review" hx-post="/web/stacks/{{.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="kind" value="restore"><input type="hidden" name="revision" value="{{.ID}}"><input type="hidden" name="compare" value="yes">
+    <button type="submit" class="ui-button ui-button-outline ui-button-sm">Compare file contents</button> <span class="text-xs text-muted">May reveal sensitive source. Up to eight changed files; 2 KiB per excerpt.</span>
+  </form>{{end}}
+  <div class="flex flex-wrap gap-2 items-center">{{if .Confirm}}<form method="post" action="/web/stacks/{{.Stack}}/history/confirm" hx-post="/web/stacks/{{.Stack}}/history/confirm" hx-target="#stack-source-history" hx-swap="outerHTML" hx-sync="#stack-history-content:drop">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="kind" value="{{.Review}}"><input type="hidden" name="revision" value="{{.ID}}"><input type="hidden" name="review" value="{{.Proof}}">
+    <button type="submit" class="ui-button ui-button-primary ui-button-sm">{{if eq .Review "restore"}}Restore as new revision{{else}}Retain source revision{{end}}</button></form>{{end}}
+    <a class="ui-button ui-button-ghost ui-button-sm" href="/stacks/{{.Stack}}?tab=history">Back to history</a>
+  </div>
+</section>
+{{else}}
+<section class="ui-panel p-5 space-y-3" aria-labelledby="source-history-heading">
+  <div class="flex flex-wrap items-center justify-between gap-2"><h2 id="source-history-heading" class="font-semibold">Source revisions</h2>
+    {{if .Enabled}}<form method="post" action="/web/stacks/{{.Stack}}/history/review" hx-post="/web/stacks/{{.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="kind" value="retain"><button class="ui-button ui-button-outline ui-button-sm" type="submit">Review checkpoint</button></form>{{end}}</div>
+  {{if .Message}}<p class="text-sm" role="status">{{.Message}}</p>{{end}}
+  {{if .Enabled}}{{if not .Rows}}<p>No retained source revisions yet. Review a checkpoint to retain this stack’s current files.</p>{{else}}
+  <ol class="source-file-list">{{range .Rows}}<li class="flex flex-wrap items-center justify-between gap-2"><div><strong>r{{.Number}}{{if .From}} ← r{{.From}}{{end}}</strong> · {{if .From}}Source restored{{else}}Checkpoint retained{{end}}<p class="text-xs text-muted">{{.Actor}} · {{.When}} · {{.Count}} file(s)</p></div>
+  <form method="post" action="/web/stacks/{{$.Stack}}/history/review" hx-post="/web/stacks/{{$.Stack}}/history/review" hx-target="#stack-source-history" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="kind" value="restore"><input type="hidden" name="revision" value="{{.ID}}"><button class="ui-button ui-button-outline ui-button-sm" type="submit" aria-label="Review restore from r{{.Number}}">Review restore</button></form></li>{{end}}</ol>
+  <nav aria-label="Revision history pages" class="flex flex-wrap gap-2">{{if .Prev}}<button type="button" class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/stacks/{{.Stack}}/history?page={{.Prev}}" hx-target="#stack-source-history" hx-swap="outerHTML">Newer revisions</button>{{end}}{{if .Next}}<button type="button" class="ui-button ui-button-ghost ui-button-sm" hx-get="/web/stacks/{{.Stack}}/history?page={{.Next}}" hx-target="#stack-source-history" hx-swap="outerHTML">Older revisions</button>{{end}}</nav>
+  {{end}}{{end}}
+</section>
+{{if .CSRF}}<section class="ui-panel p-5 space-y-3" aria-labelledby="request-history-heading"><h2 id="request-history-heading" class="font-semibold">Remote request evidence</h2>
+  {{if .RequestError}}<p role="status">Request history is unavailable. No outcome can be inferred.</p>{{else if .Requests}}<ul class="source-file-list">{{range .Requests}}<li><strong>{{.Mode}}</strong> · {{.Host}} · <code>{{.ID}}</code><p class="text-sm">{{if .Resolved}}Reconciled; consult the original record for its outcome.{{else}}Unresolved. Inspect the original request; do not replay it.{{end}} {{if .StatusURL}}<a href="{{.StatusURL}}">Open original status</a>{{end}}</p></li>{{end}}</ul>{{else}}<p>No retained remote request records for this stack.</p>{{end}}
+  <p class="text-xs text-muted">A request record is not current health or a copy of project files. Local lifecycle output is not a durable deployment timeline.</p></section>{{end}}
+{{end}}</div>

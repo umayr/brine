@@ -74,7 +74,7 @@ func entrypointOrDefault(ep string) string {
 }
 
 func (s *FSStore) readMeta(name string) (*Stack, error) {
-	if err := ValidateStackName(name); err != nil {
+	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
 	fd, err := s.stackFD(name)
@@ -103,6 +103,9 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 		if err := validateFolder(stack.Git.Folder); err != nil {
 			return nil, fmt.Errorf("stack %q metadata: %w", name, err)
 		}
+	}
+	if !stack.SourceHistory.valid() {
+		return nil, ErrSourceUnavailable
 	}
 	if !stack.RemoteGit.valid() {
 		return nil, ErrRemoteGit
@@ -169,7 +172,7 @@ func (s *FSStore) Get(name string) (*Stack, error) {
 func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ValidateStackName(name); err != nil {
+	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
 	dir := s.stackDir(name)
@@ -389,7 +392,11 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 		return err
 	}
 	f.Close()
-	return unix.Unlinkat(fd, filename, 0)
+	if err := unix.Unlinkat(fd, filename, 0); err != nil {
+		return err
+	}
+	stack.UpdatedAt = time.Now()
+	return s.writeMeta(stack)
 }
 
 // SetEntrypoint changes the entrypoint file for a stack.
@@ -434,7 +441,7 @@ func (s *FSStore) SetEntrypoint(name, filename string) error {
 func (s *FSStore) CreateFromGit(name string, src *GitSource, entrypoint string) (*Stack, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ValidateStackName(name); err != nil {
+	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
 	if src == nil {
@@ -550,7 +557,7 @@ func (s *FSStore) UpdateGitSource(name string, src *GitSource) error {
 // RepoDir returns the absolute path of the git clone directory for a stack.
 // This path is valid even before the stack is registered (e.g. during git clone).
 func (s *FSStore) RepoDir(name string) (string, error) {
-	if err := ValidateStackName(name); err != nil {
+	if err := s.sourceInterrupted(name); err != nil {
 		return "", err
 	}
 	fd, err := s.stackFD(name)

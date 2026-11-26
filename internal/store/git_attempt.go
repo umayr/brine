@@ -12,7 +12,7 @@ import (
 // replacing an existing path. clone must finish using its destination before returning.
 // Once publication starts, cancellation cannot roll it back.
 func (s *FSStore) CreateGitAttempt(ctx context.Context, name string, src *GitSource, entrypoint string, clone func(context.Context, string) error) (*Stack, error) {
-	if err := ValidateStackName(name); err != nil {
+	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
 	if src == nil || clone == nil {
@@ -68,6 +68,9 @@ func (s *FSStore) CreateGitAttempt(ctx context.Context, name string, src *GitSou
 	}
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
 	if err := renameNoReplace(staging.stackDir(name), s.stackDir(name)); err != nil {

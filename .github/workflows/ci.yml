@@ -69,6 +69,15 @@ jobs:
           test -n "$dill_version"
           test "$(docker run --rm --entrypoint /usr/local/bin/dill brine:ci version)" = "v$dill_version"
           docker run --rm --entrypoint /usr/local/bin/pkl brine:ci --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Packaged source-only restore in Chromium
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          node scripts/ci-source-restore.cjs
       - name: Disabled Brine features
         run: |
           for option in '--profile=alpha' '--secret-target=lab-a' '--secret-policy=/synthetic-policy.json' '--secret-pkl=/synthetic-pkl' '--coordination-layout=native-local-docker-v1' '--operation-state-dir=/synthetic-history'; do

@@ -16,7 +16,8 @@ for (const width of [320, 390, 1440]) {
     await expect(details).toHaveAttribute('open', '');
     await expect(body).toBeVisible();
     await expect(body).toContainText('Socket:');
-    await expect(body).toContainText('Profile:');
+    await expect(body).not.toContainText(/legacy/i);
+    await expect(body).toContainText('Configured only');
     // A long socket must wrap rather than be hidden by the shell.
     await body.locator('span').first().evaluate(el => { el.textContent = '/a-very-long-synthetic-socket-path/'.repeat(5); });
     const rect = await body.boundingBox();

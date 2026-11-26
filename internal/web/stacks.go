@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	gitpkg "github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
 	"github.com/umayr/brine/internal/pkl"
+	"github.com/umayr/brine/internal/planstate"
 	"github.com/umayr/brine/internal/store"
 )
 
@@ -97,7 +99,13 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 	defer unlock()
 	stack, err := h.store.Get(name)
 	if err != nil {
-		http.Error(w, "Stack not found", http.StatusNotFound)
+		if errors.Is(err, store.ErrStackNotFound) {
+			http.Error(w, "Stack not found", http.StatusNotFound)
+		} else if errors.Is(err, store.ErrSourceInterrupted) {
+			http.Error(w, store.ErrSourceInterrupted.Error(), http.StatusConflict)
+		} else {
+			http.Error(w, "Stack metadata unavailable", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -470,11 +478,23 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 		h.renderAlert(w, "warning", alignment.Warning+" Update config.engine before planning or deploying.")
 		return
 	}
-	result, err := h.agent.Dill().Plan(r.Context(), stack.PklPath)
+	run := h.agent.Dill()
+	before, tagErr := planstate.Tag(stack, run)
+	result, err := run.Plan(r.Context(), stack.PklPath)
 	if err != nil {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
+	// This is a precondition on managed inputs, not a Dill apply receipt.
+	current, readErr := h.store.Get(name)
+	after, e := planstate.Tag(current, run)
+	if readErr != nil || tagErr != nil || e != nil || before != after {
+		w.Header().Set("X-Brine-Plan-Stale", "true")
+		http.Error(w, "Inputs changed or unavailable. Plan again.", http.StatusConflict)
+		return
+	}
+	w.Header().Set(planstate.Header, after)
+	w.Header().Set("Cache-Control", "no-store")
 	h.renderPartial(w, r, "plan-diff", result)
 }
 

@@ -27,7 +27,7 @@ const empty = '<div class="px-5 py-8 text-center text-dim">No containers in this
 const populated = '<table><tbody><tr><td>recovered-web</td><td>running</td></tr></tbody></table>';
 
 test('the populated stack Containers table is named from its heading', async ({ page }) => {
-  await page.goto(new URL('/stacks/homepage', baseURL).href);
+  await page.goto(new URL('/stacks/homepage?tab=containers', baseURL).href);
   await expect(page.getByRole('heading', { name: 'Containers', exact: true })).toBeVisible();
   const table = page.locator('#stack-containers').getByRole('table');
   await expect(table.getByRole('link', { name: 'fixture-web', exact: true })).toBeVisible();
@@ -36,7 +36,7 @@ test('the populated stack Containers table is named from its heading', async ({ 
 
 for (const [action, target] of [['Stop', 'fixture-web'], ['Start', 'fixture-worker']]) {
   test(`the stack Containers ${action} button describes its target`, async ({ page }) => {
-    await page.goto(new URL('/stacks/homepage', baseURL).href);
+    await page.goto(new URL('/stacks/homepage?tab=containers', baseURL).href);
     const table = page.locator('#stack-containers').getByRole('table', { name: 'Containers', exact: true });
     const button = table.getByRole('button', { name: action, exact: true });
     await expect(button).toBeVisible();
@@ -54,7 +54,7 @@ test('unavailable stack inventory has bounded keyboard retry and can recover to 
     await pending;
     return route.fulfill({ contentType: 'text/html', body: empty });
   });
-  await page.goto(new URL('/stacks/observability', baseURL).href);
+  await page.goto(new URL('/stacks/observability?tab=containers', baseURL).href);
   const inventory = page.locator('#stack-containers');
   await expect(inventory.getByRole('alert')).toHaveText('Stack container inventory is unavailable.');
   await expect(inventory).not.toContainText('No containers in this stack.');
@@ -88,7 +88,7 @@ test('a timed-out retry becomes usable again without claiming the stack is empty
     }
     return recovered ? route.fulfill({ contentType: 'text/html', body: populated }) : route.continue();
   });
-  await page.goto(new URL('/stacks/observability', baseURL).href);
+  await page.goto(new URL('/stacks/observability?tab=containers', baseURL).href);
   const inventory = page.locator('#stack-containers');
   const retry = await settledRetry(inventory);
   await expect(retry).toBeEnabled();
@@ -120,7 +120,7 @@ test('stack inventory refresh and polling retain an honest failure and recover t
     requests++;
     return mode === 'unavailable' ? route.continue() : route.fulfill({ contentType: 'text/html', body: populated });
   });
-  await page.goto(new URL('/stacks/observability', baseURL).href);
+  await page.goto(new URL('/stacks/observability?tab=containers', baseURL).href);
   const inventory = page.locator('#stack-containers');
   await expect(inventory.getByRole('alert')).toContainText('inventory is unavailable');
   // The existing five-second HTMX poll must still work after an error swap.
