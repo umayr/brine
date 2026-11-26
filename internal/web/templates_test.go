@@ -20,6 +20,7 @@ func TestParseTemplates(t *testing.T) {
 	wantPages := []string{
 		"dashboard.html",
 		"settings/appearance.html",
+		"settings/general.html",
 		"stacks/index.html",
 		"stacks/new.html",
 		"stacks/detail.html",
@@ -58,6 +59,7 @@ func TestProductionPagesExecute(t *testing.T) {
 	for page, data := range map[string]any{
 		"dashboard.html":           &dashboardData{},
 		"settings/appearance.html": &pageData{Page: "settings"},
+		"settings/general.html":    &generalSettingsData{pageData: pageData{Page: "settings"}, BrowserSession: true},
 		"stacks/index.html":        &stackListData{Stacks: []*store.Stack{stack}},
 		"stacks/new.html":          &stackNewData{},
 		"stacks/detail.html":       &stackDetailData{Stack: stack, Files: []string{"compose.pkl"}},

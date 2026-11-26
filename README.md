@@ -165,9 +165,25 @@ Podman instead, adjust `User`, `Group`, `ExecStart`, and the socket in the unit.
   ```
 
 - There is no RBAC: one admin account, intended for a single operator.
+- In **Settings → General**, update the username and password, or show, copy, and
+  regenerate the API token. Each action asks for your current password in a
+  confirmation dialog. New passwords must have at least 15 characters. A
+  sign-in change signs out all browser sessions and
+  leaves the API token alone; regeneration immediately invalidates the old
+  token and does not sign out browsers. Changes take effect without a restart.
+- Flags and environment settings take precedence and lock their individual
+  fields in General. An externally configured token is never shown in the app.
+  When both password and token are supplied at startup, no credentials file is
+  opened and the account is managed entirely outside the app. Without a
+  username override, Brine uses the stored username, or `admin` if none exists.
+- Run only one Brine process per data directory. If you edit or replace the
+  credentials file outside Brine, restart Brine with the verified file before
+  using General. If an update reports uncertain durability, inspect the private
+  file before restarting; Brine refuses further changes until restart.
 - Sessions live in memory; restarting Brine signs everyone out.
-- Login admits 20 attempts per client IP in a fixed five-minute window, including
-  successful attempts; success does not reset the window. Limits are per process
+- Login and General's password confirmations share a 20-attempt budget per
+  client IP in a fixed five-minute window, including successful attempts.
+  Success does not reset the window. Limits are per process
   and reset on restart. Password checks are globally bounded; overload can return
   HTTP 503. Brine uses the direct peer address and does not trust forwarded IP
   headers. Behind a reverse proxy, all clients sharing its address share one login
@@ -205,7 +221,7 @@ local processes and non-browser clients can still control it.
 | `--remote-forward-dir` | | unset | Existing private forwarding directory, only for SSH and SSH reveal |
 | `--remote-timeout` | | unset | Explicit positive remote connection timeout |
 | `--init-remote-registry` | | `false` | Initialize a new registry and exit; does not start or enable the server |
-| `--auth-user` | `BRINE_AUTH_USER` | `admin` | Admin username |
+| `--auth-user` | `BRINE_AUTH_USER` | stored or `admin` | Admin username |
 | `--auth-password` | `BRINE_AUTH_PASSWORD` | generated | Admin password |
 | `--api-token` | `BRINE_API_TOKEN` | generated | Bearer token for API clients |
 | `--no-auth` | | `false` | Disable auth (development only) |
@@ -426,8 +442,16 @@ To use an existing Chromium-compatible browser instead, set
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable before running the UI tests.
 The suite runs source/component contracts and browser checks against automatically
 managed disposable fixtures on localhost ports 18082 and 18083 (the latter tests
-synthetic sign-in). These ports must be free; existing servers are not reused. The managed fixtures never use a real Dill or engine. Screenshots are saved
-under `test-results/`; these checks do not run lifecycle actions. To use a separately
+synthetic sign-in). These ports must be free; existing servers are not reused.
+The managed fixtures never use a real Dill or engine. Screenshots are saved
+under `test-results/`; these checks do not run lifecycle actions.
+
+To include the production credential flow, set `BRINE_CREDENTIAL_FIXTURE_DIR`
+to a disposable private directory with the ancestry required by
+[file-backed auth](#data-directory). The test uses a unique child directory and
+localhost port 18085, without a real engine or Dill.
+
+ To use a separately
 started disposable login instance, set `BRINE_VISUAL_BASE_URL` and
 `BRINE_VISUAL_PASSWORD` before running `tests/visual.spec.js`.
 

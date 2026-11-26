@@ -44,14 +44,15 @@ type Config struct {
 
 // Authenticator validates credentials and guards HTTP handlers.
 type Authenticator struct {
-	user      string
-	salt      []byte
-	passKey   []byte
-	tokenHash [sha256.Size]byte
-	hasToken  bool
-	noAuth    bool
-	secure    bool
-	ttl       time.Duration
+	// mu protects the live login, token, file digest, and sessions.
+	login      loginCredential
+	tokenHash  [sha256.Size]byte
+	hasToken   bool
+	management *credentialManagement
+
+	noAuth bool
+	secure bool
+	ttl    time.Duration
 
 	delay time.Duration // failed-login delay (tests set this to 0)
 	now   func() time.Time
@@ -137,18 +138,11 @@ func New(cfg Config) (*Authenticator, error) {
 	if cfg.Password == "" {
 		return nil, fmt.Errorf("auth password is required")
 	}
-	a.user = cfg.User
-
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, fmt.Errorf("generate salt: %w", err)
+	login := loginCredential{user: cfg.User}
+	if err := login.setPassword(cfg.Password); err != nil {
+		return nil, err
 	}
-	key, err := pbkdf2.Key(sha256.New, cfg.Password, salt, passwordIterations, passwordKeyLength)
-	if err != nil {
-		return nil, fmt.Errorf("derive password key: %w", err)
-	}
-	a.salt = salt
-	a.passKey = key
+	a.login = login
 
 	if cfg.APIToken != "" {
 		a.tokenHash = sha256.Sum256([]byte(cfg.APIToken))
@@ -178,11 +172,12 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		}
 
 		if token := bearerToken(r); token != "" {
-			if !a.validToken(token) {
+			user, valid := a.tokenIdentity(token)
+			if !valid {
 				writeJSONError(w, http.StatusUnauthorized, "invalid API token")
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(withInfo(r.Context(), requestInfo{method: "bearer", user: a.user})))
+			next.ServeHTTP(w, r.WithContext(withInfo(r.Context(), requestInfo{method: "bearer", user: user})))
 			return
 		}
 
@@ -325,9 +320,12 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 
 	user := r.PostFormValue("user")
 	password := r.PostFormValue("password")
+	a.mu.Lock()
+	login := a.login
+	a.mu.Unlock()
 	valid := func() bool {
 		defer func() { <-a.derivations }()
-		return a.verifyPassword(user, password)
+		return login.verify(user, password)
 	}()
 	if !valid {
 		if a.delay > 0 {
@@ -337,7 +335,11 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	sessID, sess, err := a.createSession()
+	sessID, err := a.createSession(login)
+	if err == errLoginChanged {
+		a.renderLogin(w, r, "Sign-in changed. Please try again.", http.StatusUnauthorized)
+		return
+	}
 	if err != nil {
 		http.Error(w, "could not create session", http.StatusInternalServerError)
 		return
@@ -352,7 +354,6 @@ func (a *Authenticator) handleLoginPost(w http.ResponseWriter, r *http.Request) 
 		MaxAge:   int(a.ttl.Seconds()),
 	})
 	http.Redirect(w, r, safeNext(r.PostFormValue("next")), http.StatusSeeOther)
-	_ = sess
 }
 
 // SubmissionLease revalidates the cookie session and serializes a submission
@@ -464,19 +465,26 @@ func (a *Authenticator) HandleLogout(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	a.ClearSessionCookie(w)
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+// ClearSessionCookie removes the browser's cookie after server-side revocation.
+func (a *Authenticator) ClearSessionCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     SessionCookie,
-		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   a != nil && a.secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
-	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
 func (a *Authenticator) renderLogin(w http.ResponseWriter, r *http.Request, errMsg string, status int) {
+	a.mu.Lock()
+	user := a.login.user
+	a.mu.Unlock()
 	data := struct {
 		Error string
 		Next  string
@@ -484,7 +492,7 @@ func (a *Authenticator) renderLogin(w http.ResponseWriter, r *http.Request, errM
 	}{
 		Error: errMsg,
 		Next:  safeNext(r.URL.Query().Get("next")),
-		User:  a.user,
+		User:  user,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -492,47 +500,70 @@ func (a *Authenticator) renderLogin(w http.ResponseWriter, r *http.Request, errM
 	_ = loginTemplate.Execute(w, data)
 }
 
-func (a *Authenticator) verifyPassword(user, password string) bool {
+// A snapshot's slices are read-only; password updates replace rather than
+// modify them. The revision binds a verified login to session creation.
+type loginCredential struct {
+	user          string
+	salt, passKey []byte
+	revision      uint64
+}
+
+func (c *loginCredential) setPassword(password string) error {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return fmt.Errorf("generate salt: %w", err)
+	}
+	key, err := pbkdf2.Key(sha256.New, password, salt, passwordIterations, passwordKeyLength)
+	if err != nil {
+		return fmt.Errorf("derive password key: %w", err)
+	}
+	c.salt, c.passKey = salt, key
+	return nil
+}
+
+func (c loginCredential) verify(user, password string) bool {
 	// Always derive a key so that a wrong username does not return faster.
-	candidate, err := pbkdf2.Key(sha256.New, password, a.salt, passwordIterations, passwordKeyLength)
+	candidate, err := pbkdf2.Key(sha256.New, password, c.salt, passwordIterations, passwordKeyLength)
 	if err != nil {
 		return false
 	}
-	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(a.user)) == 1
-	passOK := subtle.ConstantTimeCompare(candidate, a.passKey) == 1
+	userOK := subtle.ConstantTimeCompare([]byte(user), []byte(c.user)) == 1
+	passOK := subtle.ConstantTimeCompare(candidate, c.passKey) == 1
 	return userOK && passOK
 }
 
-func (a *Authenticator) validToken(token string) bool {
-	if !a.hasToken {
-		return false
-	}
+func (a *Authenticator) tokenIdentity(token string) (string, bool) {
 	got := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(got[:], a.tokenHash[:]) == 1
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.login.user, a.hasToken && subtle.ConstantTimeCompare(got[:], a.tokenHash[:]) == 1
 }
 
-func (a *Authenticator) createSession() (string, *session, error) {
+func (a *Authenticator) createSession(login loginCredential) (string, error) {
 	idRaw := make([]byte, 32)
 	if _, err := rand.Read(idRaw); err != nil {
-		return "", nil, err
+		return "", err
 	}
 	csrfRaw := make([]byte, 32)
 	if _, err := rand.Read(csrfRaw); err != nil {
-		return "", nil, err
+		return "", err
 	}
 	id := base64.RawURLEncoding.EncodeToString(idRaw)
 	sess := &session{
 		submission: make(chan struct{}, 1),
 		done:       make(chan struct{}),
-		user:       a.user,
+		user:       login.user,
 		csrf:       base64.RawURLEncoding.EncodeToString(csrfRaw),
 		expires:    a.now().Add(a.ttl),
 	}
 	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.login.revision != login.revision {
+		return "", errLoginChanged
+	}
 	a.pruneLocked()
 	a.sessions[id] = sess
-	a.mu.Unlock()
-	return id, sess, nil
+	return id, nil
 }
 
 func (a *Authenticator) sessionFromRequest(r *http.Request) *session {

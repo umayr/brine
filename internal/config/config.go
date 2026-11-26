@@ -72,7 +72,7 @@ func Default() *Config {
 		Engine:  "docker",
 		DillBin: "dill",
 
-		AuthUser:     envOr("BRINE_AUTH_USER", "admin"),
+		AuthUser:     os.Getenv("BRINE_AUTH_USER"),
 		AuthPassword: os.Getenv("BRINE_AUTH_PASSWORD"),
 		APIToken:     os.Getenv("BRINE_API_TOKEN"),
 
@@ -182,11 +182,4 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

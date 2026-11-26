@@ -53,6 +53,8 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		// Full-page routes
 		r.Get("/", h.dashboard)
 		r.Get("/settings", h.settingsAppearance)
+		r.Get("/settings/general", h.settingsGeneral)
+		r.Post("/settings/general", h.settingsCredentials)
 		r.Get("/settings/live-updates", h.settingsLiveUpdates)
 		r.Get("/settings/source-history", h.settingsSourceHistory)
 		r.Post("/settings/source-history", h.saveSourceHistorySettings)

@@ -320,6 +320,18 @@
 .appearance-preferences .ui-button { margin-top: var(--space-6); }
 .appearance-feedback { font-size: var(--font-size-sm); }
 
+.general-stack { width: min(100%, 56rem); }
+.general-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-5); }
+.general-form > .ui-field:first-child { grid-column: 1 / -1; width: min(100%, 24rem); }
+.general-footer { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding-top: var(--space-4); border-top: var(--border-width) solid var(--color-line); }
+.general-token { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); }
+.general-token code { display: flex; align-items: center; min-width: 0; word-break: break-all; }
+.general-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.general-actions [hidden], #general-error[hidden], #general-warning[hidden] { display: none; }
+@media (max-width: 650px) {
+  .general-form, .general-token { grid-template-columns: minmax(0, 1fr); }
+}
+
 @keyframes ui-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .ui-spinner { animation: none; } *,*::before,*::after { scroll-behavior: auto !important; } }
 /* Structural breakpoints match Tailwind lg/md; CSS variables cannot be used here. */

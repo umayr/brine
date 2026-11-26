@@ -5,6 +5,7 @@ test('Source History is a settings sibling, without mutating controls when no ar
  const nav=page.getByRole('navigation',{name:'Settings sections'});
  await nav.getByRole('link',{name:'Source History',exact:true}).click();
  await expect(nav.getByRole('link',{name:'Source History',exact:true})).toHaveAttribute('aria-current','page');
+ await expect(nav.getByRole('link',{name:'General',exact:true})).toBeVisible();
  await expect(nav.getByRole('link',{name:'Appearance',exact:true})).toBeVisible();
  await expect(nav.getByRole('link',{name:'Live Updates',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Default Auto-Checkpoint'})).toBeVisible();
