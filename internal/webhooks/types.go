@@ -23,20 +23,22 @@ type Resource struct {
 // Event contains allowlisted metadata only. Never populate it with output,
 // credentials, environment values, source contents or receiver response bodies.
 type Event struct {
-	ID              string    `json:"id"`
-	SchemaVersion   int       `json:"schema_version"`
-	Type            string    `json:"type"`
-	OccurredAt      time.Time `json:"occurred_at"`
-	OperationID     string    `json:"operation_id,omitempty"`
-	Stack           Resource  `json:"stack"`
-	Source          Resource  `json:"source"`
-	Target          Resource  `json:"target"`
-	Action          string    `json:"action,omitempty"`
-	Outcome         string    `json:"outcome,omitempty"`
-	Effects         string    `json:"effects,omitempty"`
-	ChangesDetected *bool     `json:"changes_detected,omitempty"`
-	Reason          string    `json:"reason,omitempty"`
-	Reconciled      bool      `json:"reconciled,omitempty"`
+	ID              string             `json:"id"`
+	SchemaVersion   int                `json:"schema_version"`
+	Type            string             `json:"type"`
+	OccurredAt      time.Time          `json:"occurred_at"`
+	OperationID     string             `json:"operation_id,omitempty"`
+	Stack           Resource           `json:"stack"`
+	Source          Resource           `json:"source"`
+	Target          Resource           `json:"target"`
+	Action          string             `json:"action,omitempty"`
+	Outcome         string             `json:"outcome,omitempty"`
+	Effects         string             `json:"effects,omitempty"`
+	ChangesDetected *bool              `json:"changes_detected,omitempty"`
+	Reason          string             `json:"reason,omitempty"`
+	Reconciled      bool               `json:"reconciled,omitempty"`
+	Container       *Resource          `json:"container,omitempty"`
+	Observation     *ObservationChange `json:"observation,omitempty"`
 }
 
 type Endpoint struct {

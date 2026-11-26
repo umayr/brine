@@ -133,6 +133,12 @@ func (s *Server) prepareWebhooks(ctx context.Context) error {
 		s.webhookDispatcher = &webhookDispatcher{s: s}
 	}
 	s.configureWebhookProducers()
+	if s.agent != nil && s.agent.Engine() != nil && (&webhookDispatcher{s: s}).localTargetID() != "" {
+		if e = svc.ConfigureSampling(s.sampleLocalRuntime); e != nil {
+			svc.Close()
+			return e
+		}
+	}
 	s.web.EnableWebhooks(svc, s.webhookDispatcher)
 	go func() {
 		if e := svc.Run(ctx); e != nil {

@@ -34,6 +34,8 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 		return e
 	}
+	stopSampling := s.startSampling(ctx)
+	defer stopSampling()
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	lastPrune := time.Time{}

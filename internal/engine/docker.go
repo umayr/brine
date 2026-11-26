@@ -104,6 +104,9 @@ func (e *DockerEngine) InspectContainer(ctx context.Context, id string) (*Contai
 	if err != nil {
 		return nil, fmt.Errorf("inspect container %s: %w", id, err)
 	}
+	if resp.Config == nil || resp.State == nil || resp.NetworkSettings == nil {
+		return nil, fmt.Errorf("container inspection unavailable")
+	}
 	info := &ContainerInfo{
 		ID:     resp.ID,
 		Name:   strings.TrimPrefix(resp.Name, "/"),
@@ -113,6 +116,12 @@ func (e *DockerEngine) InspectContainer(ctx context.Context, id string) (*Contai
 		Ports:  inspectPorts(resp.NetworkSettings.Ports),
 		Labels: resp.Config.Labels,
 		Stack:  resp.Config.Labels["dill.stack"],
+	}
+	configured := resp.Config.Healthcheck != nil && len(resp.Config.Healthcheck.Test) > 0 && resp.Config.Healthcheck.Test[0] != "NONE"
+	info.HealthConfigured = &configured
+	if resp.State.Health != nil {
+		status := resp.State.Health.Status
+		info.HealthStatus = &status
 	}
 	return info, nil
 }
