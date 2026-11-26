@@ -49,17 +49,18 @@ func (h *Deployment) recoverManual(ctx context.Context, w http.ResponseWriter, r
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	record, recordLease, err := h.registry.AcquireRead(ctx, intent.Host)
+	record, enrollment, recordLease, err := h.acquireDeploymentTarget(ctx, intent.Host, false)
 	if err != nil {
 		http.Error(w, deploymentStatusUnavailable, 409)
 		return
 	}
 	defer recordLease.Close()
+	ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
 	if targetDigest(record) != intent.Target {
 		http.Error(w, deploymentStatusUnavailable, 409)
 		return
 	}
-	c, epoch, err := openDeploymentSession(ctx, record)
+	c, epoch, err := h.openDeploymentSession(ctx, record)
 	if err != nil {
 		http.Error(w, deploymentStatusUnavailable, 409)
 		return

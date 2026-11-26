@@ -63,6 +63,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 	pub := priv.Public().(ed25519.PublicKey)
 	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
+	deployToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
 	const socket = "unix:///run/docker.sock"
 	const engine = "11111111-1111-4111-8111-111111111111"
 	const epoch = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -110,7 +111,11 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	enabled := atomic.Bool{}
 	enabled.Store(true)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+token {
+		expected := token
+		if r.URL.Path != "/v1/session" {
+			expected = deployToken
+		}
+		if r.Header.Get("Authorization") != "Bearer "+expected {
 			t.Error("missing bearer credential")
 			w.WriteHeader(401)
 			return
@@ -368,6 +373,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err := NewDeployment(a, reg, fs)
+	if err == nil {
+		h.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,6 +407,18 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
 	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	t.Run("history-removal-refuses-rotated-credential", func(t *testing.T) {
+		oldHistory, oldCredentials := h.history, h.credentials
+		defer func() { h.history, h.credentials = oldHistory, oldCredentials }()
+		h.history = &attendedHistory{}
+		id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+		h.credentials = testDeploymentCredentials(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)))
+		before := removeCalls.Load()
+		w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"remove"}})
+		if w.Code != 409 || removeCalls.Load() != before {
+			t.Fatal("history removal dispatched under unreviewed credential", w.Code)
+		}
+	})
 	for _, mode := range []string{"create", "update", "remove"} {
 		for _, tc := range []struct {
 			name  string
@@ -419,7 +439,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				h.stacks = overlapErrorStore{StackStore: original, err: tc.err, stack: tc.stack}
 				defer func() { h.stacks = original }()
 				beforeApply, beforeRemove := calls.Load(), removeCalls.Load()
-				id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: mode, TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+				id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: mode, TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 				w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {mode}})
 				if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") {
 					t.Fatalf("expected fail-closed overlap rejection: %d %s", w.Code, w.Body.String())
@@ -444,7 +464,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 		}()
-		id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+		id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 		before := removeCalls.Load()
 		w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"remove"}})
 		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") || removeCalls.Load() != before {
@@ -459,7 +479,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		{"changed target", "different-reviewed-target", "Target was re-paired; no creation sent", time.Now().Add(time.Minute)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "create", TargetDigest: tc.target, Expiry: tc.expiry})
+			id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "create", TargetDigest: tc.target, Expiry: tc.expiry})
 			if id == "" {
 				t.Fatal("could not create confirmation fixture")
 			}
@@ -474,7 +494,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	// Exercise the immediate result and a later GET against the same validated status.
 	partial.Store(true)
-	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Journal: journal, StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+	partialID := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Journal: journal, StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 	partialPath := deployPath + "?host=demo&id=" + partialID
 	for _, w := range []*httptest.ResponseRecorder{
 		invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {partialID}, "confirm": {"create"}}),
@@ -611,6 +631,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err = NewDeployment(a, reg, reopenedStore)
+	if err == nil {
+		h.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,6 +792,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		restarted, err := NewDeployment(a, reg, fs2)
+		if err == nil {
+			restarted.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+		}
 		if err != nil {
 			t.Fatal(err)
 		}

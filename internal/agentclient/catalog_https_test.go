@@ -20,6 +20,7 @@ func TestHTTPSCatalogVerifiedSession(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 	pub := priv.Public().(ed25519.PublicKey)
 	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+	deployToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{10}, 32))
 	const socket = "unix:///run/example.sock"
 	id := strings.Repeat("1", 32)
 	raw := `{"schema":"dill.snapshot.manifest.v1","entrypoint":"main.pkl","files":[{"path":"main.pkl","length":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]}`
@@ -27,7 +28,11 @@ func TestHTTPSCatalogVerifiedSession(t *testing.T) {
 	var calls atomic.Int32
 	var bad atomic.Bool
 	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+token {
+		expected := token
+		if requiresDeploymentCredential(r) {
+			expected = deployToken
+		}
+		if r.Header.Get("Authorization") != "Bearer "+expected {
 			t.Error("missing bearer")
 			w.WriteHeader(401)
 			return
@@ -63,7 +68,7 @@ func TestHTTPSCatalogVerifiedSession(t *testing.T) {
 	defer s.Close()
 	pin := sha256.Sum256(s.Certificate().Raw)
 	ctx := context.Background()
-	c, err := NewHTTPS(ctx, strings.TrimPrefix(s.URL, "https://"), hex.EncodeToString(pin[:]), token, Binding{pub, fixtureEngine, 1, "docker", socket, "daemon"})
+	c, err := NewHTTPSWithDeploymentCredential(ctx, strings.TrimPrefix(s.URL, "https://"), hex.EncodeToString(pin[:]), token, deployToken, Binding{pub, fixtureEngine, 1, "docker", socket, "daemon"})
 	if err != nil {
 		t.Fatal(err)
 	}

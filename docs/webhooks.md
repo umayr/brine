@@ -65,6 +65,18 @@ Remote observation uses the existing verified registry read-lease provider, neve
 
 The new agent `GET /v1/capabilities` document separates monitor methods from configured deployment grants. Values are retained as a sorted JSON-array string with `monitor.` / `deployment.` prefixes. Advertised deployment entries do not authorize a monitor credential to execute. **Bundled Dill 0.11.0 does not expose this endpoint** and reports capability-unavailable; this implementation requires the authorized, separately qualified Dill contract update before the complete feature can be released. Legacy SSH sessions without the report remain unavailable, never an empty capability set. A newer bundle is not claimed until its release and paired qualification succeed.
 
+## Separate remote deployment credentials
+
+Monitor pairing is read-only. Remote staging, manifest, preview, apply, fencing, removal and operation status require a distinct canonical 32-byte base64url deployment token plus the matching explicit host grants. Neither webhook signing keys nor monitor credentials substitute. Missing custody configuration denies before dispatch.
+
+The operator supplies `--remote-deploy-credentials /absolute/private/index.json`. Both index and token files must be outside Brine's data/source directory, regular owner-only 0600 single-link files in owner-only 0700 directories with safe ACLs and trusted ancestry. Root-owned sticky temporary ancestors are permitted; bind mounts and privileged/same-UID writers remain trusted. The source does not write credentials. Obtain non-secret current enrollment metadata using `bin/brine --remote-registry-dir /absolute/private/registry --remote-deploy-binding TARGET_ID` (offline read only), then provision:
+
+```json
+{"version":1,"targets":{"TARGET_ID":{"binding":"EXACT_64_HEX_BINDING","enrollment":"EXACT_32_HEX_ENROLLMENT","token_file":"/absolute/private/deploy-token"}}}
+```
+
+The index is approved at startup and its exact digest is rechecked on every lookup; changing/removing it invalidates existing authority until restart. Tokens are re-read for each connection/request check; held clients never switch credentials. Rotating/removing token bytes prevents later requests and invalidates retained confirmations. Already dispatched operations may finish and must not be retried blindly. Restoring exact old bytes is not permanent revocation: retire the source/agent grant or restart to retire old clients. Forget/re-pair changes enrollment and cannot inherit an old index entry, even with the same pairing bundle. Reviewed apply/removal is additionally bound to the exact installed credential revision. Existing narrow operator-authority clients retain their explicit per-request allowlist; there is no status/removal/fence privilege inheritance.
+
 ## Incoming requests
 
 A trigger grants one action on one immutable stack/target binding. It uses its own signing secret, not Brine's general API token. POST JSON to the exact `/hooks/{trigger_id}` URL:

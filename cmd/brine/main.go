@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/umayr/brine/internal/remoteui"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
@@ -76,11 +79,13 @@ func run() error {
 	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: serve templates and static files from the repository (run from repo root)")
 	flag.BoolVar(&cfg.RemoteEnabled, "remote-enabled", false, "enable authenticated remote read-only UI")
 	flag.StringVar(&cfg.RemoteRegistryDir, "remote-registry-dir", "", "absolute private remote registry directory")
+	flag.StringVar(&cfg.RemoteDeployCredentials, "remote-deploy-credentials", "", "absolute private external target-bound deployment credential index")
 	flag.StringVar(&cfg.RemoteForwardDir, "remote-forward-dir", "", "existing private directory for remote Unix socket forwards")
 	flag.DurationVar(&cfg.RemoteTimeout, "remote-timeout", 0, "explicit remote connection and transport timeout")
 	flag.BoolVar(&cfg.RemoteRevealEnabled, "remote-reveal-enabled", false, "enable audited remote reveal (requires provisioned seed and initialized audit)")
 	flag.StringVar(&cfg.RemoteRevealSeedPath, "remote-reveal-seed-path", "", "absolute path to operator-provisioned reveal signing seed")
 	flag.StringVar(&cfg.RemoteRevealAuditDir, "remote-reveal-audit-dir", "", "absolute path to pre-initialized private reveal audit directory")
+	remoteDeployBinding := flag.String("remote-deploy-binding", "", "print non-secret deployment custody bindings for an existing HTTPS target and exit")
 	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
 	flag.StringVar(&cfg.SourceHistoryDir, "source-history-dir", "", "pre-initialized private source-revision archive outside Brine data (opt-in)")
 	flag.StringVar(&cfg.SourceHistoryKey, "source-history-key", "", "separately provisioned private 32-byte source archive key file")
@@ -139,6 +144,19 @@ func run() error {
 		return err
 	}
 
+	if *remoteDeployBinding != "" {
+		registry, e := targetregistry.OpenExisting(cfg.RemoteRegistryDir)
+		if e != nil {
+			return fmt.Errorf("remote registry unavailable")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		binding, e := remoteui.DeploymentBindingMetadata(ctx, registry, *remoteDeployBinding)
+		if e != nil {
+			return fmt.Errorf("deployment custody binding unavailable")
+		}
+		return json.NewEncoder(os.Stdout).Encode(binding)
+	}
 	if *initRemoteRegistry {
 		// Initialization is an explicit local operation; it never starts the server.
 		if err := targetregistry.Init(cfg.RemoteRegistryDir); err != nil {

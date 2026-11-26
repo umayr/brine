@@ -1,8 +1,10 @@
 package agentclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -67,6 +69,18 @@ func TestHTTPSPairProcess(t *testing.T) {
 	address := reserve.Addr().String()
 	const engineID = "11111111-1111-4111-8111-111111111111"
 	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon"}
+	deploymentToken := ""
+	if os.Getenv("DILL_AGENT_DEPLOY_CREDENTIAL_TEST") == "1" {
+		deploymentToken = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{17}, 32))
+		tokenFile := filepath.Join(dir, "deploy-token")
+		if e := os.WriteFile(tokenFile, []byte(deploymentToken), 0600); e != nil {
+			t.Fatal(e)
+		}
+		staging, catalog := filepath.Join(dir, "stages"), filepath.Join(dir, "catalog")
+		os.Mkdir(staging, 0700)
+		os.Mkdir(catalog, 0700)
+		args = append(args, "--https-deploy-token-file", tokenFile, "--https-deploy-grant", "stage", "--https-deploy-grant", "manifest", "--https-staging-root", staging, "--https-staging-catalog", catalog)
+	}
 	raw, err := agentCommand(append(args, "--print-https-pairing")...).Output()
 	if err != nil {
 		reserve.Close()
@@ -141,5 +155,24 @@ func TestHTTPSPairProcess(t *testing.T) {
 	}
 	if _, err = client.Stage(ctx, epoch, body); err == nil {
 		t.Fatal("read-only monitor token gained staging authority")
+	}
+	if deploymentToken != "" {
+		active := true
+		deploy, e, err := bundle.OpenDeploymentCurrent(ctx, ctx, address, deploymentToken, func(context.Context) bool { return active })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer deploy.Close()
+		stage, err := deploy.Stage(ctx, e, body)
+		if err != nil {
+			t.Fatal("distinct scoped credential staging failed", err)
+		}
+		if _, err = deploy.Snapshot(ctx, e, stage); err != nil {
+			t.Fatal("distinct credential manifest failed", err)
+		}
+		active = false
+		if _, err = deploy.Snapshot(ctx, e, stage); err == nil {
+			t.Fatal("revoked custody revision remained usable")
+		}
 	}
 }

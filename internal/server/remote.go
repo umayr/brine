@@ -74,6 +74,14 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 		if s.remoteDeploy, err = remoteui.NewDeployment(s.authn, registry, s.store); err != nil {
 			return err
 		}
+		if s.cfg.RemoteDeployCredentials != "" {
+			credentials, e := remoteui.LoadDeploymentCredentials(s.cfg.RemoteDeployCredentials, s.cfg.DataDir)
+			if e != nil {
+				s.remoteDeploy.Close()
+				return e
+			}
+			s.remoteDeploy.SetDeploymentCredentials(credentials)
+		}
 		s.remoteDeploy.EnableGit(s.git)
 		deploy = s.remoteDeploy.Protected()
 	}

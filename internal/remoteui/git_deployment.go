@@ -57,7 +57,7 @@ func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *
 			p.ID = policy.Request
 			ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
-			c, epoch, err := openDeploymentSession(ctx, record)
+			c, epoch, err := h.openDeploymentSession(ctx, record)
 			if err != nil {
 				p.Error = "Target unavailable. The pending request has not been cleared."
 				break
@@ -195,17 +195,18 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	if s.RemoteGitSource() != p.Source || (!p.Enabled && p.Request == "") || p.Phase == "blocked" {
 		return
 	}
-	record, lease, err := h.registry.AcquireRead(ctx, p.Host)
+	record, enrollment, lease, err := h.acquireDeploymentTarget(ctx, p.Host, false)
 	if err != nil {
 		h.noteGitUnavailable(s, p)
 		return
 	}
 	defer lease.Close()
+	ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
 	if targetDigest(record) != p.Target {
 		h.noteGitUnavailable(s, p)
 		return
 	}
-	c, epoch, err := openDeploymentSession(ctx, record)
+	c, epoch, err := h.openDeploymentSession(ctx, record)
 	if err != nil {
 		h.noteGitUnavailable(s, p)
 		return

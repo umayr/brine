@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,6 +34,7 @@ var captureLimits = projectsnapshot.Limits{MaxFiles: 1000, MaxEntries: 2000, Max
 
 type Deployment struct {
 	auth          *auth.Authenticator
+	credentials   DeploymentCredentials
 	registry      *targetregistry.Registry
 	stacks        store.StackStore
 	reviews       *projectreview.Store
@@ -49,6 +51,7 @@ type Deployment struct {
 
 type deploymentReview struct {
 	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest, Journal string
+	CredentialRevision                                                        string
 	Mode, PriorRequestID                                                      string
 	Expiry                                                                    time.Time
 	Attended                                                                  *attendedReview
@@ -216,7 +219,8 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer releaseRecord.Close()
-		if targetDigest(record) != review.TargetDigest {
+		ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
+		if targetDigest(record) != review.TargetDigest || (!historyRequired && h.deploymentCredentialRevision(ctx, record) != review.CredentialRevision) {
 			http.Error(w, "Target was re-paired; no creation sent", 409)
 			return
 		}
@@ -224,7 +228,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			h.submitAttended(ctx, w, p, review, record, enrollment)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record, review.CredentialRevision)
 		if err != nil {
 			http.Error(w, "Target unavailable; no creation sent", 409)
 			return
@@ -269,6 +273,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer releaseRecord.Close()
+	ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
 	if r.Method == http.MethodGet {
 		if h.history != nil && h.history.operator != nil {
 			p.Error = deploymentStatusUnavailable
@@ -295,7 +300,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			h.renderStatus(w, p, http.StatusConflict)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record)
 		if err == nil {
 			defer c.Close()
 			var status agentclient.DeploymentStatus
@@ -368,6 +373,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
+		credentialRevision := h.deploymentCredentialRevision(ctx, record)
 		var stager deploymentStager
 		var epoch string
 		var binding attendedBinding
@@ -380,7 +386,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			defer c.client.Close()
 			stager, epoch, binding = c.client, c.epoch, c.binding
 		} else {
-			c, e, err := openDeploymentSession(ctx, record)
+			c, e, err := h.openDeploymentSession(ctx, record)
 			if err != nil {
 				http.Error(w, "Target unavailable; no transfer sent", 409)
 				return
@@ -393,7 +399,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		stage, manifest, plan, err := stageAndPreview(ctx, stager, epoch, p.Stack, intent.Snapshot)
-		if err != nil {
+		if err != nil || (h.history == nil && (credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision)) {
 			p.Error = "Staging or preview could not be confirmed. Inspect the receiver before preparing another transfer. No retry was sent."
 			p.ID = ""
 			h.render(w, p)
@@ -410,24 +416,25 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			}
 			review.prior = intent.PriorDeployment
 		}
-		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review)
+		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review, credentialRevision)
 	case deployPath + "/remove-preview":
+		credentialRevision := h.deploymentCredentialRevision(ctx, record)
 		if h.history != nil && h.history.operator != nil {
 			http.Error(w, "Operator-configured authority is for new deployments only", http.StatusConflict)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record)
 		if err != nil {
 			http.Error(w, "Target unavailable", 409)
 			return
 		}
 		defer c.Close()
 		plan, err := c.PreviewRemoval(ctx, epoch, p.Stack)
-		if err != nil {
+		if err != nil || credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision {
 			p.Error = "Managed removal preview unavailable. No operation was sent."
 			break
 		}
-		h.renderPlan(&p, session, current.Target.Identity, "", "", plan, nil)
+		h.renderPlan(&p, session, current.Target.Identity, "", "", plan, nil, credentialRevision)
 	default:
 		http.NotFound(w, r)
 		return
@@ -435,7 +442,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 	h.render(w, p)
 }
 
-func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview, attended *attendedReview) {
+func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview, attended *attendedReview, credentialRevision string) {
 	p.JournalCapacityLow = plan.JournalCapacityLow
 	p.Plan, p.ID = plan.PreflightResult, ""
 	if plan.Mode == "" || plan.SelectionDigest == nil || len(plan.Resources) == 0 {
@@ -448,7 +455,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 			}
 		}
 	}
-	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Journal: plan.JournalID, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
+	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, CredentialRevision: credentialRevision, Journal: plan.JournalID, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
 	if p.ID != "" {
 		p.Mode = plan.Mode
 	}
@@ -457,7 +464,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 // New operator-authorized actions pin the active history enrollment and target
 // under one lease. Legacy reads and removal retain their existing behavior.
 func (h *Deployment) acquireDeploymentTarget(ctx context.Context, host string, attended bool) (targetregistry.Record, targetregistry.HistoryIncarnation, *targetregistry.ReadLease, error) {
-	if attended && h.history != nil && h.history.operator != nil {
+	if h.credentials != nil || (attended && h.history != nil && h.history.operator != nil) {
 		return h.registry.AcquireHistoryRead(ctx, host)
 	}
 	r, lease, err := h.registry.AcquireRead(ctx, host)
@@ -468,7 +475,7 @@ func targetDigest(record targetregistry.Record) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(record.HTTPSAddress+"\x00"+string(record.HTTPSPairing))))
 }
 
-func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agentclient.Client, string, error) {
+func (h *Deployment) openDeploymentSession(ctx context.Context, r targetregistry.Record, expected ...string) (*agentclient.Client, string, error) {
 	if r.HTTPSAddress == "" {
 		return nil, "", agentclient.ErrProtocol
 	}
@@ -476,7 +483,17 @@ func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agent
 	if err != nil {
 		return nil, "", err
 	}
-	return p.Open(ctx, ctx, r.HTTPSAddress)
+	if h.credentials == nil {
+		return nil, "", errDeployCredential
+	}
+	credential, e := h.credentials.Credential(ctx, r)
+	if e != nil || (len(expected) > 0 && (expected[0] == "" || deploymentRevision(ctx, r, credential) != expected[0])) {
+		return nil, "", errDeployCredential
+	}
+	return p.OpenDeploymentCurrent(ctx, ctx, r.HTTPSAddress, credential, func(ctx context.Context) bool {
+		latest, err := h.credentials.Credential(ctx, r)
+		return err == nil && subtle.ConstantTimeCompare([]byte(latest), []byte(credential)) == 1
+	})
 }
 
 func stageAndPreview(ctx context.Context, c deploymentStager, epoch, stack string, snap projectsnapshot.Snapshot) (string, string, *agentclient.DeploymentPreview, error) {
