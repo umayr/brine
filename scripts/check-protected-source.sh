@@ -11,7 +11,7 @@ set -euo pipefail
 }
 capture_helper=$1
 # Fail closed when the application pins move; update the verified hashes together.
-grep -qx 'ARG DILL_VERSION=0.8.1' Dockerfile
+grep -qx 'ARG DILL_VERSION=0.11.0' Dockerfile
 grep -qx 'ARG PKL_VERSION=0.31.1' Dockerfile
 umask 022
 root=$(mktemp -d /tmp/brine-protected-source.XXXXXXXX)
@@ -19,10 +19,10 @@ trap 'rm -rf -- "$root"' EXIT
 cd "$root"
 chmod 0755 "$root"
 mkdir workspace export home
-curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.8.1/dill-linux-amd64 -o dill
+curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.11.0/dill-linux-amd64 -o dill
 curl -fsSL --retry 3 https://github.com/apple/pkl/releases/download/0.31.1/pkl-linux-amd64 -o pkl
 sha256sum -c <<'SUMS'
-e27c4e6597f5b8fd12518a82d2f3e59d87ca59625f43bbdda6cc47fa85943cc0  dill
+698a531ba60663d03c08309f7caba5ef0192aaa8b830f2398d440919d88b5c1d  dill
 618f13955d755cafbfe8c9cba1d27635848cd49dbc6abffd398d2751db1231bf  pkl
 SUMS
 chmod 0555 dill pkl

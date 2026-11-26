@@ -63,7 +63,7 @@ directory; cross-process variable writes are not coordinated.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (the image bundles v0.8.1) on `PATH`, or pass `--dill /path/to/dill`.
+- A `dill` binary (the image bundles v0.11.0) on `PATH`, or pass `--dill /path/to/dill`.
   Older binaries that cannot accept explicit stack/engine/socket flags are
   rejected for lifecycle and validation; Brine does not retry against defaults.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
@@ -95,9 +95,13 @@ BRINE_AUTH_PASSWORD='choose-something' ./bin/brine --dill /path/to/dill
 Tagged builds are published to `ghcr.io/umayr/brine` for Linux amd64 and
 arm64. Use the tag or digest from the [GitHub release](https://github.com/umayr/brine/releases)
 rather than a floating `latest` tag. A new Brine image updates its bundled
-Dill binary, not the Dill agents installed on remote hosts.
+Dill CLI, not the Dill agents installed on remote hosts. See the
+[remote compatibility note](docs/remote-agent-https.md) before upgrading an agent.
 
-The image bundles Brine, Dill (v0.8.1), and Pkl (0.31.1):
+The image bundles Brine, Dill (v0.11.0), and Pkl (0.31.1). As with v0.8.1,
+Dill can remove containers but retain a stack network and report an error on
+**Down** or **Teardown**. Inspect the target before retrying; see Dill’s
+[lifecycle failure guidance](https://github.com/umayr/dill/blob/v0.11.0/docs/lifecycle-failures.md).
 
 ```sh
 docker build -t brine .
@@ -123,7 +127,7 @@ docker run -d --name brine \
   brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.8.1`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.11.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the
