@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/umayr/brine/internal/snapshothistory"
 )
 
 var (
@@ -21,7 +23,6 @@ var (
 	ErrSourceUncertain   = errors.New("source revision outcome unknown; inspect the current source and history, do not repeat this write")
 )
 
-const MaxSourceRevisions = 100
 const maxSourceSize = 4 << 20
 
 var sourceComponent = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._ -]{0,127}$`)
@@ -44,7 +45,7 @@ func (l *SourceLineage) valid() bool {
 	if l == nil {
 		return true
 	}
-	if !hexID(l.Identity) || len(l.Revisions) == 0 || len(l.Revisions) > MaxSourceRevisions {
+	if !hexID(l.Identity) || len(l.Revisions) == 0 || len(l.Revisions) > snapshothistory.MaxSourceArchiveObjects {
 		return false
 	}
 	seen := map[string]bool{}

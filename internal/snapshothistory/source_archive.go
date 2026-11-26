@@ -16,19 +16,66 @@ type SourceRevision struct {
 	Created                                 time.Time
 	Files                                   map[string][]byte
 }
+
+const (
+	DefaultSourceArchiveObjects = 100
+	DefaultSourceArchiveBytes   = 256 << 20
+
+	// Hard read/validation bounds, independent of the operator's write policy.
+	MaxSourceArchiveObjects = 512
+	MaxSourceArchiveBytes   = 512 << 20
+)
+
+type SourceArchiveLimits struct {
+	Objects int
+	Bytes   int64
+}
+
+func (l SourceArchiveLimits) Resolve() (SourceArchiveLimits, error) {
+	if l.Objects == 0 {
+		l.Objects = DefaultSourceArchiveObjects
+	}
+	if l.Bytes == 0 {
+		l.Bytes = DefaultSourceArchiveBytes
+	}
+	if l.Objects < 1 || l.Objects > MaxSourceArchiveObjects || l.Bytes < 1 || l.Bytes > MaxSourceArchiveBytes {
+		return SourceArchiveLimits{}, ErrCapacity
+	}
+	return l, nil
+}
+
+type SourceArchiveUsage struct {
+	Objects int
+	Bytes   int64
+	Limits  SourceArchiveLimits
+}
+
+func (u SourceArchiveUsage) RemainingObjects() int { return max(0, u.Limits.Objects-u.Objects) }
+func (u SourceArchiveUsage) RemainingBytes() int64 { return max(0, u.Limits.Bytes-u.Bytes) }
+
 type SourceArchive struct{ storage *sourceArchive }
 
 func InitializeSourceArchive(dir, key, workspace string) error {
 	return initSource(dir, key, workspace)
 }
-func OpenSourceArchive(dir, key, workspace string) (*SourceArchive, error) {
-	s, e := openSource(dir, key, workspace)
+func OpenSourceArchive(dir, key, workspace string, limits SourceArchiveLimits) (*SourceArchive, error) {
+	l, err := limits.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	s, e := openSource(dir, key, workspace, l)
 	if e != nil {
 		return nil, e
 	}
 	return &SourceArchive{s}, nil
 }
 func (s *SourceArchive) Close() error { return s.storage.close() }
+
+// Usage checks archive metadata and reports logical sealed bytes, not disk allocation.
+// It does not attest that every revision is readable; reads and writes verify content.
+func (s *SourceArchive) Usage(ctx context.Context) (SourceArchiveUsage, error) {
+	return s.storage.usage(ctx)
+}
 func (s *SourceArchive) PutChain(ctx context.Context, scope string, ancestors []string, records []SourceRevision) ([]string, error) {
 	return s.storage.putChain(ctx, scope, ancestors, records)
 }

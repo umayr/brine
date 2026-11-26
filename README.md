@@ -215,6 +215,7 @@ local processes and non-browser clients can still control it.
 | `--deploy-timeout` | | `30m` | Timeout for deploy/teardown/git commands |
 | `--dev` | | `false` | Re-parse templates on every request |
 | `--source-history-dir` / `--source-history-key` | | off | Existing private source archive and external key; [Linux setup](docs/source-history.md) |
+| `--source-history-max-objects` / `--source-history-max-bytes` | | 100 objects / 256 MiB | Restart-time source archive write limits shared across stacks; existing revisions stay readable after lowering |
 | `--init-source-history` | | `false` | Initialize that empty archive explicitly and exit |
 | `--version` | | | Print the version |
 

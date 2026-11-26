@@ -28,6 +28,7 @@ import (
 type revisionArchive interface {
 	PutChain(context.Context, string, []string, []snapshothistory.SourceRevision) ([]string, error)
 	Get(string, string) (snapshothistory.SourceRevision, error)
+	Usage(context.Context) (snapshothistory.SourceArchiveUsage, error)
 }
 type sourceHistoryAccess struct {
 	vault     revisionArchive
@@ -98,6 +99,8 @@ type historyPage struct {
 	From, Page, Next, Prev, Total           int
 	Files                                   []sourceDiff
 	EntryBefore, EntryAfter                 string
+	Capacity                                *snapshothistory.SourceArchiveUsage
+	SlotsNeeded                             int
 }
 
 func (h *Handler) manualRows(name string) ([]requestEvidence, bool, error) {
@@ -181,6 +184,9 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			p.Message = "Source history is unavailable for this workspace. Only private managed Pkl projects with no extra files, links or mounts are eligible."
 			break
+		}
+		if usage, err := h.sourceHistory.vault.Usage(r.Context()); err == nil {
+			p.Capacity = &usage
 		}
 		p.Total = len(view.Revisions)
 		p.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
@@ -356,16 +362,14 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 		}
 	} else {
 		p.Files = diffSource(nil, v.Files, false)
-		if len(v.Revisions) > 0 {
-			head, e := s.record(v, len(v.Revisions)-1)
-			if e != nil {
-				http.Error(w, "Previous revision unavailable", 409)
-				return
-			}
-			if head.Entrypoint == v.Entrypoint && maps.EqualFunc(v.Files, head.Files, bytes.Equal) {
-				p.Confirm = false
-				p.Message = "These exact source files are already retained as the latest revision."
-			}
+		_, changed, err := s.checkpointHead(v)
+		if err != nil {
+			http.Error(w, "Previous revision unavailable", 409)
+			return
+		}
+		if !changed {
+			p.Confirm = false
+			p.Message = "These exact source files are already retained as the latest revision."
 		}
 	}
 	if r.Context().Err() != nil {
@@ -373,7 +377,33 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 		return
 	}
 	if !confirm {
-		p.Proof = s.proof(csrf, name, kind, id, v.Baseline, time.Now().Add(5*time.Minute).Unix())
+		if p.Confirm {
+			p.SlotsNeeded = 1
+			if kind == "restore" {
+				_, changed, err := s.checkpointHead(v)
+				if err != nil {
+					http.Error(w, "Previous revision unavailable", 409)
+					return
+				}
+				if changed {
+					p.SlotsNeeded++
+				}
+			}
+			if usage, err := s.vault.Usage(r.Context()); err == nil {
+				p.Capacity = &usage
+				if p.SlotsNeeded > usage.RemainingObjects() || usage.RemainingBytes() == 0 {
+					p.Confirm = false
+					p.Message = "The source archive has insufficient capacity. Ask the operator to review its configured limits. No history was removed."
+				}
+			}
+		}
+		if r.Context().Err() != nil {
+			http.Error(w, "Session or request expired", 403)
+			return
+		}
+		if p.Confirm {
+			p.Proof = s.proof(csrf, name, kind, id, v.Baseline, time.Now().Add(5*time.Minute).Unix())
+		}
 		h.renderPartial(w, r, "stack-history", p)
 		return
 	}
@@ -392,6 +422,8 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 		switch {
 		case errors.Is(err, store.ErrSourceStale):
 			http.Error(w, "Source changed after review. Nothing restored.", 409)
+		case errors.Is(err, snapshothistory.ErrCapacity):
+			http.Error(w, "The source archive has insufficient capacity. No source was changed or history removed.", 409)
 		case errors.Is(err, store.ErrSourceInterrupted), errors.Is(err, store.ErrSourceUncertain):
 			http.Error(w, "Publication unconfirmed. Preserve workspace and archive; inspect before any further write. Do not repeat this request.", 409)
 		default:
@@ -407,17 +439,23 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 	}
 	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
+func (s *sourceHistoryAccess) checkpointHead(v store.SourceView) (parent string, changed bool, err error) {
+	n := len(v.Revisions)
+	if n == 0 {
+		return "", true, nil
+	}
+	head, err := s.record(v, n-1)
+	if err != nil {
+		return "", false, err
+	}
+	return v.Revisions[n-1], head.Entrypoint != v.Entrypoint || !maps.EqualFunc(head.Files, v.Files, bytes.Equal), nil
+}
+
 func (s *sourceHistoryAccess) createUpdate(ctx context.Context, v store.SourceView, actor, id string) (store.SourceUpdate, error) {
 	var update store.SourceUpdate
-	parent := ""
-	retain := true
-	if n := len(v.Revisions); n > 0 {
-		head, err := s.record(v, n-1)
-		if err != nil {
-			return update, err
-		}
-		parent = v.Revisions[n-1]
-		retain = head.Entrypoint != v.Entrypoint || !maps.EqualFunc(head.Files, v.Files, bytes.Equal)
+	parent, retain, err := s.checkpointHead(v)
+	if err != nil {
+		return update, err
 	}
 	var target snapshothistory.SourceRevision
 	needed := 0
@@ -432,7 +470,7 @@ func (s *sourceHistoryAccess) createUpdate(ctx context.Context, v store.SourceVi
 		}
 		needed++
 	}
-	if needed == 0 || len(v.Revisions)+needed > store.MaxSourceRevisions {
+	if needed == 0 {
 		return update, store.ErrSourceUnavailable
 	}
 	records := make([]snapshothistory.SourceRevision, 0, needed)

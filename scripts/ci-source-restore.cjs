@@ -31,9 +31,14 @@ async function main(){
   const mounts=['--user',process.getuid()+':'+process.getgid(),'-v',local('data')+':/data','-v',local('archive')+':/archive','-v',local('keys')+':/keys:ro','-v',local('engine')+':/engine:ro'];
   const flags=['--source-history-dir','/archive','--source-history-key','/keys/source','--engine-socket','/engine/target.sock'];
   docker('run','--rm',...mounts,'brine:ci',...flags,'--init-source-history');
-  cid=docker('run','-d','-p','127.0.0.1::8080',...mounts,'brine:ci',...flags,'--bind','0.0.0.0','--auth-user','operator','--auth-password','synthetic-browser-only','--api-token','synthetic-api-only');
-  const port=docker('port',cid,'8080/tcp');assert.match(port,/^127\.0\.0\.1:\d+$/);
-  const base='http://'+port;await expect.poll(async()=>{try{return (await fetch(base+'/api/health')).status}catch{return 0}},{timeout:15000}).toBe(200);
+  let base;
+  const start=async(objects,bytes)=>{
+   cid=docker('run','-d','-p','127.0.0.1::8080',...mounts,'brine:ci',...flags,'--source-history-max-objects',String(objects),'--source-history-max-bytes',String(bytes),'--bind','0.0.0.0','--auth-user','operator','--auth-password','synthetic-browser-only','--api-token','synthetic-api-only');
+   const port=docker('port',cid,'8080/tcp');assert.match(port,/^127\.0\.0\.1:\d+$/);
+   base='http://'+port;await expect.poll(async()=>{try{return (await fetch(base+'/api/health')).status}catch{return 0}},{timeout:15000}).toBe(200);
+  };
+  const stop=()=>{docker('stop','-t','10',cid);docker('rm',cid);cid=undefined};
+  await start(4,1048576);
   const api=(method,route,data)=>fetch(base+route,{method,headers:{Authorization:'Bearer synthetic-api-only','Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});
   const name='restore-demo',stack='/stacks/'+name,history='/web'+stack+'/history';
   const src='amends "package://pkg.ushd.ca/dill@0.8.1#/dill.pkl"\nconfig { name = "restore-demo"; engine = "docker" }\n// checkpoint-A\n';
@@ -42,7 +47,8 @@ async function main(){
   const original=fs.readFileSync(slot,'utf8');
   browser=await chromium.launch();const page=await browser.newPage();
   const mutating=[];page.on('request',r=>{if(r.method()==='POST'&&/\/(up|down|start|stop|restart|teardown)$/.test(new URL(r.url()).pathname))mutating.push(r.method())});
-  await page.goto(base+'/login?next='+stack);await page.locator('[name="user"]').fill('operator');await page.locator('[name="password"]').fill('synthetic-browser-only');await page.getByRole('button',{name:/sign in/i}).click();
+  const login=async()=>{await page.goto(base+'/login?next='+stack);await page.locator('[name="user"]').fill('operator');await page.locator('[name="password"]').fill('synthetic-browser-only');await page.getByRole('button',{name:/sign in/i}).click()};
+  await login();
   await page.goto(base+stack);
   const btn=(name)=>page.getByRole('button',{name,exact:true});
   const retain=async()=>{await btn('Review checkpoint').click();await btn('Retain source revision').click();await expect(page.getByText('Checkpoint retained',{exact:false}).first()).toBeVisible()};
@@ -62,7 +68,10 @@ async function main(){
   const edited=fs.readFileSync(slot,'utf8')+'\n// edited-C';
   assert.equal((await api('PUT','/api'+stack,{pkl_content:edited})).status,200);
   assert.equal((await confirm(form)).status(),409);assert.equal(fs.readFileSync(slot,'utf8'),edited);
-  await page.goto(base+stack+'?tab=history');await btn('Review restore from r1').click();
+  await page.goto(base+stack+'?tab=history');
+  await expect(page.getByText(/1 \/ 4 objects \(3 slots remaining\)/)).toBeVisible();
+  await btn('Review restore from r1').click();
+  await expect(page.getByText(/needs 2 archive slot\(s\)\. 3 available/)).toBeVisible();
   refuseReads=true;
   const second=await page.locator('form[action$="/history/confirm"]').evaluate(f=>Object.fromEntries(new FormData(f)));
   assert.equal((await confirm(second)).status(),409);assert.equal(fs.readFileSync(slot,'utf8'),edited);
@@ -76,9 +85,30 @@ async function main(){
   assert.equal((await confirm(second)).status(),409);
   await btn('Review restore from r2').click();await btn('Compare file contents').click();await page.getByText('Source excerpt',{exact:true}).click();
   await expect(page.locator('.source-excerpts')).toContainText('edited-C');
-  assert.equal(fs.readdirSync(local('archive')).filter(n=>n.startsWith('source-object-')).length,3);
+  const objects=()=>fs.readdirSync(local('archive')).filter(n=>n.startsWith('source-object-')).length;
+  assert.equal(objects(),3);
+  stop();
+  await start(1,1);
+  await login();
+  await page.goto(base+stack+'?tab=history');
+  await expect(page.getByText(/3 \/ 1 objects \(0 slots remaining\)/)).toBeVisible();
+  await expect(page.getByText('r3 ← r1',{exact:true})).toBeVisible();
+  await btn('Review restore from r2').click();
+  await expect(page.getByText(/insufficient capacity/)).toBeVisible();
+  await expect(btn('Restore as new revision')).toHaveCount(0);
+  await btn('Compare file contents').click();await page.getByText('Source excerpt',{exact:true}).click();
+  await expect(page.locator('.source-excerpts')).toContainText('edited-C');
+  assert.equal(objects(),3);assert.equal(fs.readFileSync(slot,'utf8'),original);
+  stop();
+  await start(105,1048576);
+  await login();
+  await page.goto(base+stack+'?tab=history');await btn('Review restore from r2').click();
+  await expect(page.getByText(/needs 1 archive slot\(s\)\. 102 available/)).toBeVisible();
+  await btn('Restore as new revision').click();
+  await expect(page.getByText('r4 ← r2',{exact:true})).toBeVisible();
+  assert.equal(fs.readFileSync(slot,'utf8'),edited);assert.equal(objects(),4);
   assert.ok(reads>0);assert.equal(writes,0);assert.equal(mutating.length,0);
-  console.log('Packaged source restore: checkpoint → edit → compare → r3 from r1; r2 preserves the edited bytes. Stale, missing-CSRF, bearer, unavailable target and missing protection-state submissions denied. Zero lifecycle requests and zero target writes.');
+  console.log('Packaged source restore: checkpoint → edit → compare → r3 from r1; r2 preserves the edited bytes. Restart with lower limits preserves history and refuses writes; raising limits on restart permits r4 without reinitialization. Zero lifecycle requests and zero target writes.');
  }finally{
   try{if(browser)await browser.close();if(cid)docker('rm','-f',cid)}finally{await new Promise(resolve=>engine.close(resolve));fs.rmSync(root,{recursive:true,force:true})}
  }

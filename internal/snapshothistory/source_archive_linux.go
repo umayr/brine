@@ -21,13 +21,12 @@ const (
 	sourceObjectPrefix = "source-object-"
 	sourceIdentityKind = "source-history-identity"
 	sourceObjectKind   = "source-history-revision"
-	sourceMaxBytes     = 256 << 20
-	sourceMaxObjects   = 100
 )
 
 type sourceArchive struct {
 	s           *store
 	objectStore [sha256.Size]byte
+	limits      SourceArchiveLimits
 }
 
 type sourcePayload struct {
@@ -47,8 +46,8 @@ func lockSource(dir, key, workspace string) (*store, error) {
 		KeyFile:       key,
 		WorkspaceDir:  workspace,
 		StoreID:       sha256.Sum256([]byte("brine.source-history/path/v1\x00" + filepath.Clean(dir))),
-		MaxBytes:      sourceMaxBytes,
-		MaxOperations: sourceMaxObjects,
+		MaxBytes:      MaxSourceArchiveBytes,
+		MaxOperations: MaxSourceArchiveObjects,
 	}
 	root, keyBytes, normalized, err := validateOptions(options)
 	if err != nil {
@@ -85,7 +84,7 @@ func initSource(dir, key, workspace string) error {
 	return writeNoClobber(s.root, sourceIdentityName, sealed)
 }
 
-func openSource(dir, key, workspace string) (*sourceArchive, error) {
+func openSource(dir, key, workspace string, limits SourceArchiveLimits) (*sourceArchive, error) {
 	s, err := lockSource(dir, key, workspace)
 	if err != nil {
 		return nil, err
@@ -95,10 +94,10 @@ func openSource(dir, key, workspace string) (*sourceArchive, error) {
 		s.close()
 		return nil, err
 	}
-	a := &sourceArchive{s: s, objectStore: objectStore}
+	a := &sourceArchive{s: s, objectStore: objectStore, limits: limits}
 	// Validate existing entries and sync any publication that was visible but
 	// indeterminate after a prior rename.
-	if _, err := a.scan(context.Background(), ""); err != nil || unix.Fsync(int(s.root.Fd())) != nil {
+	if _, err := a.scan(context.Background(), "", true); err != nil || unix.Fsync(int(s.root.Fd())) != nil {
 		s.close()
 		return nil, ErrUnavailable
 	}
@@ -123,7 +122,10 @@ func readSourceIdentity(s *store) ([sha256.Size]byte, int64, error) {
 // scan runs with exclusive access (under the handle mutex once opened). Pending
 // files can be partial writes: check their names and metadata, but never use
 // their bytes as records. Charge every remnant to both quotas.
-func (a *sourceArchive) scan(ctx context.Context, scope string) (sourceUsage, error) {
+func (a *sourceArchive) scan(ctx context.Context, scope string, verify bool) (sourceUsage, error) {
+	if err := ctx.Err(); err != nil {
+		return sourceUsage{}, err
+	}
 	s := a.s
 	if s.check() != nil {
 		return sourceUsage{}, ErrUnavailable
@@ -162,9 +164,14 @@ func (a *sourceArchive) scan(ctx context.Context, scope string) (sourceUsage, er
 		if _, err := hex.Decode(id[:], []byte(idText)); err != nil {
 			return sourceUsage{}, ErrUnavailable
 		}
-		limit := s.maxBytes - u.bytes
-		if limit > maxObjectCiphertextBytes {
-			limit = maxObjectCiphertextBytes
+		limit := min(s.maxBytes-u.bytes, maxObjectCiphertextBytes)
+		if !verify {
+			n, err := s.sealedSize(name)
+			if err != nil || n > limit {
+				return sourceUsage{}, ErrUnavailable
+			}
+			u.bytes += n
+			continue
 		}
 		sealed, err := s.readFile(name, limit)
 		if err != nil {
@@ -185,6 +192,19 @@ func (a *sourceArchive) scan(ctx context.Context, scope string) (sourceUsage, er
 	return u, nil
 }
 
+func (a *sourceArchive) usage(ctx context.Context) (SourceArchiveUsage, error) {
+	// History page admission must not queue behind a full authenticated write scan.
+	if !a.s.mu.TryLock() {
+		return SourceArchiveUsage{}, ErrUnavailable
+	}
+	defer a.s.mu.Unlock()
+	u, err := a.scan(ctx, "", false)
+	if err != nil {
+		return SourceArchiveUsage{}, err
+	}
+	return SourceArchiveUsage{Objects: u.objects, Bytes: u.bytes, Limits: a.limits}, nil
+}
+
 func (a *sourceArchive) decode(id ObjectID, sealed []byte) (sourcePayload, error) {
 	plain, err := openSealed(a.s.key, a.objectStore, id, sourceObjectKind, sealed)
 	var p sourcePayload
@@ -203,15 +223,18 @@ func (a *sourceArchive) decode(id ObjectID, sealed []byte) (sourcePayload, error
 // An I/O failure may leave charged but unreachable objects; the workspace
 // only adds reachability after receiving the complete durable set.
 func (a *sourceArchive) putChain(ctx context.Context, scope string, ancestors []string, records []SourceRevision) ([]string, error) {
-	if !canonicalHex(scope, sha256.Size) || len(records) < 1 || len(records) > 2 || len(ancestors) > sourceMaxObjects {
+	if !canonicalHex(scope, sha256.Size) || len(records) < 1 || len(records) > 2 || len(ancestors) > MaxSourceArchiveObjects {
 		return nil, ErrUnavailable
 	}
 	s := a.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	u, err := a.scan(ctx, scope)
+	u, err := a.scan(ctx, scope, true)
 	if err != nil {
 		return nil, err
+	}
+	if u.objects+len(records) > a.limits.Objects || u.bytes >= a.limits.Bytes {
+		return nil, ErrCapacity
 	}
 	parent := ""
 	seen := map[string]bool{}
@@ -222,9 +245,6 @@ func (a *sourceArchive) putChain(ctx context.Context, scope string, ancestors []
 		}
 		seen[id] = true
 		parent = id
-	}
-	if u.objects+len(records) > s.maxOperations {
-		return nil, ErrCapacity
 	}
 	ids := make([]string, 0, len(records))
 	members := make([][]byte, 0, len(records))
@@ -249,7 +269,7 @@ func (a *sourceArchive) putChain(ctx context.Context, scope string, ancestors []
 		if err != nil {
 			return nil, ErrUnavailable
 		}
-		if len(sealed) > maxObjectCiphertextBytes || int64(len(sealed)) > s.maxBytes-u.bytes {
+		if len(sealed) > maxObjectCiphertextBytes || int64(len(sealed)) > a.limits.Bytes-u.bytes {
 			return nil, ErrCapacity
 		}
 		u.bytes += int64(len(sealed))

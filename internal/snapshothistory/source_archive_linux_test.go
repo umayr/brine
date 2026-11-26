@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -16,13 +18,13 @@ import (
 	"time"
 )
 
-func sourceArchiveFixture(t *testing.T) Options {
+func sourceArchiveFixture(t testing.TB) Options {
 	t.Helper()
 	o, _ := fixture(t, 1<<20, 10)
 	return initSourceArchiveForTest(t, o)
 }
 
-func initSourceArchiveForTest(t *testing.T, o Options) Options {
+func initSourceArchiveForTest(t testing.TB, o Options) Options {
 	t.Helper()
 	// Use a fresh sibling of the snapshot archive under the same trusted base.
 	dir, err := os.MkdirTemp(filepath.Dir(o.ArchiveDir), "source-")
@@ -36,9 +38,13 @@ func initSourceArchiveForTest(t *testing.T, o Options) Options {
 	return o
 }
 
-func openSourceArchiveForTest(t *testing.T, o Options) (*SourceArchive, func()) {
+func openSourceArchiveForTest(t testing.TB, o Options, settings ...SourceArchiveLimits) (*SourceArchive, func()) {
 	t.Helper()
-	a, err := OpenSourceArchive(o.ArchiveDir, o.KeyFile, o.WorkspaceDir)
+	var limits SourceArchiveLimits
+	if len(settings) != 0 {
+		limits = settings[0]
+	}
+	a, err := OpenSourceArchive(o.ArchiveDir, o.KeyFile, o.WorkspaceDir, limits)
 	if err != nil {
 		t.Fatalf("open source archive: %v", err)
 	}
@@ -79,8 +85,7 @@ func (a *SourceArchive) putTestRevision(scope string, r SourceRevision) (string,
 
 func TestSourceArchiveBatchCapacity(t *testing.T) {
 	o := sourceArchiveFixture(t)
-	a, _ := openSourceArchiveForTest(t, o)
-	a.storage.s.maxOperations = 1
+	a, _ := openSourceArchiveForTest(t, o, SourceArchiveLimits{Objects: 1})
 	r := sourceRevisionForTest()
 	if _, e := a.PutChain(context.Background(), sourceTestScope, nil, []SourceRevision{r, r}); !errors.Is(e, ErrCapacity) {
 		t.Fatal(e)
@@ -189,7 +194,7 @@ func TestSourceArchiveRejectsCorruption(t *testing.T) {
 			id := putSourceRevisionForTest(t, a, sourceRevisionForTest())
 			closeArchive()
 			tc.mutate(t, &o, id)
-			reopened, err := OpenSourceArchive(o.ArchiveDir, o.KeyFile, o.WorkspaceDir)
+			reopened, err := OpenSourceArchive(o.ArchiveDir, o.KeyFile, o.WorkspaceDir, SourceArchiveLimits{Objects: 1, Bytes: 1})
 			if reopened != nil {
 				if err := reopened.Close(); err != nil {
 					t.Errorf("close unexpected handle: %v", err)
@@ -203,26 +208,94 @@ func TestSourceArchiveRejectsCorruption(t *testing.T) {
 	}
 }
 
+// Run with -benchtime=1x on a disposable Linux runner. The fixture seeds
+// almost the full hard read bound; the timer covers only the write-time scan.
+func BenchmarkSourceArchiveScanAtLimit(b *testing.B) {
+	o := sourceArchiveFixture(b)
+	a, _ := openSourceArchiveForTest(b, o)
+	r := sourceRevisionForTest()
+	r.Files = map[string][]byte{r.Entrypoint: make([]byte, 765<<10)}
+	plain, err := json.Marshal(sourcePayload{Scope: sourceTestScope, Revision: r})
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < MaxSourceArchiveObjects; i++ {
+		var id ObjectID
+		binary.BigEndian.PutUint32(id[:4], uint32(i+1))
+		sealed, err := seal(a.storage.s.key, a.storage.objectStore, id, sourceObjectKind, plain)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(o.ArchiveDir, fmt.Sprintf("%s%x", sourceObjectPrefix, id[:])), sealed, 0600); err != nil {
+			b.Fatal(err)
+		}
+	}
+	ctx := context.Background()
+	b.SetBytes(int64(len(plain)) * MaxSourceArchiveObjects)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := a.storage.scan(ctx, sourceTestScope, true); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestSourceArchiveQuotas(t *testing.T) {
 	t.Run("revision count", func(t *testing.T) {
-		a, _ := openSourceArchiveForTest(t, sourceArchiveFixture(t))
+		o := sourceArchiveFixture(t)
+		a, closeArchive := openSourceArchiveForTest(t, o)
+		ctx := context.Background()
 		r := sourceRevisionForTest()
-		for i := 0; i < sourceMaxObjects; i++ {
-			r.Actor = fmt.Sprintf("synthetic-actor-%d", i)
-			putSourceRevisionForTest(t, a, r)
+		var lineage []string
+		for i := 0; i < DefaultSourceArchiveObjects; i++ {
+			if i > 0 {
+				r.Parent = lineage[i-1]
+			}
+			ids, err := a.PutChain(ctx, sourceTestScope, lineage, []SourceRevision{r})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lineage = append(lineage, ids[0])
 		}
-		r.Actor = "synthetic-over-quota"
-		if id, err := a.putTestRevision(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
-			t.Fatalf("put beyond revision quota: id=%q, err=%v, want no ID and ErrCapacity", id, err)
+		r.Parent = lineage[len(lineage)-1]
+		if ids, err := a.PutChain(ctx, sourceTestScope, lineage, []SourceRevision{r}); len(ids) != 0 || !errors.Is(err, ErrCapacity) {
+			t.Fatalf("default write limit: %v, %v", ids, err)
+		}
+		closeArchive()
+
+		a, closeArchive = openSourceArchiveForTest(t, o, SourceArchiveLimits{Objects: DefaultSourceArchiveObjects + 2})
+		ids, err := a.PutChain(ctx, sourceTestScope, lineage, []SourceRevision{r})
+		if err != nil || len(ids) != 1 {
+			t.Fatalf("raise quota on same archive: %v, %v", ids, err)
+		}
+		lineage = append(lineage, ids[0])
+		usage, err := a.Usage(ctx)
+		if err != nil || usage.Objects != len(lineage) || usage.RemainingObjects() != 1 || usage.Bytes <= 0 {
+			t.Fatalf("raised quota usage: %+v, %v", usage, err)
+		}
+		closeArchive()
+
+		a, _ = openSourceArchiveForTest(t, o, SourceArchiveLimits{Objects: 1, Bytes: 1})
+		usage, err = a.Usage(ctx)
+		if err != nil || usage.Objects != len(lineage) || usage.Bytes <= 1 || usage.RemainingObjects() != 0 || usage.RemainingBytes() != 0 {
+			t.Fatalf("lowered quota usage: %+v, %v", usage, err)
+		}
+		last := lineage[len(lineage)-1]
+		if got, err := a.Get(sourceTestScope, last); err != nil || !reflect.DeepEqual(got, r) {
+			t.Fatalf("over-quota archive lost its revision: %v", err)
+		}
+		r.Parent = last
+		if ids, err := a.PutChain(ctx, sourceTestScope, lineage, []SourceRevision{r}); len(ids) != 0 || !errors.Is(err, ErrCapacity) {
+			t.Fatalf("lowered quota admitted a write: %v, %v", ids, err)
 		}
 	})
 	t.Run("stored bytes", func(t *testing.T) {
 		o := sourceArchiveFixture(t)
-		a, _ := openSourceArchiveForTest(t, o)
+		a, closeArchive := openSourceArchiveForTest(t, o)
 		r := sourceRevisionForTest()
 		id := putSourceRevisionForTest(t, a, r)
-		// Lower the limit to current disk usage to exercise the exact boundary
-		// without writing hundreds of MiB in CI.
+		closeArchive()
+		// Leave a byte of headroom, not enough for a complete sealed revision.
 		var used int64
 		for _, name := range []string{sourceIdentityName, sourceObjectPrefix + id} {
 			info, err := os.Stat(filepath.Join(o.ArchiveDir, name))
@@ -231,7 +304,7 @@ func TestSourceArchiveQuotas(t *testing.T) {
 			}
 			used += info.Size()
 		}
-		a.storage.s.maxBytes = used
+		a, _ = openSourceArchiveForTest(t, o, SourceArchiveLimits{Bytes: used + 1})
 		r.Actor = "synthetic-over-quota"
 		if id, err := a.putTestRevision(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
 			t.Fatalf("put beyond byte quota: id=%q, err=%v, want no ID and ErrCapacity", id, err)

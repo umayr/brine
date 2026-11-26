@@ -19,7 +19,7 @@ import (
 
 var fixtureHome = regexp.MustCompile(`^/brine-go-test-home\.[A-Za-z0-9]{8}$`)
 
-func fixture(t *testing.T, maxBytes int64, maxOps int) (Options, func()) {
+func fixture(t testing.TB, maxBytes int64, maxOps int) (Options, func()) {
 	t.Helper()
 	home := os.Getenv("HOME")
 	if !fixtureHome.MatchString(home) {

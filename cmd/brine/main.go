@@ -84,6 +84,8 @@ func run() error {
 	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
 	flag.StringVar(&cfg.SourceHistoryDir, "source-history-dir", "", "pre-initialized private source-revision archive outside Brine data (opt-in)")
 	flag.StringVar(&cfg.SourceHistoryKey, "source-history-key", "", "separately provisioned private 32-byte source archive key file")
+	flag.IntVar(&cfg.SourceHistoryLimits.Objects, "source-history-max-objects", 0, fmt.Sprintf("maximum source archive objects across all stacks (0: %d, maximum %d)", snapshothistory.DefaultSourceArchiveObjects, snapshothistory.MaxSourceArchiveObjects))
+	flag.Int64Var(&cfg.SourceHistoryLimits.Bytes, "source-history-max-bytes", 0, fmt.Sprintf("maximum logical sealed source archive bytes (0: %d MiB, maximum %d MiB)", snapshothistory.DefaultSourceArchiveBytes>>20, snapshothistory.MaxSourceArchiveBytes>>20))
 	initSourceHistory := flag.Bool("init-source-history", false, "initialize an empty, externally provisioned source archive and exit; never generate keys")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
 
