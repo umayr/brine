@@ -31,11 +31,15 @@ func (h *Handler) stackAutoCheckpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value := r.PostForm.Get("enabled")
-	if value != "yes" && value != "no" {
+	if value != "yes" && value != "no" && value != "inherit" {
 		http.Error(w, "Invalid checkpoint setting", 400)
 		return
 	}
-	enabled := value == "yes"
+	var override *bool
+	if value != "inherit" {
+		enabled := value == "yes"
+		override = &enabled
+	}
 	unlock, ok := h.admitStack(w, r, name)
 	if !ok {
 		return
@@ -46,9 +50,9 @@ func (h *Handler) stackAutoCheckpoint(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Stack unavailable", 409)
 		return
 	}
-	if st.AutoCheckpoint != enabled {
-		if err = h.captureSavedSource(r, st, &enabled); err != nil {
-			http.Error(w, "Auto-checkpoint setting not changed. Check workspace eligibility, protection state and archive capacity.", 409)
+	if !sameCheckpointOverride(st.AutoCheckpoint, override) {
+		if err = h.captureSavedSource(r, st, true, override); err != nil {
+			http.Error(w, "Auto-Checkpoint setting not confirmed. Check History, workspace eligibility and archive capacity before retrying.", 409)
 			return
 		}
 	}
@@ -76,7 +80,14 @@ func (h *Handler) BeginSourceSave(r *http.Request) (observe func(string) bool, r
 	}
 	return func(name string) bool {
 		st, err := h.store.Get(name)
-		if err != nil || st == nil || !st.AutoCheckpoint {
+		if err != nil || st == nil || st.Git != nil || st.RemoteGit != nil {
+			return false
+		}
+		enabled, err := h.effectiveCheckpoint(st)
+		if err != nil {
+			return true
+		}
+		if !enabled {
 			return false
 		}
 		// Bearer/no-auth saves retain their existing permissions but do not
@@ -84,7 +95,8 @@ func (h *Handler) BeginSourceSave(r *http.Request) (observe func(string) bool, r
 		if lease == nil {
 			return true
 		}
-		return h.captureSavedSource(r.WithContext(lease), st, nil) != nil
+		err = h.captureSavedSource(r.WithContext(lease), st, false, nil)
+		return err != nil && !errors.Is(err, store.ErrSourceCheckpointDisabled)
 	}, release
 }
 
@@ -103,7 +115,21 @@ func (h *Handler) checkpointNotice(w http.ResponseWriter, missed bool, dest stri
 	return u.String()
 }
 
-func (h *Handler) captureSavedSource(r *http.Request, st *store.Stack, setting *bool) error {
+func sameCheckpointOverride(a, b *bool) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+func (h *Handler) effectiveCheckpoint(st *store.Stack) (bool, error) {
+	if st.AutoCheckpoint != nil {
+		return *st.AutoCheckpoint, nil
+	}
+	if workspace, ok := h.store.(store.RevisionWorkspace); ok {
+		return workspace.SourceCheckpointDefault()
+	}
+	return false, nil
+}
+
+func (h *Handler) captureSavedSource(r *http.Request, st *store.Stack, setOverride bool, override *bool) error {
 	if h.sourceHistory == nil || !auth.CookieAuthenticated(r) || r.Context().Err() != nil {
 		return store.ErrSourceUnavailable
 	}
@@ -116,7 +142,7 @@ func (h *Handler) captureSavedSource(r *http.Request, st *store.Stack, setting *
 	if err != nil {
 		return err
 	}
-	checkpoint := setting == nil || *setting
+	checkpoint := !setOverride || override != nil && *override
 	records := false
 	if checkpoint {
 		_, records, err = s.checkpointHead(v)
@@ -124,23 +150,27 @@ func (h *Handler) captureSavedSource(r *http.Request, st *store.Stack, setting *
 			return err
 		}
 	}
-	if setting == nil && !records {
+	if !setOverride && !records {
 		return nil
 	}
 	actor := auth.Identity(r)
 	if actor == "" {
 		return errors.New("checkpoint actor unavailable")
 	}
-	return s.workspace.CommitSource(r.Context(), st.Name, v.Baseline, func(current store.SourceView) (store.SourceUpdate, error) {
+	commit := s.workspace.CommitSource
+	if !setOverride {
+		commit = s.workspace.CommitAutomaticCheckpoint
+	}
+	return commit(r.Context(), st.Name, v.Baseline, func(current store.SourceView) (store.SourceUpdate, error) {
 		if err := h.agent.Dill().CheckSourceProtection(st.Name); err != nil {
 			return store.SourceUpdate{}, store.ErrSourceUnavailable
 		}
-		update := store.SourceUpdate{AutoCheckpoint: setting}
+		update := store.SourceUpdate{SetAutoCheckpoint: setOverride, AutoCheckpoint: override}
 		if !records {
 			return update, nil
 		}
 		update, err := s.createUpdate(r.Context(), current, actor, "")
-		update.AutoCheckpoint = setting
+		update.SetAutoCheckpoint, update.AutoCheckpoint = setOverride, override
 		return update, err
 	})
 }

@@ -57,7 +57,7 @@ func TestSourceHistoryPostsRequireBrowserSessionAndCSRF(t *testing.T) {
 		t.Fatalf("authenticated CSRF lookup: status %d, token present %t", response.Code, csrf != "")
 	}
 
-	for _, action := range []string{"review", "confirm", "auto-checkpoint"} {
+	for _, action := range []string{"review", "confirm", "auto-checkpoint", "global-default"} {
 		for _, tc := range []struct {
 			name, token, wantBody string
 			local, bearer, cookie bool
@@ -79,7 +79,11 @@ func TestSourceHistoryPostsRequireBrowserSessionAndCSRF(t *testing.T) {
 				if tc.token != "" {
 					form.Set("_csrf", tc.token)
 				}
-				r := post("/web/stacks/example/history/"+action, form)
+				path := "/web/stacks/example/history/" + action
+				if action == "global-default" {
+					path = "/settings/source-history"
+				}
+				r := post(path, form)
 				if tc.cookie {
 					r.AddCookie(cookies[0])
 				}
@@ -92,7 +96,7 @@ func TestSourceHistoryPostsRequireBrowserSessionAndCSRF(t *testing.T) {
 				}
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
-				if action == "auto-checkpoint" && tc.wantStatus == http.StatusBadRequest {
+				if (action == "auto-checkpoint" || action == "global-default") && tc.wantStatus == http.StatusBadRequest {
 					tc.wantBody = "Invalid checkpoint setting"
 				}
 				if w.Code != tc.wantStatus || !strings.Contains(w.Body.String(), tc.wantBody) {

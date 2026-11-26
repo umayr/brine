@@ -92,16 +92,16 @@ type sourceDiff struct {
 	Lines                     []sourceLine
 }
 type historyPage struct {
-	Stack, CSRF, Message, Review, ID, Proof               string
-	Rows                                                  []revisionRow
-	Requests                                              []requestEvidence
-	RequestError, ShowRequests, Enabled, Compare, Confirm bool
-	AutoCheckpoint                                        bool
-	From, Previous, Page, Next, Prev, Total               int
-	Files                                                 []sourceDiff
-	EntryBefore, EntryAfter                               string
-	Capacity                                              *snapshothistory.SourceArchiveUsage
-	SlotsNeeded                                           int
+	Stack, CSRF, Message, Review, ID, Proof                          string
+	Rows                                                             []revisionRow
+	Requests                                                         []requestEvidence
+	RequestError, ShowRequests, Enabled, Compare, Confirm            bool
+	AutoCheckpointStatus, AutoCheckpointMode, AutoCheckpointOverride string
+	From, Previous, Page, Next, Prev, Total                          int
+	Files                                                            []sourceDiff
+	EntryBefore, EntryAfter                                          string
+	Capacity                                                         *snapshothistory.SourceArchiveUsage
+	SlotsNeeded                                                      int
 }
 
 func (h *Handler) manualRows(name string) ([]requestEvidence, bool, error) {
@@ -206,7 +206,22 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 			p.Next = p.Page + 1
 		}
 		p.Enabled = true
-		p.AutoCheckpoint = st.AutoCheckpoint
+		enabled, err := h.effectiveCheckpoint(st)
+		p.AutoCheckpointMode = "Global default"
+		if st.AutoCheckpoint != nil {
+			p.AutoCheckpointMode = "Stack override"
+			if *st.AutoCheckpoint {
+				p.AutoCheckpointOverride = "on"
+			} else {
+				p.AutoCheckpointOverride = "off"
+			}
+		}
+		p.AutoCheckpointStatus = "Off"
+		if err != nil {
+			p.AutoCheckpointStatus = "Unavailable"
+		} else if enabled {
+			p.AutoCheckpointStatus = "On"
+		}
 		for i := p.Total - 1 - 10*(p.Page-1); i >= max(0, p.Total-10*p.Page); i-- {
 			if r.Context().Err() != nil {
 				http.Error(w, "Session or request expired", 403)

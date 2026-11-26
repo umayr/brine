@@ -108,10 +108,22 @@ async function main(){
   await btn('Restore as new revision').click();
   await expect(page.getByText('r4 ← r2',{exact:true})).toBeVisible();
   assert.equal(fs.readFileSync(slot,'utf8'),edited);assert.equal(objects(),4);
+  const autoSummary=page.locator('#stack-source-history details > summary');
+  await page.goto(base+'/settings/source-history');
+  await btn('Enable Auto-Checkpoint').click();
+  await expect(btn('Disable Auto-Checkpoint')).toBeVisible();
+  assert.equal(objects(),4); // No backfill on global activation.
   await page.goto(base+stack+'?tab=history');
-  await page.getByText('Auto-checkpoint: off',{exact:true}).click();
-  await btn('Enable and retain current source').click();
-  await expect(page.getByText('Auto-checkpoint: on',{exact:true})).toBeVisible();
+  await expect(autoSummary).toContainText('On · Global default');
+  await autoSummary.click();
+  await btn('Disable Auto-Checkpoint').click();
+  await expect(autoSummary).toContainText('Off · Stack override');
+  await page.goto(base+stack+'/edit');await editor.click();await editor.press('Control+End');
+  await page.keyboard.insertText('\n// browser-override-off');
+  await btn('Update').click();await page.waitForURL(base+stack);
+  assert.equal(objects(),4);
+  await btn('Restore').click();await autoSummary.click();await btn('Use global default').click();
+  await expect(autoSummary).toContainText('On · Global default');
   await page.goto(base+stack+'/edit');await editor.click();await editor.press('Control+End');
   await page.keyboard.insertText('\n// browser-auto-E');
   await btn('Update').click();await page.waitForURL(base+stack);
@@ -128,9 +140,11 @@ async function main(){
   assert.match(fs.readFileSync(slot,'utf8'),/browser-saved-with-warning/);
   refuseReads=false;
   assert.equal(objects(),5);
+  await page.goto(base+'/settings/source-history');
+  await btn('Disable Auto-Checkpoint').click();
+  await expect(btn('Enable Auto-Checkpoint')).toBeVisible();
   await page.goto(base+stack+'?tab=history');
-  await page.getByText('Auto-checkpoint: on',{exact:true}).click();await btn('Turn off Auto-checkpoint').click();
-  await expect(page.getByText('Auto-checkpoint: off',{exact:true})).toBeVisible();
+  await expect(autoSummary).toContainText('Off · Global default');
   assert.ok(reads>0);assert.equal(writes,0);assert.equal(mutating.length,0);
   console.log('Packaged source restore: checkpoint → edit → compare → r3 from r1; r2 preserves the edited bytes. Restart with lower limits preserves history and refuses writes; raising limits on restart permits r4 without reinitialization. Zero lifecycle requests and zero target writes.');
  }finally{

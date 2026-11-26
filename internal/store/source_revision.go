@@ -68,16 +68,22 @@ type SourceView struct {
 	Files                       map[string][]byte
 }
 type SourceUpdate struct {
-	NewRevisions   []string
-	AutoCheckpoint *bool // nil leaves the registration's preference unchanged.
-	Entrypoint     string
-	Files          map[string][]byte
+	NewRevisions      []string
+	SetAutoCheckpoint bool
+	AutoCheckpoint    *bool // When SetAutoCheckpoint is true, nil means inherit.
+	Entrypoint        string
+	Files             map[string][]byte
 } // nil Files: retain only, do not rewrite source.
 type SourceChange func(SourceView) (SourceUpdate, error)
 type RevisionWorkspace interface {
 	ReviewSource(context.Context, string) (SourceView, error)
 	CommitSource(context.Context, string, string, SourceChange) error
+	CommitAutomaticCheckpoint(context.Context, string, string, SourceChange) error
+	SourceCheckpointDefault() (bool, error)
+	SetSourceCheckpointDefault(context.Context, bool) error
 }
+
+var ErrSourceCheckpointDisabled = errors.New("automatic source checkpoint disabled")
 
 func sourcePathOK(p string, dir bool) bool {
 	if !path.IsAbs(p) && path.Clean(p) == p && len(p) <= 1024 {

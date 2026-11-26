@@ -1,5 +1,16 @@
 const {test,expect}=require('@playwright/test');
 const base=process.env.BRINE_FIXTURE_BASE_URL;
+test('Source History is a settings sibling, without mutating controls when no archive is configured',async({page})=>{
+ await page.goto(base+'/settings');
+ const nav=page.getByRole('navigation',{name:'Settings sections'});
+ await nav.getByRole('link',{name:'Source History',exact:true}).click();
+ await expect(nav.getByRole('link',{name:'Source History',exact:true})).toHaveAttribute('aria-current','page');
+ await expect(nav.getByRole('link',{name:'Appearance',exact:true})).toBeVisible();
+ await expect(nav.getByRole('link',{name:'Live Updates',exact:true})).toBeVisible();
+ await expect(page.getByRole('heading',{name:'Default Auto-Checkpoint'})).toBeVisible();
+ await expect(page.getByRole('status').getByText('Configure a private source archive',{exact:false})).toBeVisible();
+ await expect(page.getByRole('button',{name:'Enable Auto-Checkpoint',exact:true})).toHaveCount(0);
+});
 test('Live Updates is a sibling of Appearance; settings persist and reach open stack tabs',async({page,context})=>{
  await page.goto(base+'/settings');
  await page.getByRole('link',{name:'Live Updates',exact:true}).click();

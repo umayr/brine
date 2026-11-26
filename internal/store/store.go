@@ -34,7 +34,7 @@ type Stack struct {
 	Git            *GitSource       `json:"git,omitempty"` // nil for locally-managed stacks
 	RemoteGit      *RemoteGitPolicy `json:"remote_git,omitempty"`
 	SourceHistory  *SourceLineage   `json:"source_history,omitempty"` // Non-secret pointers only; project bytes are never stored in metadata.
-	AutoCheckpoint bool             `json:"auto_checkpoint,omitempty"`
+	AutoCheckpoint *bool            `json:"auto_checkpoint,omitempty"`
 }
 
 // EffectiveEntrypoint reports the filename used to read the workspace configuration.

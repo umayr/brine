@@ -82,7 +82,11 @@ func readWorkspaceFile(dir int, name string) ([]byte, error) {
 // writeWorkspaceMetadata durably replaces metadata, including deployed Git
 // intents. Source selection must never roll back through a partial write.
 func writeWorkspaceMetadata(dir int, data []byte) error {
-	if old, err := openWorkspaceFile(dir, "meta.json", unix.O_RDONLY); err == nil {
+	return replaceWorkspaceMetadata(dir, "meta.json", data)
+}
+
+func replaceWorkspaceMetadata(dir int, dest string, data []byte) error {
+	if old, err := openWorkspaceFile(dir, dest, unix.O_RDONLY); err == nil {
 		if err := old.Close(); err != nil {
 			return err
 		}
@@ -103,7 +107,7 @@ func writeWorkspaceMetadata(dir int, data []byte) error {
 	if err := errors.Join(writeErr, f.Sync(), f.Close()); err != nil {
 		return err
 	}
-	if err := unix.Renameat(dir, name, dir, "meta.json"); err != nil {
+	if err := unix.Renameat(dir, name, dir, dest); err != nil {
 		return err
 	}
 	return unix.Fsync(dir)

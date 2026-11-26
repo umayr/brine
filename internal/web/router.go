@@ -54,6 +54,8 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		r.Get("/", h.dashboard)
 		r.Get("/settings", h.settingsAppearance)
 		r.Get("/settings/live-updates", h.settingsLiveUpdates)
+		r.Get("/settings/source-history", h.settingsSourceHistory)
+		r.Post("/settings/source-history", h.saveSourceHistorySettings)
 		r.Get("/variables", h.variablesPage)
 		r.Post("/variables", h.variablesSave)
 		// Keep previously shared bookmarks and form submissions working.

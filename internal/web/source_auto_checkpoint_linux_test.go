@@ -110,14 +110,39 @@ func TestSourceAutoCheckpointSavesWithVisibleWarningWhenArchiveIsFull(t *testing
 			t.Fatalf("saved source=%q want %q", got, content)
 		}
 	}
+	global := func(value string) {
+		t.Helper()
+		w := req("POST", "/settings/source-history", url.Values{"enabled": {value}, "_csrf": {csrf}}, cookie)
+		if w.Code != 303 {
+			t.Fatalf("global default %s: %d %s", value, w.Code, w.Body.String())
+		}
+		w = req("GET", "/settings/source-history", nil, cookie)
+		label := "Enable Auto-Checkpoint"
+		if value == "yes" {
+			label = "Disable Auto-Checkpoint"
+		}
+		if w.Code != 200 || !strings.Contains(w.Body.String(), label) {
+			t.Fatalf("settings state %s: %d", value, w.Code)
+		}
+	}
 	revisions(0)
-	toggle("yes")
+	global("yes")
+	revisions(0) // No global backfill.
+	toggle("no")
+	save("value = 0\n", false)
+	revisions(0) // Explicit off wins.
+	toggle("inherit")
+	revisions(0)
+	save("value = 1\n", false)
 	revisions(1)
+	global("no")
+	save("value = 2\n", false)
+	revisions(1)
+	toggle("yes")
+	revisions(2) // Explicit enable retains the current baseline.
 	save("value = 2\n", false)
 	revisions(2)
-	save("value = 2\n", false)
-	revisions(2)
-	save("value = 3\n", true)
+	save("value = 3\n", true) // Explicit on wins; quota failure does not lose the saved edit.
 	revisions(2)
 	v, err := st.ReviewSource(context.Background(), "demo")
 	check(err)
@@ -126,7 +151,7 @@ func TestSourceAutoCheckpointSavesWithVisibleWarningWhenArchiveIsFull(t *testing
 	if w.Code != 200 || !strings.Contains(body, "Comparing r1 → r2") || !strings.Contains(body, "value = 2") || strings.Contains(body, "/history/confirm") {
 		t.Fatalf("unexpected read-only comparison: %d %s", w.Code, body)
 	}
-	toggle("no")
+	toggle("inherit")
 	save("value = 4\n", false)
 	revisions(2)
 }
