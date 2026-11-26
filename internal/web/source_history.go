@@ -397,7 +397,13 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 				}
 			}
 		}
-		p.Proof = s.proof(csrf, name, kind, id, v.Baseline, time.Now().Add(5*time.Minute).Unix())
+		if r.Context().Err() != nil {
+			http.Error(w, "Session or request expired", 403)
+			return
+		}
+		if p.Confirm {
+			p.Proof = s.proof(csrf, name, kind, id, v.Baseline, time.Now().Add(5*time.Minute).Unix())
+		}
 		h.renderPartial(w, r, "stack-history", p)
 		return
 	}
