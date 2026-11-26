@@ -269,7 +269,7 @@ func (h *stackHandler) lifecycle(w http.ResponseWriter, r *http.Request, action 
 		return
 	}
 	if observed := r.Header.Get(planstate.Header); action == "up" && observed != "" {
-		now, e := planstate.Tag(stack, h.agent.Dill().Variables)
+		now, e := planstate.Tag(stack, h.agent.Dill())
 		if e != nil || now != observed {
 			w.Header().Set("X-Brine-Plan-Stale", "true")
 			writeError(w, http.StatusPreconditionFailed, "Inputs changed or unavailable. Plan again; deployment was not started.")

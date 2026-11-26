@@ -115,6 +115,10 @@
         const xhr = event.detail.xhr;
         if (!pending || xhr !== pending) return;
         pending = null;
+        if (xhr.status === 409 && xhr.getResponseHeader('X-Brine-Plan-Stale') === 'true') {
+          markStale(true);
+          return;
+        }
         if (result.querySelector('.stack-loading') || empty()) {
           result.textContent = 'Plan unavailable. No current plan was returned.';
         } else if (!result.querySelector('.ui-notice-error,.ui-notice-warning')) {

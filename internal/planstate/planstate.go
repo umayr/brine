@@ -11,8 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/umayr/brine/internal/configvars"
+	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/target"
 )
 
 const Header = "X-Brine-Plan-Inputs"
@@ -22,16 +23,20 @@ var ErrUnavailable = errors.New("plan inputs unavailable")
 
 // Brine editor, entrypoint, Git and revision publications update the registration.
 // Include effective variable values separately: even shared edits can affect it.
-func Tag(stack *store.Stack, vars *configvars.Store) (string, error) {
-	if stack == nil || vars == nil {
+func Tag(stack *store.Stack, runner *dill.Runner) (string, error) {
+	if stack == nil || runner == nil {
 		return "", ErrUnavailable
 	}
-	values, err := vars.Effective(stack.Name)
-	if err != nil {
-		return "", ErrUnavailable
+	var values map[string]string
+	if runner.Profile != target.Alpha && runner.StrictActions == nil && runner.QualifiedOperation == nil && runner.Variables != nil {
+		var err error
+		values, err = runner.Variables.Effective(stack.Name)
+		if err != nil {
+			return "", ErrUnavailable
+		}
 	}
 	mac := hmac.New(sha256.New, key[:])
-	if err := json.NewEncoder(mac).Encode([]any{stack, values}); err != nil {
+	if err := json.NewEncoder(mac).Encode([]any{stack, runner.Engine, runner.Socket, runner.Profile, values}); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(mac.Sum(nil)), nil

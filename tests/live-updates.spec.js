@@ -22,6 +22,18 @@ test('Live Updates is a sibling of Appearance; settings persist and reach open s
  await stack.getByRole('tab',{name:'Compose'}).click();await stack.clock.fastForward(10000);expect(reads).toBe(3);
  await stack.close();
 });
+test('a conflicted first plan blocks deployment until a fresh tagged response',async({page})=>{
+ let conflict=true;
+ await page.route('**/web/stacks/media/plan',r=>r.fulfill(conflict?
+  {status:409,headers:{'X-Brine-Plan-Stale':'true'},body:'Replan'}:
+  {headers:{'Content-Type':'text/html','X-Brine-Plan-Inputs':'f'.repeat(64)},body:'<p>Fresh snapshot</p>'}));
+ await page.goto(base+'/stacks/media');await page.locator('#plan-button').click();
+ await expect(page.locator('#deploy-button')).toBeDisabled();await expect(page.locator('#plan-stale')).toBeVisible();
+ conflict=false;await page.locator('#plan-button').click();await expect(page.locator('#plan-result')).toHaveText('Fresh snapshot');
+ await expect(page.locator('#deploy-button')).toBeEnabled();await expect(page.locator('#plan-stale')).toBeHidden();
+ await page.evaluate(()=>window.dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));
+ await expect(page.locator('#deploy-button')).toBeDisabled();await page.locator('#plan-button').click();await expect(page.locator('#deploy-button')).toBeEnabled();
+});
 test('an observed source change keeps the old diff marked stale and blocks Deploy until a fresh plan',async({page})=>{
  await page.route('**/web/stacks/media/plan',r=>r.fulfill({headers:{'Content-Type':'text/html','X-Brine-Plan-Inputs':'a'.repeat(64)},body:'<p>Prior snapshot</p>'}));
  await page.route('**/web/stacks/media/git/pull',r=>r.fulfill({contentType:'text/html',body:'Updated'}));

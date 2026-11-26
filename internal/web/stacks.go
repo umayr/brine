@@ -479,21 +479,21 @@ func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run := h.agent.Dill()
-	before, tagErr := planstate.Tag(stack, run.Variables)
+	before, tagErr := planstate.Tag(stack, run)
 	result, err := run.Plan(r.Context(), stack.PklPath)
 	if err != nil {
 		h.renderAlert(w, "error", err.Error())
 		return
 	}
 	// This is a precondition on managed inputs, not a Dill apply receipt.
-	if !h.variableModeDisabled() && run.Variables != nil {
-		after, e := planstate.Tag(stack, run.Variables)
-		if tagErr != nil || e != nil || before != after {
-			http.Error(w, "Inputs changed or unavailable. Plan again.", http.StatusConflict)
-			return
-		}
-		w.Header().Set(planstate.Header, after)
+	current, readErr := h.store.Get(name)
+	after, e := planstate.Tag(current, run)
+	if readErr != nil || tagErr != nil || e != nil || before != after {
+		w.Header().Set("X-Brine-Plan-Stale", "true")
+		http.Error(w, "Inputs changed or unavailable. Plan again.", http.StatusConflict)
+		return
 	}
+	w.Header().Set(planstate.Header, after)
 	w.Header().Set("Cache-Control", "no-store")
 	h.renderPartial(w, r, "plan-diff", result)
 }

@@ -197,7 +197,7 @@ test('legacy deploy pages report interrupted streams as unknown', async () => {
     };
     const detail = read('internal/web/templates/stacks/detail.html');
     const script = detail.slice(detail.indexOf('async function runAction('), detail.indexOf('</script>', detail.indexOf('async function runAction(')));
-    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status', 'plan-button', 'plan-result'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, replaceChildren() {}}]));
+    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status', 'deploy-button', 'plan-button', 'plan-result'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, replaceChildren() {}}]));
     const context = {document: {body: {}, getElementById: id => elements[id] || null, querySelectorAll: () => []}, htmx: {trigger() {}}, fetch, BrineUI: ui, brineHeaders: x => x, showToast() {}, TextDecoder, Date};
     vm.createContext(context); vm.runInContext(script, context);
     await context.runAction('up', 'test');
@@ -254,7 +254,7 @@ test('git actions refresh revision state and streamed push failure remains faile
   assert.match(template, /id="git-state-values"[^>]*hx-trigger="git-refresh from:body"[^>]*hx-select="#git-state-values"/);
   const script = template.slice(template.indexOf('async function runAction('), template.indexOf('</script>', template.indexOf('async function runAction(')));
   for (const [marker, expected] of [['[brine:error] push failed', 'failed'], ['[brine:done] git push complete', 'complete']]) {
-    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, scrollTop: 0, scrollHeight: 0}]));
+    const elements = Object.fromEntries(['action-output', 'action-log', 'action-title', 'action-status', 'deploy-button', 'plan-button', 'plan-result'].map(id => [id, {textContent: '', dataset: {}, classList: {remove() {}}, replaceChildren(){}, scrollTop: 0, scrollHeight: 0}]));
     const events = []; let readCount = 0;
     const context = {
       document: {body: {}, getElementById: id => elements[id] || null, querySelectorAll: () => []},

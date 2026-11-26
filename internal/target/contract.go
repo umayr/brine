@@ -41,6 +41,18 @@ type Identity struct {
 	Status  string
 }
 
+// Location describes the selected transport, not negotiated daemon identity.
+func (i Identity) Location() string {
+	if p, ok := strings.CutPrefix(i.Socket, "unix://"); ok && filepath.IsAbs(p) && filepath.Clean(p) == p {
+		return "Local"
+	}
+	for _, scheme := range []string{"tcp://", "ssh://", "http://", "https://"} {
+		if strings.HasPrefix(i.Socket, scheme) {
+			return "Network endpoint"
+		}
+	}
+	return "Unconfirmed"
+}
 func Configured(profile, engine, socket string) Identity {
 	if profile == "" {
 		profile = Legacy

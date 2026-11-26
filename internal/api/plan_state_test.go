@@ -62,7 +62,7 @@ func TestReviewedInputsCheckedBeforeExecution(t *testing.T) {
 			t.Fatal("precondition not identified")
 		}
 	}
-	tag, err := planstate.Tag(s, vars)
+	tag, err := planstate.Tag(s, run)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestReviewedInputsCheckedBeforeExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempt(tag, 412)
-	tag, err = planstate.Tag(s, vars)
+	tag, err = planstate.Tag(s, run)
 	if err != nil {
 		t.Fatal(err)
 	}
