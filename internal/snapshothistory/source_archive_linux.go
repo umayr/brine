@@ -4,6 +4,7 @@ package snapshothistory
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,7 +12,6 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	"golang.org/x/sys/unix"
 )
@@ -38,7 +38,7 @@ type sourcePayload struct {
 type sourceUsage struct {
 	bytes   int64
 	objects int
-	found   sourcePayload
+	links   map[string][2]string // authenticated parent and restore source for the requested scope
 }
 
 func lockSource(dir, key, workspace string) (*store, error) {
@@ -98,7 +98,7 @@ func openSource(dir, key, workspace string) (*sourceArchive, error) {
 	a := &sourceArchive{s: s, objectStore: objectStore}
 	// Validate existing entries and sync any publication that was visible but
 	// indeterminate after a prior rename.
-	if _, err := a.scan(""); err != nil || unix.Fsync(int(s.root.Fd())) != nil {
+	if _, err := a.scan(context.Background(), ""); err != nil || unix.Fsync(int(s.root.Fd())) != nil {
 		s.close()
 		return nil, ErrUnavailable
 	}
@@ -123,7 +123,7 @@ func readSourceIdentity(s *store) ([sha256.Size]byte, int64, error) {
 // scan runs with exclusive access (under the handle mutex once opened). Pending
 // files can be partial writes: check their names and metadata, but never use
 // their bytes as records. Charge every remnant to both quotas.
-func (a *sourceArchive) scan(want string) (sourceUsage, error) {
+func (a *sourceArchive) scan(ctx context.Context, scope string) (sourceUsage, error) {
 	s := a.s
 	if s.check() != nil {
 		return sourceUsage{}, ErrUnavailable
@@ -136,9 +136,12 @@ func (a *sourceArchive) scan(want string) (sourceUsage, error) {
 	if err != nil || len(names) == 0 || len(names) > s.maxOperations+1 {
 		return sourceUsage{}, ErrUnavailable
 	}
-	u := sourceUsage{bytes: size, objects: len(names) - 1}
+	u := sourceUsage{bytes: size, objects: len(names) - 1, links: map[string][2]string{}}
 	seenIdentity := false
 	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return sourceUsage{}, err
+		}
 		if name == sourceIdentityName {
 			seenIdentity = true
 			continue
@@ -168,18 +171,12 @@ func (a *sourceArchive) scan(want string) (sourceUsage, error) {
 			return sourceUsage{}, ErrUnavailable
 		}
 		u.bytes += int64(len(sealed))
-		plain, err := openSealed(s.key, a.objectStore, id, sourceObjectKind, sealed)
-		var p sourcePayload
-		if err != nil || json.Unmarshal(plain, &p) != nil || !canonicalHex(p.Scope, sha256.Size) || !validSourceRevision(p.Revision) {
-			return sourceUsage{}, ErrUnavailable
+		p, err := a.decode(id, sealed)
+		if err != nil {
+			return sourceUsage{}, err
 		}
-		p.Revision.Created = p.Revision.Created.UTC()
-		canonical, err := json.Marshal(p)
-		if err != nil || !bytes.Equal(plain, canonical) {
-			return sourceUsage{}, ErrUnavailable
-		}
-		if idText == want {
-			u.found = p
+		if scope != "" && p.Scope == scope {
+			u.links[idText] = [2]string{p.Revision.Parent, p.Revision.RestoredFrom}
 		}
 	}
 	if !seenIdentity {
@@ -188,67 +185,117 @@ func (a *sourceArchive) scan(want string) (sourceUsage, error) {
 	return u, nil
 }
 
-func (a *sourceArchive) put(scope string, r SourceRevision) (string, error) {
-	if !canonicalHex(scope, sha256.Size) || !validSourceRevision(r) {
-		return "", ErrUnavailable
+func (a *sourceArchive) decode(id ObjectID, sealed []byte) (sourcePayload, error) {
+	plain, err := openSealed(a.s.key, a.objectStore, id, sourceObjectKind, sealed)
+	var p sourcePayload
+	if err != nil || json.Unmarshal(plain, &p) != nil || !canonicalHex(p.Scope, sha256.Size) || !validSourceRevision(p.Revision) {
+		return sourcePayload{}, ErrUnavailable
 	}
-	// JSON would silently replace invalid UTF-8 in strings, including file
-	// paths. File contents are encoded as bytes, not strings.
-	if !utf8.ValidString(r.Parent) || !utf8.ValidString(r.RestoredFrom) || !utf8.ValidString(r.Actor) || !utf8.ValidString(r.Entrypoint) {
-		return "", ErrUnavailable
+	p.Revision.Created = p.Revision.Created.UTC()
+	canonical, err := json.Marshal(p)
+	if err != nil || !bytes.Equal(plain, canonical) {
+		return sourcePayload{}, ErrUnavailable
 	}
-	for path := range r.Files {
-		if !utf8.ValidString(path) {
-			return "", ErrUnavailable
-		}
+	return p, nil
+}
+
+// Reserve count and byte capacity for the entire publication under one lock.
+// An I/O failure may leave charged but unreachable objects; the workspace
+// only adds reachability after receiving the complete durable set.
+func (a *sourceArchive) putChain(ctx context.Context, scope string, ancestors []string, records []SourceRevision) ([]string, error) {
+	if !canonicalHex(scope, sha256.Size) || len(records) < 1 || len(records) > 2 || len(ancestors) > sourceMaxObjects {
+		return nil, ErrUnavailable
 	}
-	r.Created = r.Created.UTC()
 	s := a.s
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	u, err := a.scan("")
+	u, err := a.scan(ctx, scope)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if u.objects >= s.maxOperations {
-		return "", ErrCapacity
-	}
-	plain, err := json.Marshal(sourcePayload{Scope: scope, Revision: r})
-	if err != nil {
-		return "", ErrUnavailable
-	}
-	var id ObjectID
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", ErrUnavailable
-	}
-	sealed, err := seal(s.key, a.objectStore, id, sourceObjectKind, plain)
-	if err != nil {
-		return "", ErrUnavailable
-	}
-	if len(sealed) > maxObjectCiphertextBytes || int64(len(sealed)) > s.maxBytes-u.bytes {
-		return "", ErrCapacity
-	}
-	idText := hex.EncodeToString(id[:])
-	if err := writeNoClobber(s.root, sourceObjectPrefix+idText, sealed); err != nil {
-		if errors.Is(err, ErrIndeterminate) {
-			s.failed = true
+	parent := ""
+	seen := map[string]bool{}
+	for _, id := range ancestors {
+		link, ok := u.links[id]
+		if !ok || seen[id] || link[0] != parent || (link[1] != "" && !seen[link[1]]) {
+			return nil, ErrUnavailable
 		}
-		return "", err
+		seen[id] = true
+		parent = id
 	}
-	return idText, nil
+	if u.objects+len(records) > s.maxOperations {
+		return nil, ErrCapacity
+	}
+	ids := make([]string, 0, len(records))
+	members := make([][]byte, 0, len(records))
+	for i, r := range records {
+		if i == 0 && r.Parent != parent || r.RestoredFrom != "" && !seen[r.RestoredFrom] {
+			return nil, ErrUnavailable
+		}
+		r.Parent = parent
+		r.Created = r.Created.UTC()
+		if !validSourceRevision(r) {
+			return nil, ErrUnavailable
+		}
+		var id ObjectID
+		if _, err := rand.Read(id[:]); err != nil {
+			return nil, ErrUnavailable
+		}
+		plain, err := json.Marshal(sourcePayload{Scope: scope, Revision: r})
+		if err != nil {
+			return nil, ErrUnavailable
+		}
+		sealed, err := seal(s.key, a.objectStore, id, sourceObjectKind, plain)
+		if err != nil {
+			return nil, ErrUnavailable
+		}
+		if len(sealed) > maxObjectCiphertextBytes || int64(len(sealed)) > s.maxBytes-u.bytes {
+			return nil, ErrCapacity
+		}
+		u.bytes += int64(len(sealed))
+		parent = hex.EncodeToString(id[:])
+		ids = append(ids, parent)
+		members = append(members, sealed)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	for i, b := range members {
+		if err := writeNoClobber(s.root, sourceObjectPrefix+ids[i], b); err != nil {
+			if errors.Is(err, ErrIndeterminate) {
+				s.failed = true
+			}
+			return nil, err
+		}
+	}
+	return ids, nil
 }
 
-func (a *sourceArchive) get(scope, id string) (SourceRevision, error) {
-	if !canonicalHex(scope, sha256.Size) || !canonicalHex(id, sha256.Size) {
+func (a *sourceArchive) get(scope, idText string) (SourceRevision, error) {
+	if !canonicalHex(scope, sha256.Size) || !canonicalHex(idText, sha256.Size) {
 		return SourceRevision{}, ErrUnavailable
 	}
-	a.s.mu.Lock()
-	defer a.s.mu.Unlock()
-	u, err := a.scan(id)
-	if err != nil || u.found.Scope != scope {
+	s := a.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.check() != nil {
 		return SourceRevision{}, ErrUnavailable
 	}
-	return u.found.Revision, nil
+	generation, _, err := readSourceIdentity(s)
+	if err != nil || generation != a.objectStore {
+		return SourceRevision{}, ErrUnavailable
+	}
+	var id ObjectID
+	hex.Decode(id[:], []byte(idText))
+	b, err := s.readFile(sourceObjectPrefix+idText, maxObjectCiphertextBytes)
+	if err != nil {
+		return SourceRevision{}, ErrUnavailable
+	}
+	p, err := a.decode(id, b)
+	if err != nil || p.Scope != scope {
+		return SourceRevision{}, ErrUnavailable
+	}
+	return p.Revision, nil
 }
 
 func (a *sourceArchive) close() error { return a.s.close() }

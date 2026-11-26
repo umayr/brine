@@ -213,6 +213,14 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("secret state unavailable")
 	}
+	if cfg.SourceHistoryDir != "" {
+		if secretState == nil {
+			return fmt.Errorf("source history requires the existing private protection-state directory; verify it offline")
+		}
+		runner.CheckSourceProtection = func(name string) error {
+			return secretState.RequireNoSourceProtection(secretbindings.DeploymentID(name), filepath.Join(cfg.DataDir, "stacks"))
+		}
+	}
 	if secretState != nil {
 		defer secretState.Close()
 		ag.SetSecretRecordLookup(func(stack string) (bool, error) {

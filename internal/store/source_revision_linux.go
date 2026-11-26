@@ -31,6 +31,12 @@ func openSourceAt(parent int, name string, directory bool) (*os.File, unix.Stat_
 		return nil, st, ErrSourceUnavailable
 	}
 	f := os.NewFile(uintptr(fd), name)
+	for _, attr := range []string{"system.posix_acl_access", "system.posix_acl_default"} {
+		if _, err := unix.Fgetxattr(fd, attr, nil); err != unix.ENODATA {
+			f.Close()
+			return nil, st, ErrSourceUnavailable
+		}
+	}
 	typ, perm := uint32(unix.S_IFREG), uint32(0600)
 	if directory {
 		typ, perm = unix.S_IFDIR, 0700
@@ -75,6 +81,13 @@ func sourceStateAt(ctx context.Context, stacks int, dir, name string) (SourceVie
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(&st) != nil || d.Decode(new(any)) != io.EOF || st.Name != name || st.Git != nil || st.RemoteGit != nil || st.CreatedAt.IsZero() || st.UpdatedAt.IsZero() || !st.SourceHistory.valid() {
+		return v, nil, ErrSourceUnavailable
+	}
+	// Source publication accepts only the registration format written by
+	// Brine. Duplicate, aliased or omitted fields are ambiguous authority.
+	canonical, err := json.Marshal(&st)
+	var compact bytes.Buffer
+	if err != nil || json.Compact(&compact, raw) != nil || !bytes.Equal(canonical, compact.Bytes()) {
 		return v, nil, ErrSourceUnavailable
 	}
 	v.Files = make(map[string][]byte)
@@ -161,12 +174,27 @@ func (s *FSStore) ReviewSource(ctx context.Context, name string) (SourceView, er
 	return v, e
 }
 
-// Caller holds the shared deployment admission for the entire review/commit.
-// Store mutex adds exclusion with editor/API metadata writers, independent of
-// the route. External concurrent workspace writers are unsupported.
+// Caller holds deployment admission for the review/commit. The store mutex
+// excludes local editor/API writers; the root flock excludes cross-process
+// ledger transactions from the admission check through workspace publication.
+// External concurrent workspace writers are unsupported.
 func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build SourceChange) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	root, err := s.lockManualRoot()
+	if err != nil {
+		return ErrSourceUnavailable
+	}
+	defer unix.Close(root)
+	rows, err := existingManualIntentsLocked(root)
+	if err != nil {
+		return ErrSourceUnavailable
+	}
+	for _, r := range rows {
+		if r.Stack == name && !r.Resolved {
+			return ErrSourceUnavailable
+		}
+	}
 	if err := s.sourceInterrupted(name); err != nil {
 		return err
 	}
@@ -239,6 +267,10 @@ func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build
 	if e = stageSourceTree(stagePath, st, next.Files); e != nil {
 		return ErrSourceInterrupted
 	}
+	staged, meta, err := sourceStateAt(ctx, fd, stage, name)
+	if err != nil || sourceBaseline(st, "", next.Files) != sourceBaseline(meta, "", staged.Files) {
+		return ErrSourceInterrupted
+	}
 	if e = verify(); e != nil {
 		if removeReviewedTree(stagePath, next.Files) != nil || unix.Fsync(fd) != nil {
 			return ErrSourceInterrupted
@@ -248,7 +280,7 @@ func (s *FSStore) CommitSource(ctx context.Context, name, baseline string, build
 	if e = unix.Renameat2(fd, stage, fd, name, unix.RENAME_EXCHANGE); e != nil {
 		return ErrSourceInterrupted
 	}
-	if unix.Fsync(fd) != nil {
+	if e = unix.Fsync(fd); e != nil {
 		return ErrSourceUncertain
 	}
 	// Only remove the reviewed, previously retained source tree, never an

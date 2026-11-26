@@ -26,7 +26,7 @@ func Tag(stack *store.Stack, vars *configvars.Store) (string, error) {
 	if stack == nil || vars == nil {
 		return "", ErrUnavailable
 	}
-	values, err := vars.Values(stack.Name)
+	values, err := vars.Effective(stack.Name)
 	if err != nil {
 		return "", ErrUnavailable
 	}

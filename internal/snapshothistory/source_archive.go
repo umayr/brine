@@ -1,6 +1,7 @@
 package snapshothistory
 
 import (
+	"context"
 	"encoding/hex"
 	"path"
 	"strings"
@@ -28,8 +29,8 @@ func OpenSourceArchive(dir, key, workspace string) (*SourceArchive, error) {
 	return &SourceArchive{s}, nil
 }
 func (s *SourceArchive) Close() error { return s.storage.close() }
-func (s *SourceArchive) Put(scope string, r SourceRevision) (string, error) {
-	return s.storage.put(scope, r)
+func (s *SourceArchive) PutChain(ctx context.Context, scope string, ancestors []string, records []SourceRevision) ([]string, error) {
+	return s.storage.putChain(ctx, scope, ancestors, records)
 }
 func (s *SourceArchive) Get(scope, id string) (SourceRevision, error) {
 	return s.storage.get(scope, id)

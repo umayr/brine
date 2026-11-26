@@ -32,7 +32,9 @@ type Runner struct {
 	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
 	BeforeLegacyAction   func(context.Context, string) error
 	BeforeLegacyValidate func(context.Context, string) error
-	StrictActions        StrictActions
+	// Source retention additionally requires affirmative, current protection-state classification.
+	CheckSourceProtection func(string) error
+	StrictActions         StrictActions
 
 	// Once set, every supported mutation uses the qualified CLI contract or fails.
 	QualifiedOperation *QualifiedOperationConfig

@@ -10,7 +10,7 @@ test('shared variables have their own navigation and stack panel shows inheritan
   await page.locator('.desk-more summary').press('Escape');
   await expect(page.getByText('BRINE_VAR_APP_DOMAIN', { exact: true })).toBeVisible();
   await expect(page.getByRole('textbox', { name: 'Value for APP_DOMAIN' })).toHaveValue('example.test');
-  await page.goto(`${base}/stacks/homepage`);
+  await page.goto(`${base}/stacks/homepage?tab=variables`);
   const panel = page.locator('#variables');
   await expect(panel.getByRole('heading', { name: 'Variables' })).toBeVisible();
   await expect(panel.getByText('Stack override')).toBeVisible();
@@ -44,7 +44,7 @@ test('stack panel uses the updated stylesheet even if the old URL is stale', asy
     if (!url.search) return route.fulfill({ status: 200, contentType: 'text/css', body: '/* stale stylesheet */' });
     return route.continue();
   });
-  await page.goto(`${base}/stacks/homepage`);
+  await page.goto(`${base}/stacks/homepage?tab=variables`);
   const href = await page.locator('link[rel="stylesheet"][href*="/static/vendor/app.css"]').getAttribute('href');
   expect(new URL(href, base).search).not.toBe('');
   const panel = page.locator('#variables');
@@ -56,7 +56,7 @@ test('stack panel uses the updated stylesheet even if the old URL is stale', asy
 
 test('variable controls fit a narrow viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`${base}/stacks/homepage`);
+  await page.goto(`${base}/stacks/homepage?tab=variables`);
   await expect(page.locator('#variables')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.goto(`${base}/variables`);

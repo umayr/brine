@@ -54,10 +54,11 @@ type stackResponse struct {
 
 // stackReadMetadata reports the effective entrypoint without changing stored metadata.
 func stackReadMetadata(stack *store.Stack) *store.Stack {
-	if stack == nil || stack.Entrypoint != "" {
+	if stack == nil || (stack.Entrypoint != "" && stack.SourceHistory == nil) {
 		return stack
 	}
 	metadata := *stack
+	metadata.SourceHistory = nil // private reachability information is browser-History-only
 	metadata.Entrypoint = stack.EffectiveEntrypoint()
 	return &metadata
 }
@@ -163,7 +164,7 @@ func (h *stackHandler) update(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	writeJSON(w, http.StatusOK, stack)
+	writeJSON(w, http.StatusOK, stackReadMetadata(stack))
 }
 
 const maxStackActionOptionsBytes = 4096

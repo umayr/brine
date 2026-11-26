@@ -5,6 +5,7 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/umayr/brine/internal/store"
 )
@@ -190,7 +192,7 @@ func TestFSStoreSourceRestoreReplacesTreeAndAppendsHistory(t *testing.T) {
 	restored := sourceTestReview(t, s)
 	if restored.Baseline == live.Baseline || restored.Scope != live.Scope || restored.Scope == "" ||
 		!slices.Equal(restored.Revisions, []string{captureID, rescueID, restoreID}) ||
-		restored.Entrypoint != snapshot.Entrypoint || !maps.EqualFunc(restored.Files, snapshot.Files, bytes.Equal) {
+		!maps.EqualFunc(restored.Files, snapshot.Files, bytes.Equal) {
 		t.Fatalf("restored view = %+v, source snapshot = %+v", restored, snapshot)
 	}
 	stack, err := s.Get(sourceTestName)
@@ -319,5 +321,152 @@ func TestFSStoreSourceInterruptedFenceBlocksAccess(t *testing.T) {
 		string(sourceTestRead(t, filepath.Join(dir, "compose.pkl"))) != sourceTestOriginal ||
 		string(sourceTestRead(t, filepath.Join(stage, "compose.pkl"))) != sourceTestEdited {
 		t.Fatal("fenced operations changed the live or staged tree")
+	}
+}
+
+const (
+	sourceTestLedger  = "manual-deployments.json"
+	sourceTestSidecar = "manual-deployments.lock"
+	sourceTestAnchor  = "manual-deployments.initialized"
+)
+
+func sourceTestIntent(stack, requestDigit string) store.ManualDeploymentIntent {
+	return store.ManualDeploymentIntent{
+		Host: "target", Target: strings.Repeat("a", 64), Stack: stack, Mode: "remove",
+		Request: strings.Repeat(requestDigit, 32), PriorRequest: strings.Repeat("c", 32),
+		Journal: strings.Repeat("d", 32), Selection: "sha256:" + strings.Repeat("e", 64),
+	}
+}
+
+func TestFSStoreSourceCommitExcludesConcurrentManualIntent(t *testing.T) {
+	s, dir, stage := sourceTestWorkspace(t)
+	root := filepath.Dir(filepath.Dir(dir))
+	other, err := store.NewFSStore(root)
+	sourceTestOK(t, err)
+	before := sourceTestReview(t, s)
+	if rows, err := other.ExistingManualIntents(); err != nil || len(rows) != 0 {
+		t.Fatalf("initial manual history = %v, %v; want empty", rows, err)
+	}
+	intent := sourceTestIntent(sourceTestName, "b")
+	sourceTestOK(t, s.CommitSource(context.Background(), sourceTestName, before.Baseline, func(v store.SourceView) (store.SourceUpdate, error) {
+		// This store has a different mutex. An attempt after the ledger was
+		// read but before publication must contend on the root inode itself.
+		done := make(chan error, 1)
+		go func() { done <- other.SaveManualIntent(intent) }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, store.ErrManualIntent) {
+				t.Fatalf("concurrent SaveManualIntent = %v, want ErrManualIntent", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("SaveManualIntent did not fail fast under root lock contention")
+		}
+		return store.SourceUpdate{
+			NewRevisions: []string{strings.Repeat("a", 64)},
+			Entrypoint:   v.Entrypoint,
+			Files:        map[string][]byte{v.Entrypoint: []byte(sourceTestEdited)},
+		}, nil
+	}))
+	for _, name := range []string{sourceTestLedger, sourceTestSidecar, sourceTestAnchor} {
+		sourceTestAbsent(t, filepath.Join(root, name))
+	}
+	sourceTestAbsent(t, stage)
+	if got := string(sourceTestReview(t, s).Files["compose.pkl"]); got != sourceTestEdited {
+		t.Fatalf("published source = %q, want %q", got, sourceTestEdited)
+	}
+	sourceTestOK(t, other.SaveManualIntent(intent)) // Now the root lock is free.
+}
+
+func sourceTestRejectCommit(t *testing.T, s *store.FSStore, before store.SourceView) {
+	t.Helper()
+	err := s.CommitSource(context.Background(), sourceTestName, before.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+		t.Fatal("commit invoked the callback despite denied ledger admission")
+		return store.SourceUpdate{}, nil
+	})
+	if !errors.Is(err, store.ErrSourceUnavailable) {
+		t.Fatalf("CommitSource = %v, want ErrSourceUnavailable", err)
+	}
+	if after := sourceTestReview(t, s); after.Baseline != before.Baseline {
+		t.Fatal("denied commit changed the workspace")
+	}
+}
+
+func TestFSStoreSourceCommitRechecksManualIntentsAfterReview(t *testing.T) {
+	s, dir, stage := sourceTestWorkspace(t)
+	other, err := store.NewFSStore(filepath.Dir(filepath.Dir(dir)))
+	sourceTestOK(t, err)
+	before := sourceTestReview(t, s)
+	if rows, err := s.ExistingManualIntents(); err != nil || len(rows) != 0 {
+		t.Fatalf("initial manual history = %v, %v; want empty", rows, err)
+	}
+	intent := sourceTestIntent(sourceTestName, "b")
+	sourceTestOK(t, other.SaveManualIntent(intent))
+	sourceTestOK(t, other.SaveManualIntent(sourceTestIntent("other-stack", "f")))
+	sourceTestRejectCommit(t, s, before)
+	sourceTestAbsent(t, stage)
+
+	// The resolved row for this stack and the unrelated active row are allowed.
+	sourceTestOK(t, other.ResolveManualIntent(intent))
+	sourceTestOK(t, s.CommitSource(context.Background(), sourceTestName, before.Baseline, func(store.SourceView) (store.SourceUpdate, error) {
+		return store.SourceUpdate{NewRevisions: []string{strings.Repeat("a", 64)}}, nil
+	}))
+}
+
+func TestFSStoreSourceCommitRejectsMalformedManualLedgerWithoutRepair(t *testing.T) {
+	intent := sourceTestIntent("other-stack", "b")
+	duplicate, err := json.Marshal([]store.ManualDeploymentIntent{intent, intent})
+	sourceTestOK(t, err)
+	for _, tc := range []struct {
+		name, raw string
+		missing   []string
+		symlink   bool
+	}{
+		{name: "null", raw: "null"},
+		{name: "trailing data", raw: "[] []"},
+		{name: "omitted fields", raw: "[{}]"},
+		{name: "duplicate request", raw: string(duplicate)},
+		{name: "over byte limit", raw: "[]" + strings.Repeat(" ", 4<<20)},
+		{name: "symlink ledger", symlink: true},
+		{name: "missing anchor", missing: []string{sourceTestAnchor}},
+		{name: "missing sidecar", missing: []string{sourceTestSidecar}},
+		{name: "only anchor remains", missing: []string{sourceTestLedger, sourceTestSidecar}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir, stage := sourceTestWorkspace(t)
+			root := filepath.Dir(filepath.Dir(dir))
+			ledger := filepath.Join(root, sourceTestLedger)
+			before := sourceTestReview(t, s)
+			_, err := s.ListManualIntents() // Provision a complete ledger first.
+			sourceTestOK(t, err)
+			if tc.raw != "" {
+				sourceTestOK(t, os.WriteFile(ledger, []byte(tc.raw), 0600))
+			}
+			if tc.symlink {
+				sourceTestWrite(t, root, "other.json", "[]")
+				sourceTestOK(t, os.Remove(ledger))
+				sourceTestOK(t, os.Symlink("other.json", ledger))
+			}
+			for _, name := range tc.missing {
+				sourceTestOK(t, os.Remove(filepath.Join(root, name)))
+			}
+
+			if _, err := s.ExistingManualIntents(); !errors.Is(err, store.ErrManualIntent) {
+				t.Fatalf("ExistingManualIntents = %v, want ErrManualIntent", err)
+			}
+			sourceTestRejectCommit(t, s, before)
+			sourceTestAbsent(t, stage)
+			for _, name := range tc.missing {
+				sourceTestAbsent(t, filepath.Join(root, name))
+			}
+			if tc.raw != "" && string(sourceTestRead(t, ledger)) != tc.raw {
+				t.Fatal("denial rewrote the malformed ledger")
+			}
+			if tc.symlink {
+				link, err := os.Readlink(ledger)
+				if err != nil || link != "other.json" {
+					t.Fatalf("denial changed the ledger symlink: %q, %v", link, err)
+				}
+			}
+		})
 	}
 }

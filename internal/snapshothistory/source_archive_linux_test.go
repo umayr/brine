@@ -4,6 +4,7 @@ package snapshothistory
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -58,11 +59,9 @@ var sourceTestScope = strings.Repeat("a", 64)
 
 func sourceRevisionForTest() SourceRevision {
 	return SourceRevision{
-		Parent:       strings.Repeat("1", 64),
-		RestoredFrom: strings.Repeat("2", 64),
-		Actor:        "synthetic-source-actor",
-		Entrypoint:   "synthetic-main.pkl",
-		Created:      time.Date(2025, time.March, 4, 5, 6, 7, 8, time.UTC),
+		Actor:      "synthetic-source-actor",
+		Entrypoint: "synthetic-main.pkl",
+		Created:    time.Date(2025, time.March, 4, 5, 6, 7, 8, time.UTC),
 		Files: map[string][]byte{
 			"synthetic-main.pkl": []byte("SYNTHETIC_SOURCE_ARCHIVE_CONTENT\n"),
 			"lib/bytes.pkl":      {0, 0xff, '\r', '\n'},
@@ -70,9 +69,30 @@ func sourceRevisionForTest() SourceRevision {
 	}
 }
 
+func (a *SourceArchive) putTestRevision(scope string, r SourceRevision) (string, error) {
+	ids, e := a.PutChain(context.Background(), scope, nil, []SourceRevision{r})
+	if e != nil {
+		return "", e
+	}
+	return ids[0], nil
+}
+
+func TestSourceArchiveBatchCapacity(t *testing.T) {
+	o := sourceArchiveFixture(t)
+	a, _ := openSourceArchiveForTest(t, o)
+	a.storage.s.maxOperations = 1
+	r := sourceRevisionForTest()
+	if _, e := a.PutChain(context.Background(), sourceTestScope, nil, []SourceRevision{r, r}); !errors.Is(e, ErrCapacity) {
+		t.Fatal(e)
+	}
+	entries, err := os.ReadDir(o.ArchiveDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatal("quota failure published a member")
+	}
+}
 func putSourceRevisionForTest(t *testing.T, a *SourceArchive, r SourceRevision) string {
 	t.Helper()
-	id, err := a.Put(sourceTestScope, r)
+	id, err := a.putTestRevision(sourceTestScope, r)
 	if err != nil {
 		t.Fatalf("put source revision: %v", err)
 	}
@@ -192,7 +212,7 @@ func TestSourceArchiveQuotas(t *testing.T) {
 			putSourceRevisionForTest(t, a, r)
 		}
 		r.Actor = "synthetic-over-quota"
-		if id, err := a.Put(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
+		if id, err := a.putTestRevision(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
 			t.Fatalf("put beyond revision quota: id=%q, err=%v, want no ID and ErrCapacity", id, err)
 		}
 	})
@@ -213,7 +233,7 @@ func TestSourceArchiveQuotas(t *testing.T) {
 		}
 		a.storage.s.maxBytes = used
 		r.Actor = "synthetic-over-quota"
-		if id, err := a.Put(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
+		if id, err := a.putTestRevision(sourceTestScope, r); id != "" || !errors.Is(err, ErrCapacity) {
 			t.Fatalf("put beyond byte quota: id=%q, err=%v, want no ID and ErrCapacity", id, err)
 		}
 		if _, err := a.Get(sourceTestScope, id); err != nil {

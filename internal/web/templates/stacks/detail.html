@@ -377,7 +377,7 @@
   </section>
   </section>
   <section id="panel-History" role="tabpanel" aria-labelledby="tab-History" tabindex="0" class="space-y-4" hidden>
-    <div id="stack-history-content" hx-get="/web/stacks/{{.Stack.Name}}/history" hx-trigger="load-history" hx-swap="innerHTML" hx-sync="this:replace" hx-history="false" hx-request='{"timeout":15000}'>
+    <div id="stack-history-content" hx-get="/web/stacks/{{.Stack.Name}}/history" hx-trigger="load-history" hx-swap="innerHTML" hx-sync="this:drop" hx-history="false" hx-request='{"timeout":15000}'>
       <div class="stack-loading" role="status"><span class="ui-spinner" aria-hidden="true"></span>Loading history…</div>
     </div>
   </section>

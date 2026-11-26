@@ -3,6 +3,7 @@ const base = process.env.BRINE_FIXTURE_BASE_URL || 'http://127.0.0.1:18082';
 
 test('read-only project preview retains stack controls and explains its boundaries', async ({ page }) => {
   await page.goto(`${base}/stacks/media`);
+  await page.locator('#plan-button').click();
   const section = page.locator('#project-preview');
   await expect(section).toContainText('contents can contain secrets');
   await expect(section.getByText('Preview project file names and sizes.', { exact: false })).toBeVisible();
@@ -20,16 +21,18 @@ test('read-only project preview retains stack controls and explains its boundari
   await expect(section.locator('#project-preview-result')).toContainText('revalidated by the server');
   await expect(section.locator('#project-preview-result unsafe')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Variables', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Variables', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'File secret references' })).toHaveCount(0);
   await section.getByRole('button', { name: 'Project snapshot preview (read-only)' }).click();
   await expect(page.locator('#project-preview-content')).toBeHidden();
+  await page.getByRole('tab',{name:'Variables'}).click();
   await expect(page.locator('#stack-variables-content')).toBeVisible();
 });
 
 test('preview renders hostile filenames as text and displays safe errors', async ({ page }) => {
   await page.route('**/web/stacks/media/project-preview', async route => route.fulfill({status: 200, contentType: 'text/html', body: '<div>&lt;img src=x onerror=alert(1)&gt; — 3 bytes</div>'}));
   await page.goto(`${base}/stacks/media`);
+  await page.locator('#plan-button').click();
   await page.getByRole('button', { name: 'Preview project files' }).click();
   await expect(page.locator('#project-preview-result')).toContainText('<img src=x onerror=alert(1)>');
   await expect(page.locator('#project-preview-result img')).toHaveCount(0);

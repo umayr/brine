@@ -26,7 +26,7 @@ import (
 )
 
 type revisionArchive interface {
-	Put(string, snapshothistory.SourceRevision) (string, error)
+	PutChain(context.Context, string, []string, []snapshothistory.SourceRevision) ([]string, error)
 	Get(string, string) (snapshothistory.SourceRevision, error)
 }
 type sourceHistoryAccess struct {
@@ -41,7 +41,7 @@ func (h *Handler) EnableSourceHistory(archive *snapshothistory.SourceArchive) er
 		return store.ErrSourceUnavailable
 	}
 	run := h.agent.Dill()
-	if !filepath.IsAbs(run.Socket) || filepath.Clean(run.Socket) != run.Socket || run.BeforeLegacyAction == nil || run.Coordinator.CheckAdmission == nil {
+	if !filepath.IsAbs(run.Socket) || filepath.Clean(run.Socket) != run.Socket || run.BeforeLegacyAction == nil || run.CheckSourceProtection == nil || run.Coordinator.CheckAdmission == nil {
 		return store.ErrSourceUnavailable
 	}
 	access := &sourceHistoryAccess{vault: archive, workspace: ws}
@@ -132,7 +132,7 @@ func (h *Handler) sourceEligible(r *http.Request, st *store.Stack, pending bool)
 		return false
 	}
 	run := h.agent.Dill()
-	return run.BeforeLegacyAction != nil && run.Coordinator.CheckAdmission != nil && run.BeforeLegacyAction(r.Context(), st.PklPath) == nil
+	return run.CheckSourceProtection != nil && run.CheckSourceProtection(st.Name) == nil && run.BeforeLegacyAction != nil && run.Coordinator.CheckAdmission != nil && run.BeforeLegacyAction(r.Context(), st.PklPath) == nil
 }
 func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
@@ -199,6 +199,10 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 		}
 		p.Enabled = true
 		for i := p.Total - 1 - 10*(p.Page-1); i >= max(0, p.Total-10*p.Page); i-- {
+			if r.Context().Err() != nil {
+				http.Error(w, "Session or request expired", 403)
+				return
+			}
 			row, err := h.sourceHistory.record(view, i)
 			if err != nil {
 				p.Enabled = false
@@ -379,6 +383,9 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 	}
 	actor := auth.Identity(r)
 	err = s.workspace.CommitSource(r.Context(), name, v.Baseline, func(current store.SourceView) (store.SourceUpdate, error) {
+		if err := h.agent.Dill().CheckSourceProtection(name); err != nil {
+			return store.SourceUpdate{}, store.ErrSourceUnavailable
+		}
 		return s.createUpdate(r.Context(), current, actor, id)
 	})
 	if err != nil {
@@ -392,7 +399,13 @@ func (h *Handler) sourcePost(w http.ResponseWriter, r *http.Request, confirm boo
 		}
 		return
 	}
-	http.Redirect(w, r, "/stacks/"+name+"?tab=history", http.StatusSeeOther)
+	destination := "/stacks/" + name + "?tab=history"
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", destination)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Redirect(w, r, destination, http.StatusSeeOther)
 }
 func (s *sourceHistoryAccess) createUpdate(ctx context.Context, v store.SourceView, actor, id string) (store.SourceUpdate, error) {
 	var update store.SourceUpdate
@@ -422,29 +435,22 @@ func (s *sourceHistoryAccess) createUpdate(ctx context.Context, v store.SourceVi
 	if needed == 0 || len(v.Revisions)+needed > store.MaxSourceRevisions {
 		return update, store.ErrSourceUnavailable
 	}
-	put := func(entry, from string, files map[string][]byte) error {
-		if e := ctx.Err(); e != nil {
-			return e
-		}
-		newID, e := s.vault.Put(v.Scope, snapshothistory.SourceRevision{Actor: actor, Created: time.Now().UTC(), Parent: parent, RestoredFrom: from, Entrypoint: entry, Files: files})
-		if e == nil {
-			update.NewRevisions = append(update.NewRevisions, newID)
-			parent = newID
-		}
-		return e
+	records := make([]snapshothistory.SourceRevision, 0, needed)
+	add := func(entry, from string, files map[string][]byte) {
+		records = append(records, snapshothistory.SourceRevision{Actor: actor, Created: time.Now().UTC(), Parent: parent, RestoredFrom: from, Entrypoint: entry, Files: files})
 	}
-	// Preserve the *actual* pre-restore files even when they have not been bookmarked.
 	if retain {
-		if e := put(v.Entrypoint, "", v.Files); e != nil {
-			return update, e
-		}
+		add(v.Entrypoint, "", v.Files)
 	}
 	if id != "" {
-		if e := put(target.Entrypoint, id, target.Files); e != nil {
-			return update, e
-		}
+		add(target.Entrypoint, id, target.Files)
 		update.Files = target.Files
 		update.Entrypoint = target.Entrypoint
 	}
+	ids, err := s.vault.PutChain(ctx, v.Scope, v.Revisions, records)
+	if err != nil {
+		return store.SourceUpdate{}, err
+	}
+	update.NewRevisions = ids
 	return update, nil
 }

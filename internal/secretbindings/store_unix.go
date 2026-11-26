@@ -419,6 +419,34 @@ func (s *Store) SecretEnabled(id string) (bool, error) {
 	return true, nil
 }
 
+// RequireNoSourceProtection is intentionally stricter than SecretEnabled.
+// A source archive must never capture bytes from a previously protected or
+// partially initialized deployment. Re-open the named authoritative directory
+// no-follow on every check; an unlinked, replaced or unreadable root is unknown.
+func (s *Store) RequireNoSourceProtection(id, workspace string) error {
+	if s == nil || !namePattern.MatchString(id) {
+		return ErrUnsafe
+	}
+	fresh, err := Open(s.path, workspace)
+	if err != nil {
+		return ErrUnsafe
+	}
+	defer fresh.Close()
+	original, err := s.root.Stat()
+	if err != nil {
+		return ErrUnsafe
+	}
+	current, err := fresh.root.Stat()
+	if err != nil || !os.SameFile(original, current) {
+		return ErrUnsafe
+	}
+	var st unix.Stat_t
+	if err := unix.Fstatat(int(fresh.root.Fd()), id, &st, unix.AT_SYMLINK_NOFOLLOW); errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	return ErrUnsafe
+}
+
 // ProofKey returns the private 32-byte per-deployment HMAC key, creating it once.
 func (s *Store) ProofKey(id string) ([]byte, error) {
 	s.mu.Lock()

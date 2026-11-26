@@ -20,21 +20,22 @@ it talks to the container engine directly for container and image views.
 
 - **Stacks**: create, edit, validate, format, plan, deploy, stop, restart, and tear down.
 - **Pkl editor**: CodeMirror with Pkl syntax highlighting, snippets, validate, and format.
-- **Plan before deploy**: field-level diff of desired vs live state.
+- **Stack workspace**: Compose first, with Containers, Variables and History tabs. Plan opens Dill’s field-level diff of desired vs live state. A displayed plan is not a saved executable approval; Brine checks its managed input tag at deployment admission, not external dependencies or future live state.
+- **Source restore**: optionally retain private, encrypted checkpoints for eligible local stacks and restore a reviewed revision as a new revision without deploying. See [setup, limits and recovery](docs/source-history.md).
 - **Multi-file stacks**: entrypoint selection and additional `.pkl` files.
 - **Git-backed stacks**: clone a repo/folder, pull, and push from writable workspaces. Local auto-deploy is paused.
 - **Containers**: list, inspect, start/stop/restart, and stream logs over SSE.
 - **Images**: list, pull, and remove.
 - **Recipes**: reusable Pkl snippets available in the editor.
 - **Appearance settings**: browser-local theme, accent and table density, with live previews
-  and reset under Settings → Appearance (`/settings`).
+  and reset under Settings → Appearance (`/settings`). The sibling Live Updates tab sets visible stack inventory polling (on by default, every 5 seconds; 5/10/30/60 seconds or manual).
 - **Auth**: single-admin login with sessions, CSRF protection, and a bearer token for API clients.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
 
 ## Configuration variables
 
-For local stacks, use **Variables** in the sidebar for values common to
+For local stacks, use **More → Variables** for values common to
 stacks. Each stack page shows inherited values and lets you add stack-specific
 values. Stack values win over shared values with the same name. These are **non-secret configuration**:
 values are stored on disk and can appear in Pkl output, plans, diagnostics, and
@@ -213,6 +214,8 @@ local processes and non-browser clients can still control it.
 | `--request-timeout` | | `30s` | Timeout for ordinary HTTP handlers |
 | `--deploy-timeout` | | `30m` | Timeout for deploy/teardown/git commands |
 | `--dev` | | `false` | Re-parse templates on every request |
+| `--source-history-dir` / `--source-history-key` | | off | Existing private source archive and external key; [Linux setup](docs/source-history.md) |
+| `--init-source-history` | | `false` | Initialize that empty archive explicitly and exit |
 | `--version` | | | Print the version |
 
 ## Remote hosts

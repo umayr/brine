@@ -157,24 +157,33 @@
       if (!historyTarget(event)) return;
       const {target, xhr} = event.detail;
       const path = event.detail.requestConfig.path;
+      const confirm = path.endsWith('/confirm');
       xhr.addEventListener('loadend', () => {
         if (!target.isConnected) return;
-        if (xhr.status !== 200 || !xhr.responseURL || new URL(xhr.responseURL).pathname === '/login') {
-          historyMessage(target, 'History or review unavailable. Check your session and reopen History. No restore was requested.');
+        if (confirm && xhr.status === 204 && xhr.getResponseHeader('HX-Redirect')) return;
+        if (confirm || xhr.status !== 200 || !xhr.responseURL || new URL(xhr.responseURL).pathname === '/login') {
+          const detail = xhr.status === 409 && xhr.getResponseHeader('Content-Type')?.startsWith('text/plain') ? xhr.responseText.trim().slice(0, 300) : '';
+          historyMessage(target, detail || (confirm ? 'Source publication was not confirmed. Inspect current source and History. Do not resubmit.' : 'History or review unavailable. Check your session and reopen History. No restore was requested.'));
         }
       }, {once:true});
       // Keep the HTMX request's source attached through its lifecycle.
       if (target === historyContent) historyMessage(target, 'Loading history…', true);
-      else if (path.endsWith('/review')) {
+      else if (confirm || path.endsWith('/review')) {
         target.querySelectorAll('button').forEach(b => { b.disabled = true; });
         const status = document.createElement('div');
-        historyMessage(status, 'Verifying source…', true); target.prepend(status);
+        historyMessage(status, confirm ? 'Publishing source revision…' : 'Verifying source…', true); target.prepend(status);
       }
     });
     historyContent?.addEventListener('htmx:beforeSwap', event => {
       const xhr = event.detail.xhr;
       if (historyTarget(event) && xhr.responseURL && new URL(xhr.responseURL).pathname === '/login') event.detail.shouldSwap = false;
     });
+    historyContent?.addEventListener('htmx:afterSettle', event => {
+      if (event.detail.requestConfig?.path?.endsWith('/review') && active === tab('History')) {
+        historyContent.querySelector('#source-review-heading')?.focus({preventScroll:true});
+      }
+    });
+
     const timeSelector = 'time[data-relative][datetime]';
     const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'always' });
     const exact = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' });

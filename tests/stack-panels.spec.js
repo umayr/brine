@@ -1,39 +1,31 @@
-const { test, expect } = require('@playwright/test');
-
-const base = process.env.BRINE_FIXTURE_BASE_URL || 'http://127.0.0.1:18082';
-
-test('stack panels collapse independently without hiding source or operation controls', async ({ page }) => {
-  await page.goto(`${base}/stacks/media`);
-  const variables = page.getByRole('button', { name: 'Variables', exact: true });
-  const containers = page.getByRole('button', { name: 'Containers', exact: true });
-  const git = page.getByRole('button', { name: 'Git source' });
-  for (const button of [variables, containers, git]) {
-    await expect(button).toHaveAttribute('aria-expanded', 'true');
-  }
-
-  await variables.click();
-  await expect(variables).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('#stack-variables-content')).toBeHidden();
-  await expect(page.locator('.pk-panel:not(.hidden)')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Deploy', exact: true })).toBeVisible();
-
-  await containers.click();
-  await expect(page.locator('#stack-containers-panel')).toBeHidden();
-  // An inventory refresh can update its child without expanding the panel.
-  await page.locator('#stack-containers').evaluate(el => { el.textContent = 'Updated inventory'; });
-  await expect(page.locator('#stack-containers-panel')).toBeHidden();
-  await containers.click();
-  await expect(page.locator('#stack-containers')).toContainText('Updated inventory');
-
-  await git.click();
-  await expect(git).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('#git-source-panel')).toBeHidden();
-  await expect(page.locator('#git-source-actions')).toBeHidden();
-  await git.click();
-  await expect(page.locator('#git-source-panel')).toBeVisible();
-  await expect(page.locator('#git-source-actions')).toBeVisible();
-  await expect(variables).toHaveAttribute('aria-expanded', 'false');
-  await variables.click();
-  await expect(page.locator('#stack-variables-content')).toBeVisible();
-  await expect(page.locator('.pk-panel:not(.hidden)')).toBeVisible();
+const {test,expect}=require('@playwright/test');
+const base=process.env.BRINE_FIXTURE_BASE_URL;
+test('stack workspace separates source, runtime and variables without hiding actions',async({page})=>{
+ await page.goto(base+'/stacks/media');
+ const tab=name=>page.getByRole('tab',{name,exact:true});
+ await expect(tab('Compose')).toHaveAttribute('aria-selected','true');
+ await expect(page.locator('.pk-panel:visible')).toBeVisible();
+ const overview=page.getByRole('definition').filter({hasText:/^Git$/});
+ await expect(overview).toBeVisible();
+ await expect(page.locator('.stack-overview')).toContainText('Local');
+ const git=page.getByRole('button',{name:'Git source'});
+ await git.click(); await expect(page.locator('#git-source-panel')).toBeHidden();
+ await git.click(); await expect(page.locator('#git-source-actions')).toBeVisible();
+ await tab('Compose').focus(); await page.keyboard.press('ArrowRight'); await expect(tab('Containers')).toBeFocused();
+ await expect(page.locator('#stack-containers')).toBeVisible(); await expect(page.locator('.pk-panel:visible')).toHaveCount(0);
+ await tab('Variables').click(); await expect(page.locator('#stack-variables-content')).toBeVisible();
+ await expect(page.getByRole('button',{name:'Deploy',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'Restore',exact:true}).click();
+ await expect(tab('History')).toBeFocused(); await expect(page.getByText(/Source history and restore require an authenticated/)).toBeVisible();
+ await page.keyboard.press('Home'); await expect(tab('Compose')).toBeFocused();
+ await expect(page.locator('.pk-panel:visible')).toBeVisible();
+});
+test('Plan preserves the response while browsing and closing returns to Compose',async({page})=>{
+ await page.route('**/web/stacks/media/plan',route=>route.fulfill({contentType:'text/html',body:'<p>Synthetic result</p>'}));
+ await page.goto(base+'/stacks/media');await page.locator('#plan-button').click();
+ const tab=page.getByRole('tab',{name:'Plan',exact:true});
+ await expect(tab).toBeFocused();await expect(page.locator('#plan-result')).toHaveText('Synthetic result');
+ await page.getByRole('tab',{name:'Compose'}).click();await tab.click();
+ await expect(page.locator('#plan-result')).toHaveText('Synthetic result');await page.getByRole('button',{name:'Close plan'}).click();
+ await expect(tab).toBeHidden();await expect(page.getByRole('tab',{name:'Compose'})).toBeFocused();
 });

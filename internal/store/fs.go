@@ -77,13 +77,6 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 	if err := s.sourceInterrupted(name); err != nil {
 		return nil, err
 	}
-	return s.readRegisteredMeta(name)
-}
-
-func (s *FSStore) readRegisteredMeta(name string) (*Stack, error) {
-	if err := ValidateStackName(name); err != nil {
-		return nil, err
-	}
 	fd, err := s.stackFD(name)
 	if err != nil {
 		return nil, err
@@ -399,7 +392,11 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 		return err
 	}
 	f.Close()
-	return unix.Unlinkat(fd, filename, 0)
+	if err := unix.Unlinkat(fd, filename, 0); err != nil {
+		return err
+	}
+	stack.UpdatedAt = time.Now()
+	return s.writeMeta(stack)
 }
 
 // SetEntrypoint changes the entrypoint file for a stack.
