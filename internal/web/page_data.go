@@ -91,6 +91,7 @@ type stackDetailData struct {
 	StagingEnabled   bool
 	CheckpointNotice string
 	Variables        stackVariablesData
+	Secrets          brokerBindingsData
 	GitRevision      string
 	GitState         string
 	Stack            *store.Stack

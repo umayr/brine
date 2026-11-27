@@ -27,6 +27,15 @@ func build(root, entrypoint string, limits Limits) (Snapshot, error) {
 	}
 	dir := os.NewFile(uintptr(fd), "project root")
 	defer dir.Close()
+	return buildDirectory(dir, entrypoint, limits)
+}
+func buildDirectory(root *os.File, entrypoint string, limits Limits) (Snapshot, error) {
+	fd, err := unix.Openat(int(root.Fd()), ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("open project directory: %w", err)
+	}
+	dir := os.NewFile(uintptr(fd), "project directory")
+	defer dir.Close()
 	w := walker{limits: limits}
 	if err := w.walk(dir, "", 0); err != nil {
 		return Snapshot{}, err

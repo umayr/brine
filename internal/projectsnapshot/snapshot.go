@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 )
@@ -42,16 +43,35 @@ func Build(root, entrypoint string, limits Limits) (Snapshot, error) {
 	if root == "" {
 		return Snapshot{}, errors.New("empty project root")
 	}
+	if err := validateRequest(entrypoint, limits); err != nil {
+		return Snapshot{}, err
+	}
+	return build(root, entrypoint, limits)
+}
+
+// BuildDirectory captures from an already authorized, opened directory. It does
+// not close or advance the caller\'s directory descriptor. The caller must anchor
+// any untrusted ancestor components before passing this handle.
+func BuildDirectory(root *os.File, entrypoint string, limits Limits) (Snapshot, error) {
+	if root == nil {
+		return Snapshot{}, errors.New("missing project directory")
+	}
+	if err := validateRequest(entrypoint, limits); err != nil {
+		return Snapshot{}, err
+	}
+	return buildDirectory(root, entrypoint, limits)
+}
+func validateRequest(entrypoint string, limits Limits) error {
 	if entrypoint == "" || strings.Contains(entrypoint, "\\") || (len(entrypoint) >= 2 && entrypoint[1] == ':') || strings.HasPrefix(entrypoint, "/") || path.Clean(entrypoint) != entrypoint || entrypoint == "." || entrypoint == ".." || strings.HasPrefix(entrypoint, "../") {
-		return Snapshot{}, errors.New("entrypoint must be a canonical relative slash path")
+		return errors.New("entrypoint must be a canonical relative slash path")
 	}
 	for _, part := range strings.Split(entrypoint, "/") {
 		if part == ".git" {
-			return Snapshot{}, errors.New("entrypoint is excluded")
+			return errors.New("entrypoint is excluded")
 		}
 	}
 	if limits.MaxFiles <= 0 || limits.MaxEntries <= 0 || limits.MaxDepth <= 0 || limits.MaxFileBytes <= 0 || limits.MaxTotalBytes <= 0 || limits.MaxFileBytes == int64(^uint64(0)>>1) {
-		return Snapshot{}, fmt.Errorf("all limits must be positive and MaxFileBytes must be below MaxInt64")
+		return fmt.Errorf("all limits must be positive and MaxFileBytes must be below MaxInt64")
 	}
-	return build(root, entrypoint, limits)
+	return nil
 }

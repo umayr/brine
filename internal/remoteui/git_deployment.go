@@ -195,6 +195,13 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	if s.RemoteGitSource() != p.Source || (!p.Enabled && p.Request == "") || p.Phase == "blocked" {
 		return
 	}
+	if p.Request == "" && h.legacyGuard != nil {
+		_ = h.legacyGuard(ctx, name, func() { h.pollGitAdmitted(ctx, name, s, p) })
+		return
+	}
+	h.pollGitAdmitted(ctx, name, s, p)
+}
+func (h *Deployment) pollGitAdmitted(ctx context.Context, name string, s *store.Stack, p *store.RemoteGitPolicy) {
 	record, lease, err := h.registry.AcquireRead(ctx, p.Host)
 	if err != nil {
 		h.noteGitUnavailable(s, p)

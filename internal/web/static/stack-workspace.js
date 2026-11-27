@@ -9,6 +9,7 @@
     const result = document.getElementById('plan-result');
     const legacy = { '#history': 'history', '#variables': 'variables' };
     let active, pending;
+ const brokerRequests = new WeakSet();
 
     function select(next, focus = false) {
       if (!next || next.hidden) next = tab('Compose');
@@ -94,6 +95,12 @@
       window.addEventListener('pageshow', e => { if (e.persisted) markStale(false); });
       document.addEventListener('htmx:beforeRequest', event => {
         const { elt, xhr, requestConfig } = event.detail;
+        if (elt?.matches('form[data-broker-plan]')) {
+          if (pending) { event.preventDefault(); return; }
+          brokerRequests.add(xhr); pending = xhr;
+          stale.hidden = true; tools.hidden = false;
+          select(planTab, true); return;
+        }
         if (elt !== button) {
           if (requestConfig?.verb !== 'get' && elt?.closest('#git-source-panel, #git-source-actions')) markStale(false);
           return;
@@ -108,8 +115,10 @@
       });
       document.addEventListener('htmx:beforeSwap', event => {
         const { target, xhr } = event.detail;
-        if (target === result && (xhr !== pending || xhr.status !== 200 || new URL(xhr.responseURL).pathname === '/login')) {
-          event.detail.shouldSwap = false;
+        if (target === result) {
+          const denied = brokerRequests.has(xhr) && xhr.status === 409;
+          if (xhr !== pending || (xhr.status !== 200 && !denied) || new URL(xhr.responseURL).pathname === '/login') event.detail.shouldSwap = false;
+          else if (denied) { event.detail.shouldSwap = true; event.detail.isError = false; }
         }
       });
       document.addEventListener('htmx:afterRequest', event => {
