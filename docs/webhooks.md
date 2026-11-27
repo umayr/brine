@@ -109,7 +109,9 @@ For the same proven Git owner, `plan` captures the explicitly reviewed branch, s
 
 For the same explicitly trusted automatic Git policy, incoming `deploy` reuses the existing captured-commit deployment runner and its durable attempted-revision/pending journal. It does not approve attended source workflows. A distinct `checked-apply` host grant and atomic exact-predecessor submission are required; there is no create or ordinary apply fallback. Pending/unknown work is reconciled by status lookup, never resubmitted. Previously attempted revisions are refused with no execution, including branch rollback; they are not reported as a successful new deployment. A known target outcome remains visible if saving local recovery state fails.
 
-Additional source/operator qualification, ordinary remote producer coverage, the new actual Dill release and bundle pin remain release-gate work; this branch is not a completed release.
+Ordinary remote UI stage/preflight, reviewed apply/removal, and automatic Git preflight/apply use passive durable operation observations around the existing SDK calls. Observation grants no authority and never resubmits. A journal admission failure prevents a new send; target results remain unchanged if recording their outcome fails. Reported completion must match the exact request and stack. Runtime-only removal/preflight cannot acquire a local source association merely through a same-name workspace. Incoming actions retain their own single operation journal. Later status inspection remains read-only, not another execution.
+
+Additional source/operator qualification, the new actual Dill release and bundle pin remain release-gate work; this branch is not a completed release.
 
 History and deduplication are bounded by configured retention. Unresolved unknown/awaiting-review incoming records are retained until inspection. Queue or journal exhaustion refuses new work explicitly rather than dropping it or inventing successful delivery.
 

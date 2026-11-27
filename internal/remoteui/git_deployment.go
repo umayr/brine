@@ -292,7 +292,7 @@ func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDep
 		return
 	}
 	stageCtx, stopStage := context.WithTimeout(ctx, 75*time.Second)
-	stage, manifest, plan, err := stageAndPreview(stageCtx, c, epoch, name, snap)
+	stage, manifest, plan, err := h.observePlan(stageCtx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: name}, c, epoch, name, snap)
 	stopStage()
 	if err != nil || plan.SelectionDigest == nil || (plan.Mode != "create" && plan.Mode != "update") {
 		return
@@ -335,7 +335,9 @@ func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDep
 		result, err = c.ApplyCheckedJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, p.DeploymentRequest, pending.Journal)
 	} else {
 		out.Submitted = true
-		result, err = c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
+		result, err = h.observeTarget(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: name, Action: "deploy", Request: pending.Request}, func() (agentclient.DeploymentStatus, error) {
+			return c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
+		})
 	}
 	if err == nil {
 		out.Status = result

@@ -55,6 +55,7 @@ func (d *webhookDispatcher) executeRemote(ctx context.Context, t webhooks.Trigge
 	if t.Action == "plan" || t.Action == "git-sync" {
 		return d.executeRemoteSource(ctx, t, request, op, s.Name)
 	}
+	ctx = remoteui.WithObservedExecution(ctx)
 	id := sha256.Sum256([]byte("brine-webhook-target/1\x00" + request.ID))
 	var out remoteui.LifecycleResult
 	if t.Action == "deploy" {

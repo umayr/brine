@@ -380,6 +380,17 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer h.Close()
+	normalObserved := &executionFixture{}
+	observedActions := map[string]int{}
+	h.SetExecutionObserver(func(_ context.Context, m ExecutionMetadata) (ExecutionObservation, error) {
+		observedActions[m.Action]++
+		return normalObserved, nil
+	})
+	t.Cleanup(func() {
+		if observedActions["plan"] == 0 || observedActions["deploy"] == 0 || observedActions["remove"] == 0 || normalObserved.starts != normalObserved.finishes {
+			t.Fatal("normal reviewed UI paths bypassed execution observation", observedActions, normalObserved)
+		}
+	})
 	login := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/login", strings.NewReader("user=admin&password=secret"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -632,6 +643,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	h, err = NewDeployment(a, reg, reopenedStore)
 	if err == nil {
+		h.SetExecutionObserver(func(_ context.Context, m ExecutionMetadata) (ExecutionObservation, error) {
+			observedActions[m.Action]++
+			return normalObserved, nil
+		})
 		h.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
 	}
 	if err != nil {

@@ -33,20 +33,21 @@ const deployPath = "/remote/deployment"
 var captureLimits = projectsnapshot.Limits{MaxFiles: 1000, MaxEntries: 2000, MaxDepth: 32, MaxFileBytes: 4 << 20, MaxTotalBytes: 16 << 20}
 
 type Deployment struct {
-	auth          *auth.Authenticator
-	credentials   DeploymentCredentials
-	registry      *targetregistry.Registry
-	stacks        store.StackStore
-	reviews       *projectreview.Store
-	slot          chan struct{}
-	mu            sync.Mutex
-	pending       map[string]deploymentReview
-	attendedBytes int
-	closed        bool
-	history       *attendedHistory // nil for every production constructor
-	git           *git.Runner
-	gitStore      store.RemoteGitStore
-	gitAdmission  deploymentAdmission
+	observeExecution ExecutionObserver
+	auth             *auth.Authenticator
+	credentials      DeploymentCredentials
+	registry         *targetregistry.Registry
+	stacks           store.StackStore
+	reviews          *projectreview.Store
+	slot             chan struct{}
+	mu               sync.Mutex
+	pending          map[string]deploymentReview
+	attendedBytes    int
+	closed           bool
+	history          *attendedHistory // nil for every production constructor
+	git              *git.Runner
+	gitStore         store.RemoteGitStore
+	gitAdmission     deploymentAdmission
 }
 
 type deploymentReview struct {
@@ -241,11 +242,13 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var status agentclient.DeploymentStatus
-		if review.Mode == "remove" {
-			status, err = c.RemoveJournalDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID, review.Journal)
-		} else {
-			status, err = c.ApplyJournalDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode, review.Journal)
-		}
+		status, err = h.observeTarget(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: review.Stack, Action: map[bool]string{true: "remove", false: "deploy"}[review.Mode == "remove"], Request: p.ID, RuntimeOnly: review.Mode == "remove"}, func() (agentclient.DeploymentStatus, error) {
+			if review.Mode == "remove" {
+				return c.RemoveJournalDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID, review.Journal)
+			} else {
+				return c.ApplyJournalDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode, review.Journal)
+			}
+		})
 		if err == nil {
 			p.Status = &status
 		} else {
@@ -398,7 +401,7 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
-		stage, manifest, plan, err := stageAndPreview(ctx, stager, epoch, p.Stack, intent.Snapshot)
+		stage, manifest, plan, err := h.observePlan(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: p.Stack}, stager, epoch, p.Stack, intent.Snapshot)
 		if err != nil || (h.history == nil && (credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision)) {
 			p.Error = "Staging or preview could not be confirmed. Inspect the receiver before preparing another transfer. No retry was sent."
 			p.ID = ""
@@ -429,7 +432,12 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer c.Close()
-		plan, err := c.PreviewRemoval(ctx, epoch, p.Stack)
+		var plan *agentclient.DeploymentPreview
+		_, err = h.observeTarget(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: p.Stack, Action: "plan", RuntimeOnly: true}, func() (agentclient.DeploymentStatus, error) {
+			var previewErr error
+			plan, previewErr = c.PreviewRemoval(ctx, epoch, p.Stack)
+			return agentclient.DeploymentStatus{}, previewErr
+		})
 		if err != nil || credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision {
 			p.Error = "Managed removal preview unavailable. No operation was sent."
 			break

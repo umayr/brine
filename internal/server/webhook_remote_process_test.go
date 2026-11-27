@@ -309,6 +309,7 @@ config {
 	server.webhooks = svc
 	server.webhookDispatcher = &webhookDispatcher{s: server}
 	server.web.EnableWebhooks(svc, server.webhookDispatcher)
+	server.configureWebhookProducers()
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); svc.RunTriggers(workerCtx, server.webhookDispatcher) }()
@@ -564,6 +565,53 @@ config {
 		}
 		t.Logf("signed %s completed; Settings session+CSRF, head, runtime and dedup verified", action)
 	}
+	// Ordinary (non-incoming) automatic Git deployment uses the same producer.
+	incomingEvents := journalEvents(t, server)
+	for _, event := range incomingEvents {
+		if strings.HasPrefix(event.ID, "remote_op_") {
+			t.Fatal("incoming execution observed twice")
+		}
+	}
+	gitRun(origin, "reset", "--hard", upstreamCommit)
+	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, compose...), []byte("\n// independent automatic Git update\n")...), 0600)
+	gitRun(origin, "add", ".")
+	gitRun(origin, "commit", "-m", "ordinary automatic source")
+	ordinaryCommit := gitRun(origin, "rev-parse", "HEAD")
+	pollCtx, stopPoll := context.WithCancel(ctx)
+	pollDone := make(chan struct{})
+	go func() { defer close(pollDone); deployment.RunGit(pollCtx) }()
+	completedPoll := false
+	deadlinePoll := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadlinePoll) {
+		s, e := fs.Get(stack)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if s.RemoteGit.Commit == ordinaryCommit && s.RemoteGit.Phase == "succeeded" {
+			completedPoll = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stopPoll()
+	<-pollDone
+	if !completedPoll {
+		t.Fatal("ordinary Git poll did not complete")
+	}
+	observed := journalEvents(t, server)
+	normalCount := 0
+	for _, event := range observed {
+		if strings.HasPrefix(event.ID, "remote_op_") {
+			normalCount++
+			if event.Type != "operation.completed" || event.Outcome != "success" || event.Source.Kind != "git" || event.Target.Kind != "remote" || event.Effects != "complete" {
+				t.Fatal("ordinary remote producer invented/lost target fact", event)
+			}
+		}
+	}
+	if normalCount != 1 {
+		t.Fatal("ordinary target mutation not journaled exactly once", normalCount)
+	}
+	t.Log("ordinary automatic Git execution journaled exactly once; incoming observer suppression verified")
 	// A separate authorized controller advances target lineage on the same name.
 	// The old source's trigger must not inherit that replacement deployment.
 	replacement, e := c.PreviewDeployment(ctx, epoch, stage, digest, stack)

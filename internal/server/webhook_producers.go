@@ -131,6 +131,9 @@ func (s *Server) newWebhookObservation(ctx context.Context, path, action string,
 // Hooks journal existing execution paths; they never substitute an executor,
 // identity or authorization gate. Configure once before HTTP/background work.
 func (s *Server) configureWebhookProducers() {
+	if s.remoteDeploy != nil {
+		s.remoteDeploy.SetExecutionObserver(s.newRemoteExecutionObservation)
+	}
 	if s.agent != nil && s.agent.Dill() != nil {
 		s.agent.Dill().ObserveLifecycle = func(ctx context.Context, path, action string) (dill.LifecycleObserver, error) {
 			observer, e := s.newWebhookObservation(ctx, path, action, false)

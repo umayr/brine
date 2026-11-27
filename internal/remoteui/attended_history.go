@@ -213,7 +213,9 @@ func (h *Deployment) submitAttended(ctx context.Context, w http.ResponseWriter, 
 		return
 	}
 	p.ID = a.requestID
-	status, err := c.client.ApplyJournalDeployment(ctx, c.epoch, r.StageID, r.Manifest, r.Stack, r.Selection, a.requestID, r.Mode, a.journal)
+	status, err := h.observeTarget(ctx, ExecutionMetadata{Host: r.Host, Target: r.TargetDigest, Stack: r.Stack, Action: "deploy", Request: a.requestID}, func() (agentclient.DeploymentStatus, error) {
+		return c.client.ApplyJournalDeployment(ctx, c.epoch, r.StageID, r.Manifest, r.Stack, r.Selection, a.requestID, r.Mode, a.journal)
+	})
 	if err != nil || status.RequestID != a.requestID || status.Stack != r.Stack {
 		p.Error = "Operation not confirmed. No retry was sent. Do not retry based on this result."
 		p.JournalCapacityLow = errors.Is(err, agentclient.ErrJournalCapacity)
