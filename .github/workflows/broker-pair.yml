@@ -16,11 +16,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: brine
-      - name: Checkout Dill v0.13.0 toolchain definition (not a binary build)
+      - name: Checkout Dill v0.13.1 toolchain definition (not a binary build)
         uses: actions/checkout@v4
         with:
           repository: umayr/dill
-          ref: 27d5f939e9032f526a635b7a37e1311b4126e240
+          ref: ee3810814ae90481e4faa47ffcc195b7a9f810bd
           path: dill
       - uses: actions/setup-go@v5
         with:
@@ -36,18 +36,18 @@ jobs:
       - name: Install pinned Pkl and verified released Dill
         working-directory: dill
         run: |
-          grep -qx 'ARG DILL_VERSION=0.13.0' ../brine/Dockerfile
+          grep -qx 'ARG DILL_VERSION=0.13.1' ../brine/Dockerfile
           python3 scripts/install-pkl.py "$RUNNER_TEMP/pkl"
           mkdir -p bin
-          curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.13.0/dill-linux-amd64 -o bin/dill
-          curl -fsSL --retry 3 'https://github.com/umayr/dill/releases/download/v0.13.0/dill%400.13.0.zip' -o schema.zip
-          echo '2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525  bin/dill' | sha256sum -c
+          curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.13.1/dill-linux-amd64 -o bin/dill
+          curl -fsSL --retry 3 'https://github.com/umayr/dill/releases/download/v0.13.1/dill%400.13.1.zip' -o schema.zip
+          echo 'a792cf6095d106747cd3bb7b471205ec8f9a48087eae42114a2655d20355d902  bin/dill' | sha256sum -c
           echo '2f2c1c622b9aa7f386c7d401bd912abe289a68554e1974da1bde0b6cceb6b413  schema.zip' | sha256sum -c
           test "$(unzip -Z1 schema.zip)" = dill.pkl
           unzip -p schema.zip dill.pkl > released-dill.pkl
           cmp dill.pkl released-dill.pkl
           chmod 0700 bin/dill
-          test "$(bin/dill version)" = v0.13.0
+          test "$(bin/dill version)" = v0.13.1
       - name: Build web assets and browser tooling
         working-directory: brine
         run: |

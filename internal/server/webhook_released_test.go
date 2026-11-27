@@ -26,8 +26,8 @@ func TestWebhookReleasedDillPlan(t *testing.T) {
 	if binary == "" || pkl == "" || schema == "" {
 		t.Skip("set exact released BRINE_TEST_DILL, BRINE_TEST_PKL and BRINE_TEST_DILL_SCHEMA")
 	}
-	if out, e := exec.Command(binary, "version").CombinedOutput(); e != nil || strings.TrimSpace(string(out)) != "v0.13.0" {
-		t.Fatal("requires released Dill v0.13.0")
+	if out, e := exec.Command(binary, "version").CombinedOutput(); e != nil || strings.TrimSpace(string(out)) != "v0.13.1" {
+		t.Fatal("requires released Dill v0.13.1")
 	}
 	if out, e := exec.Command(pkl, "--version").CombinedOutput(); e != nil || !strings.HasPrefix(string(out), "Pkl 0.31.1 ") {
 		t.Fatal("requires bundled Pkl0.31.1")
