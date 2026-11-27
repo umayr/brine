@@ -13,6 +13,7 @@ import (
 )
 
 var ErrAutomationAdmission = errors.New("remote automation admission unavailable")
+var ErrAutomationRecovery = errors.New("remote automation preparation requires recovery")
 
 // LifecycleTarget is a non-secret immutable automation ceiling. It is not a
 // browser session or a credential. Enrollment/custody/source changes retire it.
@@ -63,9 +64,15 @@ func (h *Deployment) LifecycleTargets(ctx context.Context, stack string) ([]Life
 	if e != nil || !slices.Contains(caps, "deployment.journal") {
 		return nil, ErrAutomationAdmission
 	}
-	actions := []string{"git-sync"}
+	actions := []string{}
+	sourceOwnerCheck := h.git != nil && slices.Contains(caps, "deployment.stop-preview")
+	if sourceOwnerCheck {
+		actions = append(actions, "git-sync")
+	}
 	if slices.Contains(caps, "deployment.stage") && slices.Contains(caps, "deployment.manifest") && slices.Contains(caps, "deployment.preview") {
-		actions = append([]string{"plan"}, actions...)
+		if sourceOwnerCheck {
+			actions = append([]string{"plan"}, actions...)
+		}
 		if slices.Contains(caps, "deployment.checked-apply") {
 			actions = append(actions, "deploy")
 		}
@@ -131,7 +138,9 @@ func (h *Deployment) RunLifecycle(ctx context.Context, stack, binding, action, r
 		return out, ErrAutomationAdmission
 	}
 	if ctx.Err() != nil || !beforeDispatch() {
-		_ = intents.ResolveManualIntent(intent)
+		if intents.ResolveManualIntent(intent) != nil {
+			return out, ErrAutomationRecovery
+		}
 		return out, ErrAutomationAdmission
 	}
 	out.Submitted = true

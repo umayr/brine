@@ -715,6 +715,66 @@ config {
 	if responseLoss != nil {
 		qualifyUnknownRecovery(t, ctx, server, fs, svc, stack, httpServer.URL, csrf, browser, option, responseLoss, lastTrigger, lastSecret, inspect)
 	}
+	{
+		// A separate authorized controller advances target lineage on the same name.
+		// The old source's trigger must not inherit that replacement deployment.
+		replacement, e := c.PreviewDeployment(ctx, epoch, stage, digest, stack)
+		if e != nil || replacement.SelectionDigest == nil {
+			t.Fatal("external replacement preview", e)
+		}
+		replacementID := fmt.Sprintf("%032x", 999)
+		r, e := c.ApplyJournalDeployment(ctx, epoch, stage, digest, stack, *replacement.SelectionDigest, replacementID, "update", preview.JournalID)
+		if e != nil || r.State != "succeeded" {
+			t.Fatal("external replacement", e, r)
+		}
+		pinIncomingReplacement(t, stack, "sleep 1", cleanupNetwork, &createdIDs, engine, engineCall)
+		_, outsideStart := inspect()
+		beforeReplacement, _ := fs.Get(stack)
+		oldReviewedHead := beforeReplacement.RemoteGit.DeploymentRequest
+		payload := []byte(`{"id":"outside-replacement"}`)
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		req, _ := http.NewRequestWithContext(ctx, "POST", httpServer.URL+"/hooks/"+lastTrigger.ID, bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Brine-Timestamp", ts)
+		req.Header.Set("Brine-Signature", webhooks.Sign([]byte(lastSecret), ts, payload))
+		resp, e := http.DefaultClient.Do(req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 202 {
+			t.Fatal("scoped replacement ingress", resp.StatusCode)
+		}
+		deadline := time.Now().Add(20 * time.Second)
+		rejected := false
+		for time.Now().Before(deadline) {
+			rows, e := svc.Requests(ctx, lastTrigger.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, row := range rows {
+				if row.IdempotencyKey == "outside-replacement" && row.Status == "rejected" {
+					rejected = true
+				}
+			}
+			if rejected {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !rejected {
+			t.Fatal("outside replacement did not deny worker admission")
+		}
+		afterReplacement, _ := fs.Get(stack)
+		_, afterStart := inspect()
+		if afterStart != outsideStart || afterReplacement.RemoteGit.DeploymentRequest != oldReviewedHead {
+			t.Fatal("outside replacement inherited scoped execution")
+		}
+		t.Log("same-name outside deployment cannot inherit signed trigger")
+	}
+	// The independently approved ordinary Git policy below establishes a fresh
+	// successful owner before testing source-only failure. No policy is reseeded.
 	// Ordinary (non-incoming) automatic Git deployment uses the same producer.
 	incomingEvents := journalEvents(t, server)
 	incomingNormal := 0
@@ -765,68 +825,16 @@ config {
 	if normalCount != 1+bootstrapEvents {
 		t.Fatal("ordinary target mutation not journaled exactly once", normalCount)
 	}
+	// This independently approved update superseded the outside controller's
+	// sleep-1 revision. Pin its real replacement before the source-only proof.
+	pinIncomingReplacement(t, stack, "sleep 3", cleanupNetwork, &createdIDs, engine, engineCall)
 	t.Log("ordinary automatic Git execution journaled exactly once; incoming observer suppression verified")
-	// A separate authorized controller advances target lineage on the same name.
-	// The old source's trigger must not inherit that replacement deployment.
-	replacement, e := c.PreviewDeployment(ctx, epoch, stage, digest, stack)
-	if e != nil || replacement.SelectionDigest == nil {
-		t.Fatal("external replacement preview", e)
-	}
-	replacementID := fmt.Sprintf("%032x", 999)
-	r, e := c.ApplyJournalDeployment(ctx, epoch, stage, digest, stack, *replacement.SelectionDigest, replacementID, "update", preview.JournalID)
-	if e != nil || r.State != "succeeded" {
-		t.Fatal("external replacement", e, r)
-	}
-	pinIncomingReplacement(t, stack, "sleep 1", cleanupNetwork, &createdIDs, engine, engineCall)
-	_, outsideStart := inspect()
-	beforeReplacement, _ := fs.Get(stack)
-	oldReviewedHead := beforeReplacement.RemoteGit.DeploymentRequest
-	payload := []byte(`{"id":"outside-replacement"}`)
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	req, _ := http.NewRequestWithContext(ctx, "POST", httpServer.URL+"/hooks/"+lastTrigger.ID, bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Brine-Timestamp", ts)
-	req.Header.Set("Brine-Signature", webhooks.Sign([]byte(lastSecret), ts, payload))
-	resp, e := http.DefaultClient.Do(req)
-	if e != nil {
-		t.Fatal(e)
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != 202 {
-		t.Fatal("scoped replacement ingress", resp.StatusCode)
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	rejected := false
-	for time.Now().Before(deadline) {
-		rows, e := svc.Requests(ctx, lastTrigger.ID)
-		if e != nil {
-			t.Fatal(e)
-		}
-		for _, row := range rows {
-			if row.IdempotencyKey == "outside-replacement" && row.Status == "rejected" {
-				rejected = true
-			}
-		}
-		if rejected {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !rejected {
-		t.Fatal("outside replacement did not deny worker admission")
-	}
-	afterReplacement, _ := fs.Get(stack)
-	_, afterStart := inspect()
-	if afterStart != outsideStart || afterReplacement.RemoteGit.DeploymentRequest != oldReviewedHead {
-		t.Fatal("outside replacement inherited scoped execution")
-	}
-	t.Log("same-name outside deployment cannot inherit signed trigger")
 	// A fetch failing after the source mutation boundary remains unknown and
 	// blocks every remote action until explicitly inspected/reconfigured.
 	if e := os.Rename(origin, origin+"-offline"); e != nil {
 		t.Fatal(e)
 	}
+	_, beforeFailedSource := inspect()
 	failedPayload := []byte(`{"id":"upstream-unavailable"}`)
 	stamp := strconv.FormatInt(time.Now().Unix(), 10)
 	failedReq, _ := http.NewRequestWithContext(ctx, "POST", httpServer.URL+"/hooks/"+syncTrigger.ID, bytes.NewReader(failedPayload))
@@ -842,7 +850,7 @@ config {
 	if failedResponse.StatusCode != 202 {
 		t.Fatal("source unknown fixture not admitted", failedResponse.StatusCode)
 	}
-	deadline = time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	uncertain := false
 	for time.Now().Before(deadline) {
 		rows, e := svc.Requests(ctx, syncTrigger.ID)
@@ -867,7 +875,7 @@ config {
 		t.Fatal("source uncertainty did not block lifecycle")
 	}
 	_, afterFailedSource := inspect()
-	if afterFailedSource != afterStart {
+	if afterFailedSource != beforeFailedSource {
 		t.Fatal("failed source sync changed runtime")
 	}
 	t.Log("uncertain source-only sync stays unknown and blocks remote lifecycle without deploying")

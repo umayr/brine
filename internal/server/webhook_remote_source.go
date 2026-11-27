@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"errors"
+	"github.com/umayr/brine/internal/remoteui"
 	"github.com/umayr/brine/internal/webhooks"
 	"time"
 )
@@ -16,6 +18,10 @@ func (d *webhookDispatcher) executeRemoteSource(ctx context.Context, t webhooks.
 	out, e := d.s.remoteDeploy.RunSourceAction(ctx, stack, t.TargetID, t.Action, func() bool { return op.Started(ctx) == nil })
 	result := webhooks.TriggerResult{Status: "rejected", Reason: "admission_denied", OperationID: request.ID}
 	kind, outcome, effects := "operation.rejected", "unavailable", "none"
+	if !out.Attempted && errors.Is(e, remoteui.ErrAutomationRecovery) {
+		result.Status, result.Outcome, result.Reason = "unknown", "unknown", "recovery_storage_unavailable"
+		kind, outcome, effects = "operation.outcome_unknown", "unknown", "none"
+	}
 	if out.Attempted {
 		result.Status, result.Outcome, result.Reason = "unknown", "unknown", "execution_unconfirmed"
 		kind, outcome, effects = "operation.outcome_unknown", "unknown", out.Effects

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"github.com/umayr/brine/internal/remoteui"
 	"github.com/umayr/brine/internal/web"
@@ -84,6 +85,10 @@ func (d *webhookDispatcher) executeRemote(ctx context.Context, t webhooks.Trigge
 func remoteLifecycleResult(id string, out remoteui.LifecycleResult, e error) (webhooks.TriggerResult, string, string, string, string) {
 	result := webhooks.TriggerResult{Status: "rejected", Reason: "admission_denied", OperationID: id}
 	kind, outcome, effects, reason := "operation.rejected", "unavailable", "none", "admission_denied"
+	if !out.Submitted && errors.Is(e, remoteui.ErrAutomationRecovery) {
+		result.Status, result.Outcome, result.Reason = "unknown", "unknown", "recovery_storage_unavailable"
+		kind, outcome, effects, reason = "operation.outcome_unknown", "unknown", "none", result.Reason
+	}
 	if out.Submitted {
 		result.Status = "unknown"
 		result.Outcome = "unknown"

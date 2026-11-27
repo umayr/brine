@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/umayr/brine/internal/agentclient"
 	"github.com/umayr/brine/internal/auth"
@@ -17,11 +18,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 )
+
+type failedAutomationResolution struct{ *store.FSStore }
+
+func (f failedAutomationResolution) ResolveManualIntent(store.ManualDeploymentIntent) error {
+	return store.ErrManualIntent
+}
+
+type failedSourceRollback struct{ *store.FSStore }
+
+func (f failedSourceRollback) SwapRemoteGit(name, source string, expected, next *store.RemoteGitPolicy) error {
+	if expected != nil && next != nil && expected.SourceSync != "" && next.SourceSync == "" {
+		return store.ErrRemoteGit
+	}
+	return f.FSStore.SwapRemoteGit(name, source, expected, next)
+}
 
 func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) {
 	ctx := context.Background()
@@ -32,6 +50,9 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	const engine = "11111111-1111-4111-8111-111111111111"
 	journal, head := strings.Repeat("a", 32), strings.Repeat("b", 32)
 	calls := 0
+	ownerPreviews := 0
+	replaceOnPreview := 0
+	var sourceOnlyCaps atomic.Bool
 	unknown := false
 	var capsUnavailable atomic.Bool
 	raw, e := os.ReadFile("../dill/testdata/preflight-v1/preview-up-config-noop.json")
@@ -77,11 +98,19 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
+			if sourceOnlyCaps.Load() {
+				fmt.Fprint(w, `{"schema":"dill.agent.capabilities.v1","monitor":["session","capabilities"],"deployment_grants":["journal","stop-preview","stage","manifest","preview"]}`)
+				return
+			}
 			fmt.Fprint(w, `{"schema":"dill.agent.capabilities.v1","monitor":["session","capabilities"],"deployment_grants":["journal","stop-preview","stop"]}`)
 		case "/v1/deploy/journal":
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			fmt.Fprintf(w, `{"journalId":%q}`, journal)
 		case "/v1/deploy/stop-preview":
+			ownerPreviews++
+			if ownerPreviews == replaceOnPreview {
+				head = strings.Repeat("d", 32)
+			}
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			w.Header().Set("X-Dill-Prior-Request", head)
 			w.Header().Set("X-Dill-Deployment-Mode", "stop")
@@ -115,12 +144,20 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	}
 	data := t.TempDir()
 	os.MkdirAll(filepath.Join(data, "stacks", "demo", "repo"), 0700)
-	os.WriteFile(filepath.Join(data, "stacks", "demo", "repo", "compose.pkl"), []byte("synthetic"), 0600)
+	repository := filepath.Join(data, "stacks", "demo", "repo")
+	os.WriteFile(filepath.Join(repository, "compose.pkl"), []byte("value = 42\n"), 0600)
+	for _, args := range [][]string{{"init", "--initial-branch=main"}, {"add", "compose.pkl"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "synthetic"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repository
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("fixture git %v: %s", err, out)
+		}
+	}
 	fs, e := store.NewFSStore(data)
 	if e != nil {
 		t.Fatal(e)
 	}
-	s, e := fs.CreateFromGit("demo", &store.GitSource{URL: "https://example.invalid/repo.git", Branch: "main"}, "compose.pkl")
+	s, e := fs.CreateFromGit("demo", &store.GitSource{URL: repository, Branch: "main"}, "compose.pkl")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -135,7 +172,12 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	}
 	defer h.Close()
 	h.SetDeploymentCredentials(testDeploymentCredentials(deploy))
-	h.EnableGit(&gitpkg.Runner{})
+	gitMarker := filepath.Join(t.TempDir(), "git-called")
+	gitBinary := filepath.Join(t.TempDir(), "git")
+	if e = os.WriteFile(gitBinary, []byte(fmt.Sprintf("#!/bin/sh\nprintf hit >> %q\nexit 1\n", gitMarker)), 0700); e != nil {
+		t.Fatal(e)
+	}
+	h.EnableGit(&gitpkg.Runner{Binary: gitBinary})
 	targets, e := h.LifecycleTargets(ctx, "demo")
 	if e != nil || len(targets) != 1 {
 		t.Fatal(targets, e)
@@ -143,6 +185,19 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	if len(targets[0].Actions) != 2 || targets[0].Actions[0] != "git-sync" || targets[0].Actions[1] != "stop" {
 		t.Fatal("ungranted lifecycle action advertised")
 	}
+	sourceOnlyCaps.Store(true)
+	sourceTargets, err := h.LifecycleTargets(ctx, "demo")
+	if err != nil || len(sourceTargets) != 1 || !slices.Contains(sourceTargets[0].Actions, "plan") || !slices.Contains(sourceTargets[0].Actions, "git-sync") || slices.Contains(sourceTargets[0].Actions, "stop") {
+		t.Fatal("source actions required stop execution permission", sourceTargets, err)
+	}
+	savedGit := h.git
+	h.git = nil
+	noGit, err := h.LifecycleTargets(ctx, "demo")
+	if err == nil || len(noGit) != 0 {
+		t.Fatal("source actions advertised without runner", noGit, err)
+	}
+	h.git = savedGit
+	sourceOnlyCaps.Store(false)
 	capsUnavailable.Store(true)
 	if opts, err := h.LifecycleTargets(ctx, "demo"); err == nil || len(opts) != 0 {
 		t.Fatal("old capability-unavailable target offered automation")
@@ -156,7 +211,56 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	if e == nil || out.Submitted || calls != 0 {
 		t.Fatal("unreviewed replacement mutated", out, e)
 	}
+	for _, action := range []string{"git-sync", "plan"} {
+		beforePreview := ownerPreviews
+		source, err := h.RunSourceAction(ctx, "demo", id, action, func() bool { t.Fatal("stale owner reached dispatch"); return false })
+		if err == nil || source.Attempted || ownerPreviews <= beforePreview {
+			t.Fatal("stale source owner not checked before capture/pull", action, source, err)
+		}
+		if _, err = os.Stat(gitMarker); !os.IsNotExist(err) {
+			t.Fatal("stale source owner invoked git", action, err)
+		}
+	}
 	head = saved
+	h.git = gitpkg.New()
+	for _, action := range []string{"git-sync", "plan"} {
+		before := ownerPreviews
+		replaceOnPreview = before + 2
+		out, err := h.RunSourceAction(ctx, "demo", id, action, func() bool { t.Fatal("replacement after first owner check reached dispatch"); return false })
+		if err == nil || out.Attempted || ownerPreviews != before+2 {
+			t.Fatal("repeat live owner check missing", action, out, err, ownerPreviews-before)
+		}
+		fresh, _ := fs.Get("demo")
+		if fresh.RemoteGit.Phase != "succeeded" || fresh.RemoteGit.SourceSync != "" {
+			t.Fatal("replacement prepared source policy")
+		}
+		head = saved
+		replaceOnPreview = 0
+	}
+	h.gitStore = failedSourceRollback{fs}
+	source, sourceErr := h.RunSourceAction(ctx, "demo", id, "git-sync", func() bool { return false })
+	blocked, _ := fs.Get("demo")
+	if !errors.Is(sourceErr, ErrAutomationRecovery) || source.Attempted || blocked.RemoteGit.Phase != "blocked" || blocked.RemoteGit.SourceSync == "" {
+		t.Fatal("source rollback failure hidden", source, sourceErr)
+	}
+	if e = fs.SwapRemoteGit("demo", p.Source, blocked.RemoteGit, p); e != nil {
+		t.Fatal(e)
+	}
+	h.gitStore = fs
+	h.stacks = failedAutomationResolution{fs}
+	cleanupRequest := strings.Repeat("7", 32)
+	denied, cleanupErr := h.RunLifecycle(ctx, "demo", id, "stop", cleanupRequest, func() bool { return false })
+	if !errors.Is(cleanupErr, ErrAutomationRecovery) || denied.Submitted || h.manualClear("demo") {
+		t.Fatal("failed preparation cleanup hidden", denied, cleanupErr)
+	}
+	intentToClear, err := fs.GetManualIntent(cleanupRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fs.ResolveManualIntent(intentToClear); err != nil {
+		t.Fatal(err)
+	}
+	h.stacks = fs
 	out, e = h.RunLifecycle(ctx, "demo", id, "stop", strings.Repeat("6", 32), func() bool {
 		prepared, err := fs.GetManualIntent(strings.Repeat("6", 32))
 		if err != nil || prepared.Resolved {

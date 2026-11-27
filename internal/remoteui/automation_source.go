@@ -83,6 +83,15 @@ func (h *Deployment) RunSourceAction(ctx context.Context, stack, binding, action
 		fresh, e := h.stacks.Get(stack)
 		return e == nil && lifecycleSource(fresh) && fresh.CreatedAt.Equal(s.CreatedAt) && *fresh.RemoteGit == *s.RemoteGit && h.deploymentCredentialRevision(ctx, r) == revision && ctx.Err() == nil
 	}
+	c, epoch, e := h.openDeploymentSession(ctx, r, revision)
+	if e != nil {
+		return out, ErrAutomationAdmission
+	}
+	defer c.Close()
+	ownerCurrent := func() bool { return current() && verifiedSourceOwner(ctx, c, epoch, stack, s.RemoteGit) && current() }
+	if !ownerCurrent() {
+		return out, ErrAutomationAdmission
+	}
 	if action == "git-sync" {
 		repo, e := h.stacks.RepoDir(stack)
 		if e != nil {
@@ -96,19 +105,23 @@ func (h *Deployment) RunSourceAction(ctx context.Context, stack, binding, action
 		blocked.SourceSync = hex.EncodeToString(incident[:])
 		blocked.Phase, blocked.Reason = "blocked", "source-sync-unconfirmed"
 		prepared := false
+		rollbackFailed := false
 		observation := sourceObservation{out: &out, before: func() bool {
-			if !current() || h.gitStore.SwapRemoteGit(stack, s.RemoteGit.Source, s.RemoteGit, &blocked) != nil {
+			if !ownerCurrent() || h.gitStore.SwapRemoteGit(stack, s.RemoteGit.Source, s.RemoteGit, &blocked) != nil {
 				return false
 			}
 			prepared = true
 			if !beforeDispatch() {
-				_ = h.gitStore.SwapRemoteGit(stack, s.RemoteGit.Source, &blocked, s.RemoteGit)
+				rollbackFailed = h.gitStore.SwapRemoteGit(stack, s.RemoteGit.Source, &blocked, s.RemoteGit) != nil
 				return false
 			}
 			return true
 		}}
 		pullCtx := gitpkg.WithPullObserver(ctx, observation)
 		_, _, e = gitpkg.PullAndRecord(pullCtx, reviewedPull{h.git, s.Git.URL, s.RemoteGitBranch()}, h.stacks, stack, repo)
+		if rollbackFailed {
+			return out, ErrAutomationRecovery
+		}
 		if out.Outcome == "success" && prepared {
 			if h.gitStore.SwapRemoteGit(stack, s.RemoteGit.Source, &blocked, s.RemoteGit) != nil {
 				return out, ErrAutomationAdmission
@@ -124,12 +137,7 @@ func (h *Deployment) RunSourceAction(ctx context.Context, stack, binding, action
 	if e != nil || !current() {
 		return out, ErrAutomationAdmission
 	}
-	c, epoch, e := h.openDeploymentSession(ctx, r, revision)
-	if e != nil {
-		return out, ErrAutomationAdmission
-	}
-	defer c.Close()
-	if !beforeDispatch() {
+	if !ownerCurrent() || !beforeDispatch() {
 		return out, ErrAutomationAdmission
 	}
 	out.Attempted = true
@@ -143,6 +151,17 @@ func (h *Deployment) RunSourceAction(ctx context.Context, stack, binding, action
 	}
 	out.Outcome, out.Effects = "success", "none"
 	return out, nil
+}
+
+// Uses only the explicitly granted read-only stop preview. No lifecycle action
+// is submitted and no source is transferred by this ownership check.
+func verifiedSourceOwner(ctx context.Context, c *agentclient.Client, epoch, stack string, owner *store.RemoteGitPolicy) bool {
+	journal, e := c.DeploymentJournal(ctx, epoch)
+	if e != nil || journal != owner.DeploymentJournal {
+		return false
+	}
+	p, e := c.PreviewLifecycle(ctx, epoch, stack, "stop", journal)
+	return e == nil && p != nil && p.JournalID == journal && p.PriorRequestID == owner.DeploymentRequest
 }
 func qualifiedSourcePreview(p *agentclient.DeploymentPreview, owner *store.RemoteGitPolicy) bool {
 	return p != nil && p.Mode == "update" && p.SelectionDigest != nil && p.JournalID == owner.DeploymentJournal && p.PriorRequestID == owner.DeploymentRequest
