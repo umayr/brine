@@ -128,9 +128,18 @@ func testBrokerClientPinnedEpoch(t *testing.T, profile bool) {
 	if !errors.Is(err, ErrDeploymentUnknown) || applies.Load() != 1 {
 		t.Fatal("ambiguous write retried or succeeded")
 	}
+	// A rejected/ambiguous response may permanently close the single owned
+	// connection (notably when its body is not consumed). Reconciliation uses
+	// a fresh authenticated transport, never a retry of the original mutation.
+	client.Close()
+	client, epoch, err = pair.OpenBrokerDeploy(context.Background(), target, deploy, BrokerStatus|BrokerRequirements|BrokerPrepare|BrokerApply, func(context.Context) bool { return !revoked.Load() }, pins...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
 	status, err := client.Status(context.Background(), epoch, journal, id, ref)
-	if err != nil || status.Status.State != "unknown" {
-		t.Fatal("unknown not preserved")
+	if err != nil || status.Status.State != "unknown" || applies.Load() != 1 {
+		t.Fatal("original-request unknown not preserved without replay")
 	}
 	before := calls.Load()
 	if _, err = client.Stage(context.Background(), epoch, []byte("{}")); err == nil || calls.Load() != before {
