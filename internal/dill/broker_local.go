@@ -186,10 +186,7 @@ func (c *LocalBroker) matches(s brokerwire.Scope) bool {
 	return s.Valid() && s.Engine == c.Engine() && s.TargetDigest == c.expectedTarget() && s.EndpointDigest == c.expectedEndpoint()
 }
 func (c *LocalBroker) Prepare(ctx context.Context, journal, stage string, e brokerwire.Envelope) (brokerwire.Review, error) {
-	var reply struct {
-		Contract string            `json:"contract"`
-		Prepared brokerwire.Review `json:"prepared"`
-	}
+	var reply brokerwire.PreparedReply
 	if !c.matches(e.Scope) || !brokerwire.ValidHandle(stage) {
 		return reply.Prepared, brokerwire.ErrInvalid
 	}
@@ -199,7 +196,7 @@ func (c *LocalBroker) Prepare(ctx context.Context, journal, stage string, e brok
 	}
 	defer clear(body)
 	r, err := c.call(ctx, "prepare", stage, journal, "", body)
-	if err != nil || brokerwire.DecodeMetadata(bytes.NewReader(r.Body), &reply) != nil || reply.Contract != brokerwire.Version || reply.Prepared.Scope != e.Scope || reply.Prepared.Active || !brokerwire.ValidHandle(reply.Prepared.Handle) || !reply.Prepared.ExpiresAt.After(time.Now()) || reply.Prepared.ExpiresAt.After(time.Now().Add(5*time.Minute)) {
+	if err != nil || brokerwire.DecodeMetadata(bytes.NewReader(r.Body), &reply) != nil || !reply.ValidFor(e.Scope, time.Now()) {
 		return brokerwire.Review{}, brokerwire.ErrUnavailable
 	}
 	return reply.Prepared, nil

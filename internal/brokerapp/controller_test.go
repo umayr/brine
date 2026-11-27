@@ -24,12 +24,14 @@ type controllerTarget struct {
 	identity     secretbroker.ReviewIdentity
 	scope        brokerwire.Scope
 	unknown      bool
+	infoCalls    int
 	writes       int
 	status       string
 	intentExists func(string) bool
 }
 
 func (t *controllerTarget) Info(context.Context) (TargetInfo, error) {
+	t.infoCalls++
 	return TargetInfo{strings.Repeat("a", 32), t.identity.TargetDigest, brokerwire.Digest([]byte("endpoint"))}, nil
 }
 func (t *controllerTarget) Requirements(context.Context, string, string, string, string) (brokerwire.Requirements, error) {
@@ -149,5 +151,51 @@ func TestControllerBindingChangeCannotDispatchReviewedHandle(t *testing.T) {
 	record, err := c.Submit(context.Background(), review.ID, i, target)
 	if err == nil || target.writes != 0 || record.Events[len(record.Events)-1].State != "not-admitted" {
 		t.Fatal("stale bindings dispatched")
+	}
+}
+
+func TestControllerUnresolvedHistoryBlocksPrepareAndSubmit(t *testing.T) {
+	for _, state := range []string{"pending", "running", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			c, target, i := controllerFixture(t)
+			stage, manifest := strings.Repeat("c", 32), strings.TrimPrefix(i.SourceDigest, "sha256:")
+			review, err := c.Prepare(ctx, i, stage, manifest, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Model a different reviewed request starting before this review is submitted.
+			id := strings.Repeat("d", 32)
+			intent := secretbroker.DeploymentIntent{
+				ID: id, Identity: i, Reference: review.Reference, StageID: review.StageID,
+				JournalID: review.JournalID, SelectionDigest: *review.Native.Preflight.SelectionDigest,
+				Mode: review.Mode, Revisions: review.Revisions,
+			}
+			if err := c.service.State.BeginDeployment(intent); err != nil {
+				t.Fatal(err)
+			}
+			if state != "pending" {
+				event := secretbroker.DeploymentEvent{Sequence: 1, State: state, Effects: "unknown"}
+				if err := c.service.State.AppendDeploymentEvent(i.Scope, id, 0, event); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			infoCalls := target.infoCalls
+			if _, err := c.Prepare(ctx, i, stage, manifest, target); err != ErrUnavailable || target.infoCalls != infoCalls {
+				t.Fatalf("Prepare did not reject history before target calls: %v", err)
+			}
+			if _, err := c.Submit(ctx, review.ID, i, target); err != ErrUnavailable || target.infoCalls != infoCalls+1 || target.writes != 0 {
+				t.Fatalf("Submit did not reject history after checking the target and before Apply: %v", err)
+			}
+			rows, err := c.service.State.Deployments(i.Scope)
+			if err != nil || len(rows) != 1 || rows[0].Intent.ID != id || len(rows[0].Events) == 0 || rows[0].Events[len(rows[0].Events)-1].State != state {
+				t.Fatalf("denial changed deployment history: %v", err)
+			}
+			if _, err := c.Submit(ctx, review.ID, i, target); err != ErrUnavailable || target.infoCalls != infoCalls+1 {
+				t.Fatalf("review remained usable after denied Submit: %v", err)
+			}
+		})
 	}
 }
