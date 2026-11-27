@@ -130,6 +130,10 @@ func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity,
 	if err != nil {
 		return PlanReview{}, ErrUnavailable
 	}
+	if !retiring {
+		// Cancel only the local preparation if Dispatch did not consume it.
+		defer c.service.Manager.Cancel(prepared.ID, i)
+	}
 	scope := brokerwire.Scope{Registration: i.Scope.RegistrationID, Stack: i.Scope.StackName, Engine: req.Engine, TargetDigest: i.TargetDigest, SourceDigest: i.SourceDigest, ConfigDigest: req.ConfigDigest, EndpointDigest: info.EndpointDigest, BindingRevision: uint64(i.BindingRevision), PolicyRevision: i.PolicyRevision, Generation: prepared.ID}
 	var delivery brokerwire.Review
 	if retiring {

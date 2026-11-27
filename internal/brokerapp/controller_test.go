@@ -12,9 +12,10 @@ import (
 	"time"
 )
 
-type controllerAcquire struct{}
+type controllerAcquire struct{ calls int }
 
-func (controllerAcquire) Acquire(context.Context, secrets.Selector) (secrets.Value, error) {
+func (a *controllerAcquire) Acquire(context.Context, secrets.Selector) (secrets.Value, error) {
+	a.calls++
 	return secrets.NewValue([]byte("synthetic-static-password"))
 }
 
@@ -76,7 +77,7 @@ func controllerFixture(t *testing.T) (*Controller, *controllerTarget, secretbrok
 		t.Fatal(err)
 	}
 	s.Manager.Close()
-	s.Manager, err = secretbroker.NewManager(s.State, controllerAcquire{}, func(_ context.Context, i secretbroker.ReviewIdentity, b []secretbroker.Binding) error {
+	s.Manager, err = secretbroker.NewManager(s.State, &controllerAcquire{}, func(_ context.Context, i secretbroker.ReviewIdentity, b []secretbroker.Binding) error {
 		if i.PolicyRevision != s.Revision() {
 			return ErrUnavailable
 		}
@@ -106,6 +107,54 @@ func controllerFixture(t *testing.T) (*Controller, *controllerTarget, secretbrok
 		return reader.QueryRow("SELECT count(*) FROM broker_deployments WHERE id=?", id).Scan(&count) == nil && count == 1
 	}}, i
 }
+
+func TestControllerCanceledDispatchReleasesPreparation(t *testing.T) {
+	c, target, i := controllerFixture(t)
+	s := c.service
+	acquirer := &controllerAcquire{}
+	var cancelAttempt context.CancelFunc
+	var authorizations int
+	manager, err := secretbroker.NewManager(s.State, acquirer, func(_ context.Context, current secretbroker.ReviewIdentity, bindings []secretbroker.Binding) error {
+		if current.PolicyRevision != s.Revision() {
+			return ErrUnavailable
+		}
+		if err := s.Allowed(current.Scope, bindings); err != nil {
+			return err
+		}
+		authorizations++
+		if cancelAttempt != nil && authorizations == 2 {
+			// Allow final authorization so Prepare publishes, but Dispatch sees cancellation.
+			cancelAttempt()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Manager.Close()
+	s.Manager = manager
+
+	stage, manifest := strings.Repeat("c", 32), strings.TrimPrefix(i.SourceDigest, "sha256:")
+	// Exceed the manager's 32 pending slots without waiting for expiration.
+	for attempt := 1; attempt <= 40; attempt++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelAttempt, authorizations = cancel, 0
+		_, err := c.Prepare(ctx, i, stage, manifest, target)
+		ctxErr := ctx.Err()
+		cancel()
+		if authorizations != 2 || acquirer.calls != attempt {
+			t.Fatalf("attempt %d: got %d authorizations and %d total acquisitions; want 2 and %d", attempt, authorizations, acquirer.calls, attempt)
+		}
+		if err != ErrUnavailable || ctxErr != context.Canceled || target.scope != (brokerwire.Scope{}) {
+			t.Fatalf("attempt %d: expected cancellation before target preparation; Prepare error: %v, context error: %v", attempt, err, ctxErr)
+		}
+	}
+	cancelAttempt = nil
+	if _, err := c.Prepare(context.Background(), i, stage, manifest, target); err != nil {
+		t.Fatalf("fresh Prepare after canceled dispatches: %v", err)
+	}
+}
+
 func TestControllerUnknownIsDurableAndNeverResubmitted(t *testing.T) {
 	c, target, i := controllerFixture(t)
 	target.unknown = true

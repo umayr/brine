@@ -224,7 +224,10 @@ func (m *Manager) Prepare(ctx context.Context, i ReviewIdentity, requirements []
 	if ctx.Err() != nil {
 		return Preparation{}, secrets.ErrCanceled
 	}
-	if m.authorized(ctx, i, current.Bindings) != nil {
+	// Keep ChangePolicy from clearing pending entries between authorization and publication.
+	m.policy.RLock()
+	defer m.policy.RUnlock()
+	if m.authorize(ctx, i, current.Bindings) != nil {
 		return Preparation{}, secrets.ErrDenied
 	}
 	var id [16]byte
