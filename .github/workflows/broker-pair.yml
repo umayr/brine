@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: umayr/dill
-          ref: 9b3677ad4a031c8b18d981f66bedbe2d72bdd1e7
+          ref: c30582f6f6e699849b8294b4e872d19b56b36506
           path: dill
       - uses: actions/setup-go@v5
         with:
