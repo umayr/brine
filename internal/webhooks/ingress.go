@@ -12,6 +12,9 @@ import (
 	"time"
 )
 
+// Saturation is retryable admission pressure, not evidence of a stack action.
+var errAdmissionSaturated = errors.Join(ErrBusy, errors.New("webhook admission saturated"))
+
 // Ingress is mounted outside cookie authentication on an exact /hooks/{id}
 // POST route. It performs its own mandatory HMAC authentication. No cookie,
 // bearer token, query argument or submitted action can expand the grant.
@@ -36,7 +39,12 @@ func (s *Service) Ingress(dispatcher TriggerDispatcher) http.Handler {
 		r.Body = http.MaxBytesReader(w, r.Body, 4096)
 		body, e := io.ReadAll(r.Body)
 		if e != nil {
-			fail(413, "request body too large")
+			var large *http.MaxBytesError
+			if errors.As(e, &large) {
+				fail(413, "request body too large")
+			} else {
+				fail(400, "request body could not be read")
+			}
 			return
 		}
 		accepted, e := s.Accept(r.Context(), id, r.Header.Get("Brine-Timestamp"), r.Header.Get("Brine-Signature"), body, dispatcher)
@@ -53,9 +61,13 @@ func (s *Service) Ingress(dispatcher TriggerDispatcher) http.Handler {
 			case errors.Is(e, ErrConflict):
 				code = 409
 				message = "idempotency key reused with different input or trigger changed"
+			case errors.Is(e, errAdmissionSaturated):
+				code = 429
+				message = "webhook admission busy; retry the same request id"
+				w.Header().Set("Retry-After", "1")
 			case errors.Is(e, ErrBusy):
 				code = 409
-				message = "stack action already queued or running"
+				message = "stack action blocked by a queued, active, or unresolved request"
 			case errors.Is(e, ErrRateLimited):
 				code = 429
 				message = "webhook request rate exceeded"
@@ -77,9 +89,21 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 	if len(body) > 4096 || len(timestamp) > 20 || len(signature) > 80 {
 		return zero, ErrUnauthorized
 	}
+	ctx, cancelAccept := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelAccept()
+	// Bound database lookup waiters before authentication too. This is a
+	// resource limit, not action admission; no work is queued by this permit.
+	select {
+	case s.incomingWaiters <- struct{}{}:
+		defer func() { <-s.incomingWaiters }()
+	default:
+		return zero, errAdmissionSaturated
+	}
+	lookupCtx, stopLookup := context.WithTimeout(ctx, 5*time.Second)
+	defer stopLookup()
 	var config, sealed []byte
 	var trigger Trigger
-	e := s.db.QueryRowContext(ctx, "SELECT config,secret FROM triggers WHERE id=?", id).Scan(&config, &sealed)
+	e := s.db.QueryRowContext(lookupCtx, "SELECT config,secret FROM triggers WHERE id=?", id).Scan(&config, &sealed)
 	if errors.Is(e, sql.ErrNoRows) {
 		return zero, ErrUnauthorized
 	}
@@ -98,18 +122,31 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 		ID string `json:"id"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || !validID(input.ID) {
+	// Exactly one semantic lowercase id member; struct decoding alone accepts
+	// duplicate members and case-insensitive aliases.
+	open, openErr := decoder.Token()
+	field, fieldErr := decoder.Token()
+	if openErr != nil || open != json.Delim('{') || fieldErr != nil || field != "id" || decoder.Decode(&input.ID) != nil {
 		return zero, ErrInvalid
 	}
+	close, closeErr := decoder.Token()
+	if closeErr != nil || close != json.Delim('}') || decoder.Decode(new(any)) != io.EOF || !validID(input.ID) {
+		return zero, ErrInvalid
+	}
+	waitCtx, stopWaiting := context.WithTimeout(ctx, 5*time.Second)
+	defer stopWaiting()
 	select {
 	case s.incomingAdmission <- struct{}{}:
 		defer func() { <-s.incomingAdmission }()
-	case <-ctx.Done():
-		return zero, ErrBusy
+	case <-waitCtx.Done():
+		return zero, errAdmissionSaturated
 	}
 	var refreshed []byte
-	if e = s.db.QueryRowContext(ctx, "SELECT config FROM triggers WHERE id=?", id).Scan(&refreshed); e != nil || !bytes.Equal(refreshed, config) || !s.now().Before(trigger.ExpiresAt) {
+	e = s.db.QueryRowContext(ctx, "SELECT config FROM triggers WHERE id=?", id).Scan(&refreshed)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return zero, errStorage
+	}
+	if errors.Is(e, sql.ErrNoRows) || !bytes.Equal(refreshed, config) || !s.now().Before(trigger.ExpiresAt) {
 		return zero, ErrUnauthorized
 	}
 	digest := requestDigest(body)
@@ -138,7 +175,11 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 	}
 	validateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	validationErr := dispatcher.Validate(validateCtx, trigger)
+	timedOut := validateCtx.Err() != nil
 	cancel()
+	if timedOut || errors.Is(validationErr, context.DeadlineExceeded) || errors.Is(validationErr, context.Canceled) {
+		return zero, errStorage
+	}
 	if validationErr != nil {
 		return zero, ErrUnsupported
 	}
@@ -150,7 +191,11 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 	// Re-read after validation: concurrent changes or revocation must invalidate
 	// the authenticated snapshot, not turn it into a newly expanded grant.
 	var current []byte
-	if tx.QueryRowContext(ctx, "SELECT config FROM triggers WHERE id=?", id).Scan(&current) != nil || !bytes.Equal(current, config) {
+	e = tx.QueryRowContext(ctx, "SELECT config FROM triggers WHERE id=?", id).Scan(&current)
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return zero, errStorage
+	}
+	if errors.Is(e, sql.ErrNoRows) || !bytes.Equal(current, config) {
 		return zero, ErrConflict
 	}
 	e = tx.QueryRowContext(ctx, "SELECT record,digest,binding FROM incoming_requests WHERE trigger_id=? AND idempotency_key=?", id, input.ID).Scan(&existing, &digestBefore, &priorBinding)

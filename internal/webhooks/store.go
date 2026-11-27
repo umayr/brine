@@ -38,6 +38,7 @@ type Service struct {
 	incomingCancel    context.CancelFunc
 	incomingDone      chan struct{}
 	incomingAdmission chan struct{}
+	incomingWaiters   chan struct{}
 	metadataObserve   MetadataObservationFunc
 	sample            func(context.Context) error
 	samplingStatus    atomic.Int32
@@ -155,7 +156,7 @@ func Open(cfg Config) (*Service, error) {
 	block, _ := aes.NewCipher(cfg.EncryptionKey)
 	crypt, _ := cipher.NewGCM(block)
 	cfg.EncryptionKey = nil // Do not retain an additional cleartext copy.
-	s := &Service{db: db, lock: lock, crypt: crypt, client: client, cfg: cfg, now: func() time.Time { return time.Now().UTC() }, incomingAdmission: make(chan struct{}, 1)}
+	s := &Service{db: db, lock: lock, crypt: crypt, client: client, cfg: cfg, now: func() time.Time { return time.Now().UTC() }, incomingAdmission: make(chan struct{}, 1), incomingWaiters: make(chan struct{}, 64)}
 	if _, e = db.Exec(schema + triggerSchema + operationSchema + metadataSchema + observationSchema); e != nil {
 		s.Close()
 		return nil, errStorage
