@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -314,8 +315,24 @@ config {
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); svc.RunTriggers(workerCtx, server.webhookDispatcher) }()
 	defer func() { stopWorker(); <-workerDone }()
+	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
+	var manualPhase atomic.Int32
+	var manualBrowserObserved atomic.Bool
+	var qualifyManual func()
+	if browserFixture {
+		qualifyManual = setupManualBrowserQualification(t, server, fs, stack, compose, schemaBytes, engine, engineCall, &manualPhase, &manualBrowserObserved)
+	}
 	operator := deployment.Protected()
 	fixtureRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/manual-phase" {
+			w.Header().Set("Content-Type", "application/json")
+			p := manualPhase.Load()
+			json.NewEncoder(w).Encode(map[string]int32{"phase": p})
+			if p == 2 {
+				manualBrowserObserved.Store(true)
+			}
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/remote/deployment") {
 			operator.ServeHTTP(w, r)
 			return
@@ -323,7 +340,6 @@ config {
 		server.router.ServeHTTP(w, r)
 	})
 	httpServer := httptest.NewUnstartedServer(fixtureRouter)
-	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	if browserFixture {
 		httpServer.Listener.Close()
 		listener, err := net.Listen("tcp", "0.0.0.0:18766")
@@ -780,4 +796,7 @@ config {
 		t.Fatal("source inspection rewrote history or executed runtime")
 	}
 	t.Log("authenticated source inspection disables policy without replay or outcome fabrication")
+	if qualifyManual != nil {
+		qualifyManual()
+	}
 }

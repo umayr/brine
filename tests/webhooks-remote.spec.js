@@ -2,6 +2,7 @@ const {test,expect}=require('@playwright/test');
 const root=process.env.BRINE_REMOTE_WEBHOOK_BASE_URL;
 test.skip(!root,'Requires explicit disposable Linux/Dill incoming fixture');
 test('Settings reviews a real capability-scoped remote lifecycle binding',async({browser})=>{
+ test.setTimeout(120000);
  const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  await page.goto(root+'/login?next=%2Fsettings%2Fwebhooks');await page.getByLabel('Username',{exact:true}).fill('admin');await page.getByLabel('Password',{exact:true}).fill('fixture-only-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForURL('**/settings/webhooks');
@@ -18,5 +19,19 @@ test('Settings reviews a real capability-scoped remote lifecycle binding',async(
  await expect.poll(async()=>{const r=await context.request.get(root+'/api/webhooks/requests');const data=await r.json();return data.requests.some(row=>row.idempotency_key==='upstream-unavailable'&&row.status==='unknown');},{timeout:30000}).toBe(true);
  // Use the real production form navigation, not injected HTML or fabricated auth.
  await Promise.all([page.waitForURL('**/remote/deployment/git'),page.evaluate(({root,csrf,stack})=>{const form=document.createElement('form');form.method='POST';form.action=root+'/remote/deployment/git';for(const [name,value]of Object.entries({_csrf:csrf,host:'synthetic',stack})){const input=document.createElement('input');input.name=name;input.value=value;form.append(input);}document.body.append(form);form.submit();},{root,csrf,stack:actualStack})]);
- await page.getByLabel('I inspected this source sync; disable automation without retrying it.',{exact:true}).check();await page.getByRole('button',{name:'Confirm source inspection',exact:true}).click();await expect(page.getByRole('button',{name:'Enable remote auto-deploy',exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('State: disabled');expect(errors).toEqual([]);await context.close();
+ await page.getByLabel('I inspected this source sync; disable automation without retrying it.',{exact:true}).check();await page.getByRole('button',{name:'Confirm source inspection',exact:true}).click();await expect(page.getByRole('button',{name:'Enable remote auto-deploy',exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('State: disabled');expect(errors).toEqual([]);
+ // Separate workspace: both attended confirmations are explicit production UI
+ // actions. The Go harness changes synthetic source only after proven creation.
+ const manualStack=actualStack+'-manual',captured=[];
+ for(const mode of ['create','update']){
+  await page.goto(root+'/remote/deployment?host=synthetic');await page.getByLabel('Brine project name',{exact:true}).fill(manualStack);await page.getByRole('button',{name:'Review project files',exact:true}).click();await expect(page.getByRole('heading',{name:'Review captured files',exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('No files have been sent yet.');const entry=page.getByRole('listitem').filter({hasText:/^compose\.pkl ·/});await expect(entry).toHaveCount(1);const digest=await entry.locator('code').textContent();expect(digest).toMatch(/^[a-f0-9]{64}$/);captured.push(digest);
+  await page.getByLabel('Send these exact files and request a preview',{exact:true}).check();await page.getByRole('button',{name:'Stage and preview',exact:true}).click();await expect(page.getByRole('heading',{name:'Deployment preview for '+manualStack,exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('This preview did not permit writes.');
+  await page.getByLabel(`Confirm ${mode} for this stack on this target`,{exact:true}).check();await page.getByRole('button',{name:mode==='create'?'Create stack':'Update stack',exact:true}).click();await expect(page.locator('body')).toContainText('State succeeded · Effects complete');const request=await page.getByLabel('Request ID',{exact:true}).inputValue();expect(request).toMatch(/^[a-f0-9]{32}$/);
+  await page.getByRole('link',{name:'Refresh status',exact:true}).click();await expect(page.getByLabel('Request ID',{exact:true})).toHaveValue(request);await expect(page.locator('body')).toContainText('State succeeded · Effects complete');
+  // Existing explicit recovery inspection releases the local intent, even for
+  // an already known successful receipt. It fences/checks, never reapplies.
+  await page.getByRole('checkbox',{name:/^Check the original journal and prevent/}).check();await page.getByRole('button',{name:'Check and fence request',exact:true}).click();await expect(page.locator('body')).toContainText('State succeeded · Effects complete');
+  await expect.poll(async()=>{const r=await context.request.get(root+'/__qualification/manual-phase');return (await r.json()).phase;},{timeout:45000}).toBe(mode==='create'?1:2);
+ }
+ expect(captured[0]).not.toEqual(captured[1]);expect(errors).toEqual([]);await context.close();
 });
