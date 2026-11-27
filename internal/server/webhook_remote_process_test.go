@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -103,10 +105,18 @@ func TestSignedIncomingRemoteLifecycle(t *testing.T) {
 	process := command(args...)
 	var logs bytes.Buffer
 	process.Stderr = &logs
+	isolateFixtureProcess(process)
 	if e = process.Start(); e != nil {
 		t.Fatal(e)
 	}
-	defer func() { process.Process.Kill(); process.Wait() }()
+	var stopOnce sync.Once
+	stopAgent := func() {
+		stopOnce.Do(func() {
+			killFixtureGroup(process)
+			process.Wait()
+		})
+	}
+	defer stopAgent()
 	var c *agentclient.Client
 	var epoch string
 	for ctx.Err() == nil {
@@ -174,14 +184,16 @@ config {
 	// Pin cleanup immediately after successful creation. A later object with
 	// the same stack/network name is not this test's cleanup authority.
 	defer func() {
+		stopAgent()
+		cleanupNetworks := collectIncomingCleanup(t, stack, engine, &createdIDs, &cleanupNetwork)
 		cleanup, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		paths := []string{}
 		for _, id := range createdIDs {
 			paths = append(paths, "/containers/"+id+"?force=1")
 		}
-		if cleanupNetwork != "" {
-			paths = append(paths, "/networks/"+cleanupNetwork)
+		for _, networkID := range cleanupNetworks {
+			paths = append(paths, "/networks/"+networkID)
 		}
 		for _, path := range paths {
 			req, _ := http.NewRequestWithContext(cleanup, "DELETE", "http://docker"+path, nil)
@@ -192,7 +204,7 @@ config {
 			}
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
-			if resp.StatusCode >= 300 {
+			if resp.StatusCode >= 300 && resp.StatusCode != 404 {
 				t.Errorf("fixture cleanup %s HTTP%d", path, resp.StatusCode)
 			}
 		}
@@ -236,10 +248,12 @@ config {
 		t.Fatal("creation did not produce running fixture")
 	}
 
-	// Fixture initialization records an actually verified deployment response as
-	// an approved Git owner. It does not qualify deployment-review UI behavior.
+	// The nonbrowser fixture retains an explicit historical approved-owner seed.
+	// Browser mode instead establishes Git policy through real operator review
+	// and an ordinary first deployment below; it never saves that seed.
 	server := webhookServer(t)
 	fs := server.store.(*store.FSStore)
+	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	repo := filepath.Join(server.cfg.DataDir, "stacks", stack, "repo")
 	origin := filepath.Join(dir, "origin")
 	gitRun := func(where string, args ...string) string {
@@ -299,8 +313,10 @@ config {
 	server.remoteDeploy = deployment
 	source := registered.RemoteGitSource()
 	policy := &store.RemoteGitPolicy{Enabled: true, Host: record.ID, Target: metadata["binding"], Source: source, Phase: "succeeded", Commit: initialCommit, Seen: initialCommit, DeploymentRequest: id, DeploymentJournal: preview.JournalID}
-	if err = fs.SwapRemoteGit(stack, source, nil, policy); err != nil {
-		t.Fatal(err)
+	if !browserFixture {
+		if err = fs.SwapRemoteGit(stack, source, nil, policy); err != nil {
+			t.Fatal(err)
+		}
 	}
 	svc, err := webhooks.OpenExisting(webhooks.Config{Directory: server.cfg.WebhooksDir, EncryptionKey: bytes.Repeat([]byte{4}, 32)})
 	if err != nil {
@@ -315,7 +331,6 @@ config {
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); svc.RunTriggers(workerCtx, server.webhookDispatcher) }()
 	defer func() { stopWorker(); <-workerDone }()
-	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	var manualPhase atomic.Int32
 	var manualBrowserObserved atomic.Bool
 	var qualifyManual func()
@@ -323,7 +338,23 @@ config {
 		qualifyManual = setupManualBrowserQualification(t, server, fs, stack, compose, schemaBytes, engine, engineCall, &manualPhase, &manualBrowserObserved)
 	}
 	operator := deployment.Protected()
+	access := os.Getenv("BRINE_QUAL_ACCESS")
+	if browserFixture && !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(access) {
+		t.Fatal("browser harness access token required")
+	}
 	fixtureRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if browserFixture {
+			host, _, e := net.SplitHostPort(r.RemoteAddr)
+			if e != nil || (!net.ParseIP(host).IsLoopback() && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Brine-Qualification")), []byte(access)) != 1) {
+				http.Error(w, "isolated fixture access required", 403)
+				return
+			}
+		}
+		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/git-source" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"stack": stack})
+			return
+		}
 		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/manual-phase" {
 			w.Header().Set("Content-Type", "application/json")
 			p := manualPhase.Load()
@@ -376,6 +407,61 @@ config {
 		t.Fatal("missing real session CSRF", page.StatusCode)
 	}
 	csrf := string(match[1])
+	bootstrapEvents := 0
+	if browserFixture {
+		initial, e := browser.Get(httpServer.URL + "/api/webhooks/")
+		if e != nil {
+			t.Fatal(e)
+		}
+		var before struct {
+			Options []web.WebhookOption `json:"options"`
+		}
+		decodeErr := json.NewDecoder(initial.Body).Decode(&before)
+		initial.Body.Close()
+		if initial.StatusCode != 200 || decodeErr != nil || before.Options == nil || len(before.Options) != 0 {
+			t.Fatal("unapproved Git source offered automation")
+		}
+		ready := false
+		limit := time.Now().Add(25 * time.Second)
+		for time.Now().Before(limit) {
+			st, _ := fs.Get(stack)
+			if st.RemoteGit != nil && st.RemoteGit.Enabled && st.RemoteGit.Phase == "ready" {
+				ready = true
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if !ready {
+			t.Fatal("browser did not explicitly authorize Git source")
+		}
+		pollCtx, stop := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() { defer close(done); deployment.RunGit(pollCtx) }()
+		completed := false
+		limit = time.Now().Add(25 * time.Second)
+		for time.Now().Before(limit) {
+			st, _ := fs.Get(stack)
+			if st.RemoteGit.Phase == "succeeded" && st.RemoteGit.Commit == initialCommit && st.RemoteGit.DeploymentRequest != "" && st.RemoteGit.DeploymentRequest != id && st.RemoteGit.DeploymentJournal == preview.JournalID {
+				completed = true
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		stop()
+		<-done
+		if !completed {
+			t.Fatal("approved Git first deployment not verified")
+		}
+		for _, event := range journalEvents(t, server) {
+			if strings.HasPrefix(event.ID, "remote_op_") {
+				bootstrapEvents++
+			}
+		}
+		if bootstrapEvents != 1 {
+			t.Fatal("initial explicit Git deployment not journaled once", bootstrapEvents)
+		}
+		t.Log("real browser Git policy approval and ordinary first deployment established lineage")
+	}
 	inventory, err := browser.Get(httpServer.URL + "/api/webhooks/")
 	if err != nil {
 		t.Fatal(err)
@@ -414,7 +500,8 @@ config {
 	var lastSecret string
 	var syncTrigger webhooks.Trigger
 	var syncSecret string
-	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, compose...), []byte("\n// synthetic upstream change\n")...), 0600)
+	upstreamSource := []byte(strings.ReplaceAll(string(compose), "sleep 1", "sleep 3"))
+	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, upstreamSource...), []byte("\n// synthetic upstream change\n")...), 0600)
 	gitRun(origin, "add", ".")
 	gitRun(origin, "commit", "-m", "synthetic upstream")
 	upstreamCommit := gitRun(origin, "rev-parse", "HEAD")
@@ -500,6 +587,9 @@ config {
 			}
 			time.Sleep(20 * time.Millisecond)
 		}
+		if action == "deploy" {
+			pinIncomingReplacement(t, stack, "sleep 3", cleanupNetwork, &createdIDs, engine, engineCall)
+		}
 		running, current := inspect()
 		sourceAction := action == "plan" || action == "git-sync"
 		if sourceAction {
@@ -583,13 +673,17 @@ config {
 	}
 	// Ordinary (non-incoming) automatic Git deployment uses the same producer.
 	incomingEvents := journalEvents(t, server)
+	incomingNormal := 0
 	for _, event := range incomingEvents {
 		if strings.HasPrefix(event.ID, "remote_op_") {
-			t.Fatal("incoming execution observed twice")
+			incomingNormal++
 		}
 	}
+	if incomingNormal != bootstrapEvents {
+		t.Fatal("incoming execution observed twice")
+	}
 	gitRun(origin, "reset", "--hard", upstreamCommit)
-	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, compose...), []byte("\n// independent automatic Git update\n")...), 0600)
+	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, upstreamSource...), []byte("\n// independent automatic Git update\n")...), 0600)
 	gitRun(origin, "add", ".")
 	gitRun(origin, "commit", "-m", "ordinary automatic source")
 	ordinaryCommit := gitRun(origin, "rev-parse", "HEAD")
@@ -624,7 +718,7 @@ config {
 			}
 		}
 	}
-	if normalCount != 1 {
+	if normalCount != 1+bootstrapEvents {
 		t.Fatal("ordinary target mutation not journaled exactly once", normalCount)
 	}
 	t.Log("ordinary automatic Git execution journaled exactly once; incoming observer suppression verified")
@@ -639,6 +733,7 @@ config {
 	if e != nil || r.State != "succeeded" {
 		t.Fatal("external replacement", e, r)
 	}
+	pinIncomingReplacement(t, stack, "sleep 1", cleanupNetwork, &createdIDs, engine, engineCall)
 	_, outsideStart := inspect()
 	beforeReplacement, _ := fs.Get(stack)
 	oldReviewedHead := beforeReplacement.RemoteGit.DeploymentRequest

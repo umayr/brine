@@ -3,9 +3,15 @@ const root=process.env.BRINE_REMOTE_WEBHOOK_BASE_URL;
 test.skip(!root,'Requires explicit disposable Linux/Dill incoming fixture');
 test('Settings reviews a real capability-scoped remote lifecycle binding',async({browser})=>{
  test.setTimeout(120000);
- const context=await browser.newContext({viewport:{width:1440,height:1000}}),page=await context.newPage(),errors=[];
+ const access=process.env.BRINE_QUAL_ACCESS;expect(access).toMatch(/^[a-f0-9]{64}$/);
+ const context=await browser.newContext({viewport:{width:1440,height:1000},extraHTTPHeaders:{'X-Brine-Qualification':access}}),page=await context.newPage(),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
  await page.goto(root+'/login?next=%2Fsettings%2Fwebhooks');await page.getByLabel('Username',{exact:true}).fill('admin');await page.getByLabel('Password',{exact:true}).fill('fixture-only-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();await page.waitForURL('**/settings/webhooks');
+ const sourceResponse=await context.request.get(root+'/__qualification/git-source'),sourceInfo=await sourceResponse.json();const setupStack=sourceInfo.stack;expect(setupStack).toMatch(/^brine-it-lifecycle-/);
+ const beforeApproval=await context.request.get(root+'/api/webhooks/');expect(beforeApproval.status()).toBe(200);const unapproved=await beforeApproval.json();expect(unapproved.options).toEqual([]);
+ await page.goto(root+'/remote/deployment?host=synthetic');await page.getByLabel('Git-backed Brine project',{exact:true}).fill(setupStack);await page.getByRole('button',{name:'Remote auto-deploy settings',exact:true}).click();await expect(page.locator('body')).toContainText('Branch: main');await expect(page.locator('body')).toContainText('Selected target: synthetic');await page.getByRole('checkbox',{name:/^Authorize this Git branch to send exact commits/}).check();await page.getByRole('button',{name:'Enable remote auto-deploy',exact:true}).click();
+ await expect.poll(async()=>{const r=await context.request.get(root+'/api/webhooks/');const data=await r.json();return data.options.some(row=>row.stack_name===setupStack);},{timeout:30000}).toBe(true);
+ await page.goto(root+'/settings/webhooks');
  await page.locator('#hooks-tabs').getByRole('link',{name:'Incoming triggers',exact:true}).click();await page.getByRole('button',{name:'+ Create trigger',exact:true}).click();
  await page.getByLabel('Name',{exact:true}).fill('Browser remote pipeline');
  const binding=page.getByLabel('Stack / execution target',{exact:true});await expect(binding.locator('option')).toHaveCount(1);await expect(binding).toContainText('brine-it-lifecycle-');await expect(binding).toContainText('synthetic');const actualStack=(await binding.locator('option').first().textContent()).split(' → ')[0];
@@ -18,7 +24,7 @@ test('Settings reviews a real capability-scoped remote lifecycle binding',async(
  expect(errors).toEqual([]);await card.getByRole('button',{name:'Disable',exact:true}).click();await dialog.getByRole('button',{name:'Confirm',exact:true}).click();await expect(card.getByRole('button',{name:'Enable',exact:true})).toBeVisible();
  await expect.poll(async()=>{const r=await context.request.get(root+'/api/webhooks/requests');const data=await r.json();return data.requests.some(row=>row.idempotency_key==='upstream-unavailable'&&row.status==='unknown');},{timeout:30000}).toBe(true);
  // Use the real production form navigation, not injected HTML or fabricated auth.
- await Promise.all([page.waitForURL('**/remote/deployment/git'),page.evaluate(({root,csrf,stack})=>{const form=document.createElement('form');form.method='POST';form.action=root+'/remote/deployment/git';for(const [name,value]of Object.entries({_csrf:csrf,host:'synthetic',stack})){const input=document.createElement('input');input.name=name;input.value=value;form.append(input);}document.body.append(form);form.submit();},{root,csrf,stack:actualStack})]);
+ await page.goto(root+'/remote/deployment?host=synthetic');await page.getByLabel('Git-backed Brine project',{exact:true}).fill(actualStack);await page.getByRole('button',{name:'Remote auto-deploy settings',exact:true}).click();
  await page.getByLabel('I inspected this source sync; disable automation without retrying it.',{exact:true}).check();await page.getByRole('button',{name:'Confirm source inspection',exact:true}).click();await expect(page.getByRole('button',{name:'Enable remote auto-deploy',exact:true})).toBeVisible();await expect(page.locator('body')).toContainText('State: disabled');expect(errors).toEqual([]);
  // Separate workspace: both attended confirmations are explicit production UI
  // actions. The Go harness changes synthetic source only after proven creation.
