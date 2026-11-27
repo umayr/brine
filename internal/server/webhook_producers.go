@@ -66,7 +66,10 @@ func (o *webhookLifecycleObserver) finish(err error, changed *bool) {
 	o.result = webhooks.TriggerResult{Status: status, Outcome: outcome, Reason: reason, OperationID: o.op.ID()}
 	if e != nil {
 		o.result.Status = "unknown"
-		o.result.Outcome = "unknown"
+		// Queue/history uncertainty must not erase a received operation fact.
+		if o.result.Outcome == "" {
+			o.result.Outcome = "unknown"
+		}
 		o.result.Reason = "operation_history_unavailable"
 		log.Print("Webhook operation outcome could not be journaled; inspect the exact request and target before retrying")
 	}

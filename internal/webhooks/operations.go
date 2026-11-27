@@ -136,6 +136,13 @@ func (s *Service) recoverOperations(ctx context.Context) error {
 		kind, outcome, effects, reason := "operation.rejected", "unavailable", "none", "restart_before_execution"
 		if r.started != 0 {
 			kind, outcome, effects, reason = "operation.outcome_unknown", "unknown", "unknown", "restart_requires_inspection"
+			var base Event
+			if json.Unmarshal(r.base, &base) != nil {
+				return errStorage
+			}
+			if base.Action == "plan" {
+				effects = "none"
+			}
 		}
 		if e = op.Finish(ctx, kind, outcome, effects, reason); e != nil {
 			return e

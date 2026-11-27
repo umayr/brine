@@ -335,6 +335,15 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 		return
 	}
 	current := projectreview.Current{Stack: p.Stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: targetDigest(record), Socket: record.HTTPSAddress, Endpoint: p.Host}}
+	transferRevision := ""
+	if h.history == nil && (r.URL.Path == deployPath+"/review" || r.URL.Path == deployPath+"/stage") {
+		transferRevision = h.deploymentCredentialRevision(ctx, record)
+		if transferRevision == "" {
+			http.Error(w, "Deployment custody unavailable; no transfer sent", 409)
+			return
+		}
+		current.Options = map[string]string{"deployment_custody": fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("transfer/1\\x00%s\\x00%v", transferRevision, enrollment))))}
+	}
 	switch r.URL.Path {
 	case deployPath + "/git", deployPath + "/git-config":
 		h.gitSettings(ctx, w, r, &p, record)
@@ -383,7 +392,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
-		credentialRevision := h.deploymentCredentialRevision(ctx, record)
+		credentialRevision := transferRevision
 		var stager deploymentStager
 		var epoch string
 		var binding attendedBinding
@@ -396,7 +405,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			defer c.client.Close()
 			stager, epoch, binding = c.client, c.epoch, c.binding
 		} else {
-			c, e, err := h.openDeploymentSession(ctx, record)
+			c, e, err := h.openDeploymentSession(ctx, record, transferRevision)
 			if err != nil {
 				http.Error(w, "Target unavailable; no transfer sent", 409)
 				return

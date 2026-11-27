@@ -107,6 +107,15 @@ func (s *Service) claim(ctx context.Context) (claimedDelivery, error) {
 		return c, errStorage
 	}
 	c.CreatedAt = time.UnixMilli(created)
+	if category != "operator_redelivery" && !s.now().Before(c.CreatedAt.Add(24*time.Hour)) {
+		if _, e = tx.ExecContext(ctx, "UPDATE deliveries SET status='exhausted',error_category='retry_window_elapsed',updated=? WHERE id=?", encodeTime(s.now()), c.ID); e != nil {
+			return c, errStorage
+		}
+		if tx.Commit() != nil {
+			return c, errStorage
+		}
+		return c, sql.ErrNoRows
+	}
 	c.Attempts++
 	if _, e = tx.ExecContext(ctx, "UPDATE deliveries SET status='sending',attempts=?,updated=? WHERE id=?", c.Attempts, encodeTime(s.now()), c.ID); e != nil {
 		return c, errStorage

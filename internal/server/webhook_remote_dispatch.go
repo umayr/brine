@@ -78,7 +78,11 @@ func (d *webhookDispatcher) executeRemote(ctx context.Context, t webhooks.Trigge
 	save, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
 	if op.Finish(save, kind, outcome, effects, reason) != nil {
-		return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
+		result.Status, result.Reason = "unknown", "operation_history_unavailable"
+		if result.Outcome == "" {
+			result.Outcome = "unknown"
+		}
+		return result
 	}
 	return result
 }

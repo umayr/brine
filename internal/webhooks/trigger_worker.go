@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// A known-stopped worker cannot promise processing for new work. Initial
+// offline/component services remain usable; authenticated duplicates are reads.
+func (s *Service) incomingAdmissionAvailable() bool {
+	s.lifecycle.Lock()
+	defer s.lifecycle.Unlock()
+	return !s.closed && (s.incomingDone == nil || s.incomingRunning)
+}
+
 func (s *Service) recoverIncoming(ctx context.Context) error {
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -197,7 +205,7 @@ func (s *Service) executeOne(ctx context.Context, d TriggerDispatcher) (bool, er
 	if len(result.OperationID) > 256 || len(result.Outcome) > 128 || len(result.Reason) > 128 {
 		result = TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "invalid_execution_result"}
 	}
-	if result.Status == "unknown" {
+	if result.Status == "unknown" && result.Outcome == "" {
 		result.Outcome = "unknown"
 	}
 	r.Status = result.Status

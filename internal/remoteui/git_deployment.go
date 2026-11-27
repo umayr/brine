@@ -279,6 +279,13 @@ func (h *Deployment) runGitAdmitted(ctx context.Context, name string, s *store.S
 	if !p.CanRecordAttempt() {
 		return
 	}
+	ownerCurrent := func(expected *store.RemoteGitPolicy) bool {
+		fresh, e := h.stacks.Get(name)
+		return e == nil && fresh != nil && fresh.CreatedAt.Equal(s.CreatedAt) && fresh.RemoteGit != nil && *fresh.RemoteGit == *expected && fresh.RemoteGitSource() == expected.Source && h.deploymentCredentialRevision(ctx, record) == revision && verifiedSourceOwner(ctx, c, epoch, name, p) && ctx.Err() == nil
+	}
+	if grant != nil && !ownerCurrent(p) {
+		return
+	}
 	entry := s.Entrypoint
 	if entry == "" {
 		entry = "compose.pkl"
@@ -287,6 +294,9 @@ func (h *Deployment) runGitAdmitted(ctx context.Context, name string, s *store.S
 	commit, snap, err := h.git.CaptureBranch(captureCtx, s.Git.URL, s.RemoteGitBranch(), entry, captureLimits)
 	stopCapture()
 	if err != nil {
+		return
+	}
+	if grant != nil && !ownerCurrent(p) {
 		return
 	}
 	seen := strings.Fields(p.Seen)
@@ -299,6 +309,9 @@ func (h *Deployment) runGitAdmitted(ctx context.Context, name string, s *store.S
 	staged.Commit, staged.Phase, staged.Seen = commit, "blocked", strings.Join(append(seen, commit), " ")
 	staged.Reason = "staging-or-preview"
 	if h.gitStore.SwapRemoteGit(name, p.Source, p, &staged) != nil {
+		return
+	}
+	if grant != nil && !ownerCurrent(&staged) {
 		return
 	}
 	stageCtx, stopStage := context.WithTimeout(ctx, 75*time.Second)

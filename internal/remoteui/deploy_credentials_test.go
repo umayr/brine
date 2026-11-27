@@ -16,7 +16,10 @@ import (
 
 func credentialFixture(t *testing.T) (string, string, string, targetregistry.Record, targetregistry.HistoryIncarnation) {
 	t.Helper()
-	root := t.TempDir()
+	root, e := filepath.EvalSymlinks(t.TempDir())
+	if e != nil {
+		t.Fatal(e)
+	}
 	data := filepath.Join(root, "data")
 	private := filepath.Join(root, "credentials")
 	for _, p := range []string{data, private} {
@@ -101,5 +104,25 @@ func TestDeploymentCredentialIndexFailsClosed(t *testing.T) {
 	os.WriteFile(inside, []byte("fixture"), 0600)
 	if _, e := privateDeploymentFile(inside, data, 44); e == nil {
 		t.Fatal("source/data credential accepted")
+	}
+}
+
+func TestDeploymentCredentialPathsRejectMutableAliases(t *testing.T) {
+	data, index, token, _, _ := credentialFixture(t)
+	for _, original := range []string{index, token} {
+		alias := original + ".alias"
+		if e := os.Symlink(original, alias); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := privateDeploymentFile(alias, data, 65536); e == nil {
+			t.Fatal("file symlink accepted")
+		}
+	}
+	aliasDir := filepath.Join(filepath.Dir(data), "alias-dir")
+	if e := os.Symlink(filepath.Dir(index), aliasDir); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := privateDeploymentFile(filepath.Join(aliasDir, filepath.Base(index)), data, 65536); e == nil {
+		t.Fatal("parent alias accepted")
 	}
 }

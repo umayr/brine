@@ -15,11 +15,8 @@ func (c *BrokerClient) Retire(ctx context.Context, epoch, journal, stage string,
 		return brokerwire.Review{}, ErrProtocol
 	}
 	raw, _, err := c.call(ctx, epoch, "POST", "/v1/broker-secrets/retire/"+stage, journal, body, 35*time.Second)
-	var reply struct {
-		Contract string            `json:"contract"`
-		Prepared brokerwire.Review `json:"prepared"`
-	}
-	if err != nil || decodeStrict(raw, &reply) != nil || reply.Contract != brokerwire.Version || reply.Prepared.Scope != request.Scope || reply.Prepared.Active || !brokerwire.ValidHandle(reply.Prepared.Handle) || !reply.Prepared.ExpiresAt.After(time.Now()) || reply.Prepared.ExpiresAt.After(time.Now().Add(5*time.Minute)) {
+	var reply brokerwire.PreparedReply
+	if err != nil || decodeStrict(raw, &reply) != nil || !reply.ValidFor(request.Scope, time.Now()) {
 		return brokerwire.Review{}, ErrProtocol
 	}
 	return reply.Prepared, nil

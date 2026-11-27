@@ -167,6 +167,9 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 	if !errors.Is(e, sql.ErrNoRows) {
 		return zero, errStorage
 	}
+	if !s.incomingAdmissionAvailable() {
+		return zero, errStorage
+	}
 	if dispatcher == nil {
 		return zero, ErrUnsupported
 	}
@@ -209,6 +212,9 @@ func (s *Service) Accept(ctx context.Context, id, timestamp, signature string, b
 		return zero, nil
 	}
 	if !errors.Is(e, sql.ErrNoRows) {
+		return zero, errStorage
+	}
+	if !s.incomingAdmissionAvailable() {
 		return zero, errStorage
 	}
 	now := s.now()

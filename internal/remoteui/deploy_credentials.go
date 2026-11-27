@@ -66,7 +66,7 @@ func privateDeploymentFile(path, dataDir string, max int) ([]byte, error) {
 		return nil, errDeployCredential
 	}
 	real, e := filepath.EvalSymlinks(path)
-	if e != nil {
+	if e != nil || real != path {
 		return nil, errDeployCredential
 	}
 	root, e := filepath.Abs(dataDir)

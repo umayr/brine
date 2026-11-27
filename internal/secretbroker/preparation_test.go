@@ -121,3 +121,76 @@ func TestPreparationExpiresRevokesAndSanitizes(t *testing.T) {
 		t.Fatal("raw error leaked")
 	}
 }
+
+func TestPrepareHoldsPolicyLockThroughPublication(t *testing.T) {
+	_, m, _, i, _ := reviewFixture(t)
+	if len(m.pending) != 0 {
+		t.Fatal("publication test requires an empty pending map")
+	}
+
+	atExpiry := make(chan struct{})
+	releaseClock := make(chan struct{})
+	clock := time.Now()
+	// With no pending entries, the clock is first called to set ExpiresAt
+	// under m.mu, immediately before inserting the preparation.
+	m.now = func() time.Time {
+		close(atExpiry)
+		<-releaseClock
+		return clock
+	}
+	release := func() {
+		select {
+		case <-releaseClock:
+		default:
+			close(releaseClock)
+		}
+	}
+	prepareDone := make(chan struct{})
+	var changeDone chan struct{}
+	defer func() {
+		release()
+		<-prepareDone
+		if changeDone != nil {
+			<-changeDone
+		}
+	}()
+	var prepareErr error
+	go func() {
+		defer close(prepareDone)
+		_, prepareErr = m.Prepare(context.Background(), i, []string{"TOKEN"})
+	}()
+	select {
+	case <-atExpiry:
+	case <-prepareDone:
+		t.Fatalf("Prepare returned before setting expiry: %v", prepareErr)
+	}
+	if m.policy.TryLock() {
+		m.policy.Unlock()
+		t.Fatal("Prepare released the policy read lock before publication")
+	}
+
+	changeDone = make(chan struct{})
+	var changeErr error
+	var hadPending bool
+	go func() {
+		defer close(changeDone)
+		changeErr = m.ChangePolicy(func() error {
+			m.mu.Lock()
+			hadPending = len(m.pending) == 1 && m.bytes > 0
+			m.mu.Unlock()
+			m.authorize = func(context.Context, ReviewIdentity, []Binding) error { return secrets.ErrDenied }
+			return nil
+		})
+	}()
+	release()
+	<-prepareDone
+	<-changeDone
+	wantError(t, prepareErr, nil)
+	wantError(t, changeErr, nil)
+	if !hadPending {
+		t.Fatal("policy swap did not see the published preparation")
+	}
+	if len(m.pending) != 0 || m.bytes != 0 {
+		t.Fatalf("policy swap left %d pending preparations and %d bytes", len(m.pending), m.bytes)
+	}
+}

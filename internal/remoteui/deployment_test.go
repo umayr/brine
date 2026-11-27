@@ -100,6 +100,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var removalRequest atomic.Value
 	var calls atomic.Int32
 	var checkedMode atomic.Bool
+	var outsideOwner atomic.Bool
 	var checkedCalls, checkedStatusCalls atomic.Int32
 	var checkedPrior atomic.Value
 	var manifest, catalogDigest atomic.Value
@@ -196,6 +197,40 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		case "/v1/snapshots/" + stage:
 			catalogReads.Add(1)
 			fmt.Fprint(w, manifest.Load().(string))
+		case "/v1/deploy/journal":
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			fmt.Fprintf(w, `{"journalId":%q}`, journal)
+		case "/v1/deploy/stop-preview":
+			if !checkedMode.Load() {
+				t.Error("unexpected owner probe")
+				w.WriteHeader(409)
+				return
+			}
+			var owner map[string]any
+			fixture, err := os.ReadFile("../dill/testdata/preflight-v1/preview-up-config-noop.json")
+			var envelope struct{ Stdout map[string]any }
+			if err != nil || json.Unmarshal(fixture, &envelope) != nil {
+				t.Error("owner fixture")
+				return
+			}
+			owner = envelope.Stdout
+			owner["operation"], owner["stack"] = "stop", "synthetic"
+			owner["target"].(map[string]any)["endpointDigest"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(socket)))
+			for _, v := range owner["resources"].([]any) {
+				row := v.(map[string]any)
+				row["action"] = "retain"
+				if row["kind"] == "container" {
+					row["action"] = "stop"
+				}
+			}
+			prior := checkedPrior.Load().(string)
+			if outsideOwner.Load() {
+				prior = strings.Repeat("9", 32)
+			}
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			w.Header().Set("X-Dill-Deployment-Mode", "stop")
+			w.Header().Set("X-Dill-Prior-Request", prior)
+			json.NewEncoder(w).Encode(owner)
 		case "/v1/deploy/preview":
 			previewCalls.Add(1)
 			var f map[string]string
@@ -611,6 +646,24 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	partial.Store(false)
 	calls.Store(0)
 	params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
+	t.Run("manual transfer review pins custody before upload", func(t *testing.T) {
+		params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
+		w := invoke("POST", deployPath+"/review", params)
+		id := field(w, "id")
+		if id == "" {
+			t.Fatal("missing file review")
+		}
+		before := catalogReads.Load()
+		old := h.credentials
+		h.SetDeploymentCredentials(testDeploymentCredentials(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))))
+		defer h.SetDeploymentCredentials(old)
+		params.Set("id", id)
+		params.Set("confirm", "transfer")
+		w = invoke("POST", deployPath+"/stage", params)
+		if w.Code != 409 || catalogReads.Load() != before {
+			t.Fatal("stale custody review transferred", w.Code)
+		}
+	})
 	t.Run("catalog must match reviewed bytes before preview", func(t *testing.T) {
 		differentManifest.Store(true)
 		defer differentManifest.Store(false)
@@ -932,6 +985,35 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				fresh, _ := fs2.Get("synthetic")
 				binding := lifecycleBinding(fresh, record, enrollment, restarted.deploymentCredentialRevision(boundCtx, record))
 				lease.Close()
+				// A replaced live owner must be refused before Git capture, even
+				// when the reviewed branch is already in the Seen history.
+				savedRunner := restarted.git
+				marker := filepath.Join(t.TempDir(), "capture-called")
+				probe := filepath.Join(t.TempDir(), "git")
+				if err = os.WriteFile(probe, []byte(fmt.Sprintf("#!/bin/sh\nprintf hit >> %q\nexit 1\n", marker)), 0700); err != nil {
+					t.Fatal(err)
+				}
+				outsideOwner.Store(true)
+				restarted.git = &git.Runner{Binary: probe}
+				unseenTip := run("rev-parse", "HEAD")
+				for _, seen := range []bool{false, true} {
+					tip := unseenTip
+					if seen {
+						tip = commit
+					}
+					run("update-ref", "refs/heads/deploy", tip) // Disposable fixture, unchanged tree.
+					before := catalogReads.Load()
+					denied := restarted.RunGitDeployment(ctx, "synthetic", binding, strings.Repeat("6", 32), func() bool { t.Fatal("outside owner reached dispatch"); return false })
+					if denied.Submitted || denied.Unchanged || catalogReads.Load() != before {
+						t.Fatal("outside owner captured/staged/claimed unchanged")
+					}
+					if _, e := os.Stat(marker); !os.IsNotExist(e) {
+						t.Fatal("outside owner invoked Git", e)
+					}
+				}
+				run("update-ref", "refs/heads/deploy", unseenTip)
+				outsideOwner.Store(false)
+				restarted.git = savedRunner
 				request := strings.Repeat("7", 32)
 				if failRollback {
 					request = strings.Repeat("8", 32)

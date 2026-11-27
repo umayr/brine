@@ -246,7 +246,7 @@ func (s *Service) Redeliver(ctx context.Context, id string) error {
 		return ErrCapacity
 	}
 	now := encodeTime(s.now())
-	if _, e = tx.ExecContext(ctx, "UPDATE deliveries SET status='pending',next_at=?,updated=?,http_status=0,error_category='' WHERE id=?", now, now, id); e != nil {
+	if _, e = tx.ExecContext(ctx, "UPDATE deliveries SET status='pending',next_at=?,updated=?,http_status=0,error_category='operator_redelivery' WHERE id=?", now, now, id); e != nil {
 		return errStorage
 	}
 	if tx.Commit() != nil {

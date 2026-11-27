@@ -11,6 +11,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 )
 
 const Version = "dill.broker-secrets/1"
@@ -41,6 +42,20 @@ type Scope struct {
 	PolicyRevision  string `json:"policyRevision"`
 	Generation      string `json:"generation"`
 }
+
+// PreparedReply carries the review metadata returned by Prepare and Retire.
+type PreparedReply struct {
+	Contract string `json:"contract"`
+	Prepared Review `json:"prepared"`
+}
+
+// ValidFor checks reply metadata only, not transport or request authority.
+func (r PreparedReply) ValidFor(scope Scope, now time.Time) bool {
+	p := r.Prepared
+	return r.Contract == Version && p.Scope == scope && !p.Active && ValidHandle(p.Handle) &&
+		p.ExpiresAt.After(now) && !p.ExpiresAt.After(now.Add(5*time.Minute))
+}
+
 type Grant struct {
 	Service string `json:"service"`
 	Name    string `json:"name"`

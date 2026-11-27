@@ -42,7 +42,11 @@ func (d *webhookDispatcher) executeRemoteSource(ctx context.Context, t webhooks.
 		err = op.Finish(save, kind, outcome, effects, result.Reason)
 	}
 	if err != nil {
-		return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
+		result.Status, result.Reason = "unknown", "operation_history_unavailable"
+		if result.Outcome == "" {
+			result.Outcome = "unknown"
+		}
+		return result
 	}
 	return result
 }

@@ -76,7 +76,7 @@ func (h *Deployment) lifecycleTargets(ctx context.Context, stack string) ([]Life
 		if sourceOwnerCheck {
 			actions = append([]string{"plan"}, actions...)
 		}
-		if slices.Contains(caps, "deployment.checked-apply") {
+		if sourceOwnerCheck && slices.Contains(caps, "deployment.checked-apply") {
 			actions = append(actions, "deploy")
 		}
 	}

@@ -180,10 +180,7 @@ func (c *BrokerClient) matches(s brokerwire.Scope) bool {
 	return s.Valid() && s.Engine == b.EngineKind && s.TargetDigest == c.expectedBrokerTarget() && s.EndpointDigest == brokerwire.Digest([]byte(b.EngineSocket))
 }
 func (c *BrokerClient) Prepare(ctx context.Context, epoch, journal, stage string, e brokerwire.Envelope) (brokerwire.Review, error) {
-	var reply struct {
-		Contract string            `json:"contract"`
-		Prepared brokerwire.Review `json:"prepared"`
-	}
+	var reply brokerwire.PreparedReply
 	if !canonicalHex(stage, 16) || !c.matches(e.Scope) {
 		return reply.Prepared, ErrProtocol
 	}
@@ -193,11 +190,10 @@ func (c *BrokerClient) Prepare(ctx context.Context, epoch, journal, stage string
 	}
 	defer clear(body)
 	raw, _, err := c.call(ctx, epoch, "POST", "/v1/broker-secrets/prepare/"+stage, journal, body, 35*time.Second)
-	r := &reply.Prepared
-	if err != nil || decodeStrict(raw, &reply) != nil || reply.Contract != brokerwire.Version || r.Scope != e.Scope || r.Active || !brokerwire.ValidHandle(r.Handle) || !r.ExpiresAt.After(time.Now()) || r.ExpiresAt.After(time.Now().Add(5*time.Minute)) {
+	if err != nil || decodeStrict(raw, &reply) != nil || !reply.ValidFor(e.Scope, time.Now()) {
 		return brokerwire.Review{}, ErrProtocol
 	}
-	return *r, nil
+	return reply.Prepared, nil
 }
 func (c *BrokerClient) Review(ctx context.Context, epoch, journal, stage string, ref brokerwire.Reference) (*dill.BrokerReview, string, error) {
 	if !ref.Valid() || !c.matches(ref.Scope) || !canonicalHex(stage, 16) {
