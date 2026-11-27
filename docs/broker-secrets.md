@@ -1,6 +1,6 @@
 # Central broker integration
 
-Brine's image bundles Dill v0.12.0 and Pkl 0.31.1. Broker execution requires
+Brine's image bundles Dill v0.13.0 and Pkl 0.31.1. Broker execution requires
 explicit operator provisioning and the matching engine/executor filesystem view.
 Code/contract, synthetic browser checks and actual disposable-target evidence are
 reported separately in [runtime qualification](broker-runtime-qualification.md).
@@ -24,7 +24,7 @@ qualify every packaged deployment arrangement.
   local files. Credentials stay in operator file references, never browser input.
 - `internal/secretbroker`: explicit private reference-only state and frozen
   in-memory preparations. Missing/unreadable state is not an unprotected stack.
-- `internal/brokerwire`: mirrored `dill.broker-secrets/1` contract in Dill v0.12.0.
+- `internal/brokerwire`: mirrored `dill.broker-secrets/1` contract in Dill v0.13.0.
   Only explicit Encode creates a transport payload; clear it after use. General
   marshaling/formatting refuses/redacts values. Requirements are metadata only.
 - `internal/agentclient.BrokerClient`: separate monitor proof and deploy

@@ -38,6 +38,7 @@ type Handler struct {
 	broker            *brokerapp.Service
 	brokerController  *brokerapp.Controller
 	brokerTargets     brokerTargetOpener
+	brokerObserver    brokerapp.ExecutionObserver
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)
@@ -63,6 +64,17 @@ func (h *Handler) EnableBroker(service *brokerapp.Service) {
 	h.broker = service
 	if service.Enabled() {
 		h.brokerController, _ = brokerapp.NewController(service, h.brokerGuard)
+		if h.brokerController != nil {
+			h.brokerController.SetExecutionObserver(h.brokerObserver)
+		}
+	}
+}
+
+// SetBrokerExecutionObserver is startup-only and preserves initialization order.
+func (h *Handler) SetBrokerExecutionObserver(observer brokerapp.ExecutionObserver) {
+	h.brokerObserver = observer
+	if h.brokerController != nil {
+		h.brokerController.SetExecutionObserver(observer)
 	}
 }
 

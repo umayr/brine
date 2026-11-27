@@ -131,6 +131,9 @@ func (s *Server) newWebhookObservation(ctx context.Context, path, action string,
 // Hooks journal existing execution paths; they never substitute an executor,
 // identity or authorization gate. Configure once before HTTP/background work.
 func (s *Server) configureWebhookProducers() {
+	if s.web != nil {
+		s.web.SetBrokerExecutionObserver(s.newBrokerExecutionObservation)
+	}
 	if s.remoteDeploy != nil {
 		s.remoteDeploy.SetExecutionObserver(s.newRemoteExecutionObservation)
 	}

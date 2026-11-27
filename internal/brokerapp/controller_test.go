@@ -26,6 +26,7 @@ type controllerTarget struct {
 	unknown      bool
 	writes       int
 	status       string
+	databasePath string
 	intentExists func(string) bool
 }
 
@@ -99,7 +100,7 @@ func controllerFixture(t *testing.T) (*Controller, *controllerTarget, secretbrok
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { reader.Close() })
-	return c, &controllerTarget{t: t, state: s.State, identity: i, intentExists: func(id string) bool {
+	return c, &controllerTarget{t: t, state: s.State, identity: i, databasePath: statePath(data), intentExists: func(id string) bool {
 		var count int
 		return reader.QueryRow("SELECT count(*) FROM broker_deployments WHERE id=?", id).Scan(&count) == nil && count == 1
 	}}, i

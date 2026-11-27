@@ -1,9 +1,10 @@
 # Webhook source and execution boundaries
 
 This is an implementation and evidence matrix, **not a release verdict**. The
-Dockerfile still bundles Dill **0.12.0** with Pkl **0.31.1**. The new paired-agent
-protocol is on the integration branches and needs an actual Dill release, bundle
-pin and final qualification. Unrun cells remain release work, not phased support.
+Dockerfile bundles released Dill **0.13.0** with Pkl **0.31.1**. Verified published
+binaries/schema pass managed Linux Docker, HTTPS SDK and the signed all-six-action
+browser flow. Protected broker producer/operator qualification, final review and
+Brine CI/merge remain release work, not phased support.
 
 ## Incoming actions
 
@@ -73,9 +74,10 @@ Real new paired managed execution has been qualified on a dedicated **native
 Linux Docker** daemon only. The underlying named managed contract is not a claim
 of Podman support. `TestLocalEngineAdmissionMatrixIsNotRuntimeQualification`
 checks both local engine selections with a synthetic runner; it must not be cited
-as a Podman runtime pass. Dedicated Podman runtime qualification, remaining
-protected/crash matrix, exact released-pair checks, final review and required
-CI/merges remain open.
+as a Podman runtime pass. Ordinary Dill Docker and Podman integration CI passed on the exact reviewed and
+merged protocol source. That does not qualify the named managed protocol on
+Podman. Remaining protected/operator matrix, final review and required Brine
+CI/merge checks remain open.
 
 Current real-pair harness inputs and exact commands are retained in the delivery
 record. Native opt-in tests skip without explicit disposable runtime variables;

@@ -56,8 +56,8 @@ bundled_version=0.8.1
 bundled_sha=$dill_sha
 if [[ ${PILOT_CANDIDATE:-} == true ]]; then
   image=brine-hardening-candidate:local
-  bundled_version=0.12.0
-  bundled_sha=27e4298ccb60609f4405fbcdf387617617c2e4dcd74119191f86062cf791c126
+  bundled_version=0.13.0
+  bundled_sha=2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525
   grep -qx "ARG DILL_VERSION=$bundled_version" Dockerfile
   d build -t "$image" .
   echo "Candidate image: $(d image inspect --format '{{.Id}}' "$image"); source: $(git rev-parse HEAD)"
