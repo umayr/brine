@@ -47,8 +47,8 @@ pkl_sha=618f13955d755cafbfe8c9cba1d27635848cd49dbc6abffd398d2751db1231bf
 agent_version=0.8.1
 schema_sha=47a8dbdc127e947238308cb7a863122e6de128ee6d2e893c677d3117f36f0948
 if [[ ${PILOT_CANDIDATE:-} == true ]]; then
-  agent_version=0.13.0
-  dill_sha=2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525
+  agent_version=0.13.1
+  dill_sha=a792cf6095d106747cd3bb7b471205ec8f9a48087eae42114a2655d20355d902
   schema_sha=2f2c1c622b9aa7f386c7d401bd912abe289a68554e1974da1bde0b6cceb6b413
 fi
 curl -fsSL --retry 3 "https://github.com/umayr/dill/releases/download/v${agent_version}/dill-linux-amd64" -o "$root/dill"
@@ -70,8 +70,8 @@ bundled_version=$agent_version
 bundled_sha=$dill_sha
 if [[ ${PILOT_CANDIDATE:-} == true ]]; then
   image=brine-hardening-candidate:local
-  bundled_version=0.13.0
-  bundled_sha=2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525
+  bundled_version=0.13.1
+  bundled_sha=a792cf6095d106747cd3bb7b471205ec8f9a48087eae42114a2655d20355d902
   grep -qx "ARG DILL_VERSION=$bundled_version" Dockerfile
   d build -t "$image" .
   echo "Candidate image: $(d image inspect --format '{{.Id}}' "$image"); source: $(git rev-parse HEAD)"

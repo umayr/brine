@@ -1,6 +1,6 @@
 # Webhooks
 
-Brine owns event delivery and automation admission; Dill owns planning and execution. The current Dockerfile bundles Dill **0.13.0** with Pkl **0.31.1**. An accepted request, a delivered notification, and a successful execution are three independent facts.
+Brine owns event delivery and automation admission; Dill owns planning and execution. The current Dockerfile bundles Dill **0.13.1** with Pkl **0.31.1**. An accepted request, a delivered notification, and a successful execution are three independent facts.
 
 ## Enablement and key custody
 
