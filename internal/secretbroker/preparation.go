@@ -224,7 +224,10 @@ func (m *Manager) Prepare(ctx context.Context, i ReviewIdentity, requirements []
 	if ctx.Err() != nil {
 		return Preparation{}, secrets.ErrCanceled
 	}
-	if m.authorized(ctx, i, current.Bindings) != nil {
+	// Keep ChangePolicy from clearing pending entries between authorization and publication.
+	m.policy.RLock()
+	defer m.policy.RUnlock()
+	if m.authorize(ctx, i, current.Bindings) != nil {
 		return Preparation{}, secrets.ErrDenied
 	}
 	var id [16]byte
@@ -294,11 +297,16 @@ func (m *Manager) Inspect(ctx context.Context, id string, i ReviewIdentity) (Pre
 // be reconciled using the target operation journal; never call Prepare/Take as
 // an automatic deployment retry. Caller must serialize binding changes and
 // policy revocation with final dispatch: inspection alone cannot close a race.
+// The caller owns and must close the returned delivery.
 func (m *Manager) Take(ctx context.Context, id string, i ReviewIdentity) (Preparation, *Delivery, error) {
-	meta, err := m.Inspect(ctx, id, i)
-	if err != nil {
+	if _, err := m.Inspect(ctx, id, i); err != nil {
 		return Preparation{}, nil, err
 	}
+	return m.takePending(id, i)
+}
+
+// takePending transfers ownership once; callers perform their own authority checks.
+func (m *Manager) takePending(id string, i ReviewIdentity) (Preparation, *Delivery, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.purgeLocked()
@@ -308,9 +316,9 @@ func (m *Manager) Take(ctx context.Context, id string, i ReviewIdentity) (Prepar
 	}
 	delete(m.pending, id)
 	m.bytes -= p.size
-	d := &Delivery{values: p.values}
+	delivery := &Delivery{values: p.values}
 	p.values = nil
-	return meta, d, nil
+	return clonePreparation(p.metadata), delivery, nil
 }
 func (m *Manager) Cancel(id string, i ReviewIdentity) error {
 	if m == nil {

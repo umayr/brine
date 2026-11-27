@@ -16,11 +16,8 @@ func (c *LocalBroker) Retire(ctx context.Context, journal, stage string, request
 		return brokerwire.Review{}, err
 	}
 	response, err := c.call(ctx, "retire", stage, journal, "", body)
-	var reply struct {
-		Contract string            `json:"contract"`
-		Prepared brokerwire.Review `json:"prepared"`
-	}
-	if err != nil || brokerwire.DecodeMetadata(bytes.NewReader(response.Body), &reply) != nil || reply.Contract != brokerwire.Version || reply.Prepared.Scope != request.Scope || reply.Prepared.Active || !brokerwire.ValidHandle(reply.Prepared.Handle) || !reply.Prepared.ExpiresAt.After(time.Now()) || reply.Prepared.ExpiresAt.After(time.Now().Add(5*time.Minute)) {
+	var reply brokerwire.PreparedReply
+	if err != nil || brokerwire.DecodeMetadata(bytes.NewReader(response.Body), &reply) != nil || !reply.ValidFor(request.Scope, time.Now()) {
 		return brokerwire.Review{}, brokerwire.ErrUnavailable
 	}
 	return reply.Prepared, nil

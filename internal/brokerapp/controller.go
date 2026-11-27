@@ -63,6 +63,23 @@ func (c *Controller) purge() {
 	}
 }
 
+func (c *Controller) settledDeployments(scope secretbroker.Scope) ([]secretbroker.DeploymentRecord, error) {
+	records, err := c.service.State.Deployments(scope)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	for _, r := range records {
+		if len(r.Events) == 0 {
+			return nil, ErrUnavailable
+		}
+		switch r.Events[len(r.Events)-1].State {
+		case "pending", "running", "unknown":
+			return nil, ErrUnavailable
+		}
+	}
+	return records, nil
+}
+
 // Prepare requires an independently captured/verified source digest and stage.
 // guard owns actual session/target/source authorization and the stack lock.
 func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity, stage, manifest string, target Target) (PlanReview, error) {
@@ -74,18 +91,9 @@ func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity,
 		return PlanReview{}, ErrUnavailable
 	}
 	defer release()
-	records, err := c.service.State.Deployments(i.Scope)
+	records, err := c.settledDeployments(i.Scope)
 	if err != nil {
-		return PlanReview{}, ErrUnavailable
-	}
-	for _, r := range records {
-		if len(r.Events) == 0 {
-			return PlanReview{}, ErrUnavailable
-		}
-		state := r.Events[len(r.Events)-1].State
-		if state == "pending" || state == "unknown" || state == "running" {
-			return PlanReview{}, ErrUnavailable
-		}
+		return PlanReview{}, err
 	}
 	c.mu.Lock()
 	c.purge()
@@ -121,6 +129,10 @@ func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity,
 	}
 	if err != nil {
 		return PlanReview{}, ErrUnavailable
+	}
+	if !retiring {
+		// Cancel only the local preparation if Dispatch did not consume it.
+		defer c.service.Manager.Cancel(prepared.ID, i)
 	}
 	scope := brokerwire.Scope{Registration: i.Scope.RegistrationID, Stack: i.Scope.StackName, Engine: req.Engine, TargetDigest: i.TargetDigest, SourceDigest: i.SourceDigest, ConfigDigest: req.ConfigDigest, EndpointDigest: info.EndpointDigest, BindingRevision: uint64(i.BindingRevision), PolicyRevision: i.PolicyRevision, Generation: prepared.ID}
 	var delivery brokerwire.Review
@@ -204,15 +216,8 @@ func (c *Controller) Submit(ctx context.Context, id string, i secretbroker.Revie
 	if err != nil {
 		return record, err
 	}
-	existing, err := c.service.State.Deployments(i.Scope)
-	if err != nil {
-		return record, ErrUnavailable
-	}
-	for _, r := range existing {
-		last := r.Events[len(r.Events)-1]
-		if last.State == "pending" || last.State == "unknown" || last.State == "running" {
-			return record, ErrUnavailable
-		}
+	if _, err := c.settledDeployments(i.Scope); err != nil {
+		return record, err
 	}
 	intent := secretbroker.DeploymentIntent{ID: request, Identity: i, Reference: review.Reference, StageID: review.StageID, JournalID: review.JournalID, SelectionDigest: *review.Native.Preflight.SelectionDigest, Mode: review.Mode, Revisions: review.Revisions, Retirement: review.Retirement}
 	if err := c.service.State.BeginDeployment(intent); err != nil {

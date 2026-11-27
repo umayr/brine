@@ -12,9 +12,10 @@ import (
 	"time"
 )
 
-type controllerAcquire struct{}
+type controllerAcquire struct{ calls int }
 
-func (controllerAcquire) Acquire(context.Context, secrets.Selector) (secrets.Value, error) {
+func (a *controllerAcquire) Acquire(context.Context, secrets.Selector) (secrets.Value, error) {
+	a.calls++
 	return secrets.NewValue([]byte("synthetic-static-password"))
 }
 
@@ -24,12 +25,14 @@ type controllerTarget struct {
 	identity     secretbroker.ReviewIdentity
 	scope        brokerwire.Scope
 	unknown      bool
+	infoCalls    int
 	writes       int
 	status       string
 	intentExists func(string) bool
 }
 
 func (t *controllerTarget) Info(context.Context) (TargetInfo, error) {
+	t.infoCalls++
 	return TargetInfo{strings.Repeat("a", 32), t.identity.TargetDigest, brokerwire.Digest([]byte("endpoint"))}, nil
 }
 func (t *controllerTarget) Requirements(context.Context, string, string, string, string) (brokerwire.Requirements, error) {
@@ -74,7 +77,7 @@ func controllerFixture(t *testing.T) (*Controller, *controllerTarget, secretbrok
 		t.Fatal(err)
 	}
 	s.Manager.Close()
-	s.Manager, err = secretbroker.NewManager(s.State, controllerAcquire{}, func(_ context.Context, i secretbroker.ReviewIdentity, b []secretbroker.Binding) error {
+	s.Manager, err = secretbroker.NewManager(s.State, &controllerAcquire{}, func(_ context.Context, i secretbroker.ReviewIdentity, b []secretbroker.Binding) error {
 		if i.PolicyRevision != s.Revision() {
 			return ErrUnavailable
 		}
@@ -104,6 +107,54 @@ func controllerFixture(t *testing.T) (*Controller, *controllerTarget, secretbrok
 		return reader.QueryRow("SELECT count(*) FROM broker_deployments WHERE id=?", id).Scan(&count) == nil && count == 1
 	}}, i
 }
+
+func TestControllerCanceledDispatchReleasesPreparation(t *testing.T) {
+	c, target, i := controllerFixture(t)
+	s := c.service
+	acquirer := &controllerAcquire{}
+	var cancelAttempt context.CancelFunc
+	var authorizations int
+	manager, err := secretbroker.NewManager(s.State, acquirer, func(_ context.Context, current secretbroker.ReviewIdentity, bindings []secretbroker.Binding) error {
+		if current.PolicyRevision != s.Revision() {
+			return ErrUnavailable
+		}
+		if err := s.Allowed(current.Scope, bindings); err != nil {
+			return err
+		}
+		authorizations++
+		if cancelAttempt != nil && authorizations == 2 {
+			// Allow final authorization so Prepare publishes, but Dispatch sees cancellation.
+			cancelAttempt()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Manager.Close()
+	s.Manager = manager
+
+	stage, manifest := strings.Repeat("c", 32), strings.TrimPrefix(i.SourceDigest, "sha256:")
+	// Exceed the manager's 32 pending slots without waiting for expiration.
+	for attempt := 1; attempt <= 40; attempt++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelAttempt, authorizations = cancel, 0
+		_, err := c.Prepare(ctx, i, stage, manifest, target)
+		ctxErr := ctx.Err()
+		cancel()
+		if authorizations != 2 || acquirer.calls != attempt {
+			t.Fatalf("attempt %d: got %d authorizations and %d total acquisitions; want 2 and %d", attempt, authorizations, acquirer.calls, attempt)
+		}
+		if err != ErrUnavailable || ctxErr != context.Canceled || target.scope != (brokerwire.Scope{}) {
+			t.Fatalf("attempt %d: expected cancellation before target preparation; Prepare error: %v, context error: %v", attempt, err, ctxErr)
+		}
+	}
+	cancelAttempt = nil
+	if _, err := c.Prepare(context.Background(), i, stage, manifest, target); err != nil {
+		t.Fatalf("fresh Prepare after canceled dispatches: %v", err)
+	}
+}
+
 func TestControllerUnknownIsDurableAndNeverResubmitted(t *testing.T) {
 	c, target, i := controllerFixture(t)
 	target.unknown = true
@@ -149,5 +200,51 @@ func TestControllerBindingChangeCannotDispatchReviewedHandle(t *testing.T) {
 	record, err := c.Submit(context.Background(), review.ID, i, target)
 	if err == nil || target.writes != 0 || record.Events[len(record.Events)-1].State != "not-admitted" {
 		t.Fatal("stale bindings dispatched")
+	}
+}
+
+func TestControllerUnresolvedHistoryBlocksPrepareAndSubmit(t *testing.T) {
+	for _, state := range []string{"pending", "running", "unknown"} {
+		t.Run(state, func(t *testing.T) {
+			ctx := context.Background()
+			c, target, i := controllerFixture(t)
+			stage, manifest := strings.Repeat("c", 32), strings.TrimPrefix(i.SourceDigest, "sha256:")
+			review, err := c.Prepare(ctx, i, stage, manifest, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Model a different reviewed request starting before this review is submitted.
+			id := strings.Repeat("d", 32)
+			intent := secretbroker.DeploymentIntent{
+				ID: id, Identity: i, Reference: review.Reference, StageID: review.StageID,
+				JournalID: review.JournalID, SelectionDigest: *review.Native.Preflight.SelectionDigest,
+				Mode: review.Mode, Revisions: review.Revisions,
+			}
+			if err := c.service.State.BeginDeployment(intent); err != nil {
+				t.Fatal(err)
+			}
+			if state != "pending" {
+				event := secretbroker.DeploymentEvent{Sequence: 1, State: state, Effects: "unknown"}
+				if err := c.service.State.AppendDeploymentEvent(i.Scope, id, 0, event); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			infoCalls := target.infoCalls
+			if _, err := c.Prepare(ctx, i, stage, manifest, target); err != ErrUnavailable || target.infoCalls != infoCalls {
+				t.Fatalf("Prepare did not reject history before target calls: %v", err)
+			}
+			if _, err := c.Submit(ctx, review.ID, i, target); err != ErrUnavailable || target.infoCalls != infoCalls+1 || target.writes != 0 {
+				t.Fatalf("Submit did not reject history after checking the target and before Apply: %v", err)
+			}
+			rows, err := c.service.State.Deployments(i.Scope)
+			if err != nil || len(rows) != 1 || rows[0].Intent.ID != id || len(rows[0].Events) == 0 || rows[0].Events[len(rows[0].Events)-1].State != state {
+				t.Fatalf("denial changed deployment history: %v", err)
+			}
+			if _, err := c.Submit(ctx, review.ID, i, target); err != ErrUnavailable || target.infoCalls != infoCalls+1 {
+				t.Fatalf("review remained usable after denied Submit: %v", err)
+			}
+		})
 	}
 }

@@ -92,19 +92,10 @@ func (m *Manager) Dispatch(ctx context.Context, id string, i ReviewIdentity, sen
 		return ErrInvalidInput
 	}
 	return m.WithCurrent(ctx, i, func() error {
-		m.mu.Lock()
-		m.purgeLocked()
-		p := m.pending[id]
-		if p == nil || p.metadata.Identity != i {
-			m.mu.Unlock()
-			return ErrUnavailable
+		meta, delivery, err := m.takePending(id, i)
+		if err != nil {
+			return err
 		}
-		delete(m.pending, id)
-		m.bytes -= p.size
-		meta := clonePreparation(p.metadata)
-		delivery := &Delivery{values: p.values}
-		p.values = nil
-		m.mu.Unlock()
 		defer delivery.Close()
 		return send(meta, delivery)
 	})
