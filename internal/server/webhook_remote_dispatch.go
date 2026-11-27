@@ -13,18 +13,22 @@ import (
 )
 
 func (d *webhookDispatcher) remoteOptions(ctx context.Context, stackID, stack string) []web.WebhookOption {
+	out, _ := d.remoteOptionsState(ctx, stackID, stack)
+	return out
+}
+func (d *webhookDispatcher) remoteOptionsState(ctx context.Context, stackID, stack string) ([]web.WebhookOption, error) {
 	if d.s.remoteDeploy == nil {
-		return nil
+		return nil, nil
 	}
 	targets, e := d.s.remoteDeploy.LifecycleTargets(ctx, stack)
 	if e != nil {
-		return nil
+		return nil, e
 	}
 	out := []web.WebhookOption{}
 	for _, target := range targets {
 		out = append(out, web.WebhookOption{StackID: stackID, StackName: stack, TargetID: target.ID, TargetName: target.Name, Actions: target.Actions})
 	}
-	return out
+	return out, nil
 }
 func (d *webhookDispatcher) validateRemote(ctx context.Context, t webhooks.Trigger) error {
 	if t.Action != "start" && t.Action != "stop" && t.Action != "restart" && t.Action != "plan" && t.Action != "git-sync" && t.Action != "deploy" {

@@ -8,10 +8,11 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("webhook record not found")
-	ErrInvalid  = errors.New("invalid webhook configuration")
-	ErrCapacity = errors.New("webhook capacity exhausted")
-	ErrConflict = errors.New("webhook record changed")
+	ErrPartialInventory = errors.New("some webhook target choices are unavailable")
+	ErrNotFound         = errors.New("webhook record not found")
+	ErrInvalid          = errors.New("invalid webhook configuration")
+	ErrCapacity         = errors.New("webhook capacity exhausted")
+	ErrConflict         = errors.New("webhook record changed")
 )
 
 type Resource struct {

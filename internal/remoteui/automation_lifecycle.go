@@ -41,6 +41,13 @@ func lifecycleBinding(s *store.Stack, r targetregistry.Record, enrollment target
 func (h *Deployment) LifecycleTargets(ctx context.Context, stack string) ([]LifecycleTarget, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	known, e := h.stacks.Get(stack)
+	if e != nil {
+		return nil, ErrAutomationAdmission
+	}
+	if !lifecycleSource(known) || h.credentials == nil || h.gitStore == nil || h.history != nil {
+		return []LifecycleTarget{}, nil
+	}
 	return automationUnprotected(h, ctx, stack, func() ([]LifecycleTarget, error) { return h.lifecycleTargets(ctx, stack) })
 }
 func (h *Deployment) lifecycleTargets(ctx context.Context, stack string) ([]LifecycleTarget, error) {

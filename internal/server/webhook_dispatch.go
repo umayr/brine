@@ -140,12 +140,12 @@ func (d *webhookDispatcher) WebhookOptions(ctx context.Context) ([]web.WebhookOp
 	if e != nil {
 		return nil, webhooks.ErrUnsupported
 	}
+	partial := false
 	for _, st := range stacks {
 		if ctx.Err() != nil {
-			return nil, webhooks.ErrUnsupported
+			return out, webhooks.ErrPartialInventory
 		}
 		sid, tid := webhookStackID(st), d.localTargetID()
-		out = append(out, d.remoteOptions(ctx, sid, st.Name)...)
 		if sid == "" || tid == "" {
 			continue
 		}
@@ -160,6 +160,21 @@ func (d *webhookDispatcher) WebhookOptions(ctx context.Context) ([]web.WebhookOp
 		if len(actions) > 0 {
 			out = append(out, web.WebhookOption{StackID: sid, StackName: st.Name, TargetID: tid, TargetName: "Local / " + d.s.cfg.Engine, Actions: actions})
 		}
+	}
+	// Local inventory is evaluated before network probes so an unavailable remote
+	// cannot discard verified local choices in this bounded discovery window.
+	for _, st := range stacks {
+		if ctx.Err() != nil {
+			return out, webhooks.ErrPartialInventory
+		}
+		remote, err := d.remoteOptionsState(ctx, webhookStackID(st), st.Name)
+		if err != nil {
+			partial = true
+		}
+		out = append(out, remote...)
+	}
+	if partial {
+		return out, webhooks.ErrPartialInventory
 	}
 	return out, nil
 }

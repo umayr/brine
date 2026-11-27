@@ -143,6 +143,15 @@ func (h *Handler) mountWebhooks(r chi.Router) {
 			hooksReply(w, 202, map[string]any{})
 		}))
 		r.Get("/requests", h.hooksGuard(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("unresolved") == "1" {
+				v, next, e := h.webhooks.UnresolvedRequests(r.Context(), r.URL.Query().Get("cursor"))
+				if e != nil {
+					hooksError(w, e)
+					return
+				}
+				hooksReply(w, 200, map[string]any{"requests": v, "next_cursor": next})
+				return
+			}
 			v, e := h.webhooks.Requests(r.Context(), r.URL.Query().Get("trigger_id"))
 			if e != nil {
 				hooksError(w, e)
@@ -194,11 +203,13 @@ func (h *Handler) hooksInventory(w http.ResponseWriter, r *http.Request) {
 	}
 	options := []WebhookOption{}
 	optionsAvailable := false
+	optionsPartial := false
 	if provider, ok := h.webhookDispatcher.(WebhookOptions); ok {
 		optionCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		options, e = provider.WebhookOptions(optionCtx)
 		cancel()
-		if e == nil {
+		if e == nil || errors.Is(e, webhooks.ErrPartialInventory) {
+			optionsPartial = errors.Is(e, webhooks.ErrPartialInventory)
 			optionsAvailable = true
 		} else {
 			options = []WebhookOption{}
@@ -207,7 +218,7 @@ func (h *Handler) hooksInventory(w http.ResponseWriter, r *http.Request) {
 			options = []WebhookOption{}
 		}
 	}
-	hooksReply(w, 200, map[string]any{"endpoints": endpoints, "triggers": triggers, "deliveries": deliveries, "requests": requests, "catalog": webhooks.Catalog, "actions": webhooks.Actions, "options": options, "options_available": optionsAvailable, "can_manage": auth.CookieAuthenticated(r), "health": h.webhooks.Health()})
+	hooksReply(w, 200, map[string]any{"endpoints": endpoints, "triggers": triggers, "deliveries": deliveries, "requests": requests, "catalog": webhooks.Catalog, "actions": webhooks.Actions, "options": options, "options_available": optionsAvailable, "options_partial": optionsPartial, "can_manage": auth.CookieAuthenticated(r), "health": h.webhooks.Health()})
 }
 func (h *Handler) hooksSaveEndpoint(w http.ResponseWriter, r *http.Request) {
 	var ep webhooks.Endpoint

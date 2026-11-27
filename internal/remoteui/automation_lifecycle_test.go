@@ -181,6 +181,13 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	// Permanent broker registration (or unreadable broker state) must deny all
 	// unattended paths, including source-only work, before any target/Git call.
 	guardCalls := 0
+	plain, plainErr := fs.Create("plain-local", "config { engine = \"docker\" }\n")
+	if plainErr != nil {
+		t.Fatal(plainErr)
+	}
+	if opts, err := h.LifecycleTargets(ctx, plain.Name); err != nil || len(opts) != 0 {
+		t.Fatal("known local-only source marked unavailable", opts, err)
+	}
 	h.SetLegacyGuard(func(context.Context, string, func()) error {
 		guardCalls++
 		return errors.New("broker protection unavailable")
