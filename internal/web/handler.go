@@ -8,6 +8,7 @@ import (
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/brokerapp"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/projectreview"
@@ -31,6 +32,9 @@ type Handler struct {
 	stagingLifecycle *stagingLifecycle
 	remoteEnabled    bool
 	sourceHistory    *sourceHistoryAccess
+	broker           *brokerapp.Service
+	brokerController *brokerapp.Controller
+	brokerTargets    brokerTargetOpener
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)
@@ -48,6 +52,14 @@ func New(ag agent.Agent, st store.StackStore, rs store.RecipeStore, gr *git.Runn
 		dev:           dev,
 		devFS:         os.DirFS("internal/web"),
 		deployTimeout: deployTimeout,
+	}
+}
+
+// EnableBroker is startup-only, before requests are served.
+func (h *Handler) EnableBroker(service *brokerapp.Service) {
+	h.broker = service
+	if service.Enabled() {
+		h.brokerController, _ = brokerapp.NewController(service, h.brokerGuard)
 	}
 }
 

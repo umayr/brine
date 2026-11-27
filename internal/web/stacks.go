@@ -160,6 +160,7 @@ func (h *Handler) stackDetailWithVariableError(w http.ResponseWriter, r *http.Re
 		FileContents:     fileContents,
 		EngineAlignment:  h.engineAlignmentFor(stack, fileContents),
 		Variables:        h.stackVariables(name, variableError),
+		Secrets:          h.stackSecretBindings(name),
 	})
 }
 
@@ -458,6 +459,17 @@ func (h *Handler) stackFmt(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) stackPlan(w http.ResponseWriter, r *http.Request) {
+	if h.broker != nil {
+		protected, err := h.broker.Protected(chi.URLParam(r, "name"))
+		if err != nil {
+			h.renderAlert(w, "error", "Protected state unavailable; no plan was inferred.")
+			return
+		}
+		if protected || len(h.broker.Scopes(chi.URLParam(r, "name"))) > 0 {
+			h.brokerPlanIntro(w, r)
+			return
+		}
+	}
 	if !h.qualifiedReadAllowed(w, r) {
 		return
 	}

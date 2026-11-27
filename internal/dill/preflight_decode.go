@@ -105,6 +105,9 @@ func DecodePreflightCapabilities(b []byte) (*PreflightCapabilities, error) {
 
 // DecodePreflightResult validates wire evidence only, without process or provenance.
 func DecodePreflightResult(b []byte) (*PreflightResult, error) {
+	return decodePreflightResultMode(b, false)
+}
+func decodePreflightResultMode(b []byte, broker bool) (*PreflightResult, error) {
 	if !preflightFrame(b) {
 		return nil, ErrPreflightContract
 	}
@@ -155,13 +158,14 @@ func DecodePreflightResult(b []byte) (*PreflightResult, error) {
 			return nil, ErrPreflightContract
 		}
 	}
-	if !validPreflightResult(&r) {
+	if !validPreflightResultMode(&r, broker) {
 		return nil, ErrPreflightContract
 	}
 	return &r, nil
 }
 
-func validPreflightResult(r *PreflightResult) bool {
+func validPreflightResult(r *PreflightResult) bool { return validPreflightResultMode(r, false) }
+func validPreflightResultMode(r *PreflightResult, broker bool) bool {
 	if r == nil || r.Version != PreflightVersion || !operationIDPattern.MatchString(r.OperationID) {
 		return false
 	}
@@ -175,7 +179,7 @@ func validPreflightResult(r *PreflightResult) bool {
 	if r.Resources == nil || r.Errors == nil || len(r.Resources) > 256 || len(r.Errors) > 4 {
 		return false
 	}
-	if r.Target != nil && (r.Target.Engine != "docker" || !operationDigestPattern.MatchString(r.Target.EndpointDigest) || !operationDigestPattern.MatchString(r.Target.QualifiedIdentityDigest)) {
+	if r.Target != nil && ((r.Target.Engine != "docker" && !(broker && r.Target.Engine == "podman")) || !operationDigestPattern.MatchString(r.Target.EndpointDigest) || !operationDigestPattern.MatchString(r.Target.QualifiedIdentityDigest)) {
 		return false
 	}
 	success := r.Outcome == "succeeded"
