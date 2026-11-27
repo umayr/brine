@@ -46,6 +46,7 @@ func TestSignedIncomingRemoteLifecycle(t *testing.T) {
 	if bin == "" || pkl == "" || schema == "" || socket == "" {
 		t.Fatal("explicit binary, Pkl, schema and disposable socket required")
 	}
+	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	engine := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -74,6 +75,11 @@ func TestSignedIncomingRemoteLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	os.Chmod(dir, 0700)
 	credentials := filepath.Join(dir, "credentials")
+	agentSocket := socket
+	var startFault *engineStartFault
+	if browserFixture {
+		agentSocket, startFault = newEngineStartFault(t, socket, dir, stack+"-manual")
+	}
 	command := func(args ...string) *exec.Cmd {
 		return exec.CommandContext(ctx, bin, append([]string{"agent"}, args...)...)
 	}
@@ -88,7 +94,7 @@ func TestSignedIncomingRemoteLifecycle(t *testing.T) {
 	}
 	reserve, _ := net.Listen("tcp", "127.0.0.1:0")
 	address := reserve.Addr().String()
-	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", socket, "--engine-id", "11111111-1111-4111-8111-111111111111", "--generation", "1", "--daemon-id", info.ID, "--https-deploy-token-file", tokenFile, "--https-staging-root", filepath.Join(dir, "stages"), "--https-staging-catalog", filepath.Join(dir, "catalog"), "--https-preview-state", filepath.Join(dir, "coordination"), "--https-preview-pkl", pkl, "--https-apply-state", filepath.Join(dir, "history")}
+	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", agentSocket, "--engine-id", "11111111-1111-4111-8111-111111111111", "--generation", "1", "--daemon-id", info.ID, "--https-deploy-token-file", tokenFile, "--https-staging-root", filepath.Join(dir, "stages"), "--https-staging-catalog", filepath.Join(dir, "catalog"), "--https-preview-state", filepath.Join(dir, "coordination"), "--https-preview-pkl", pkl, "--https-apply-state", filepath.Join(dir, "history")}
 	for _, grant := range []string{"stage", "manifest", "preview", "journal", "journal-apply", "checked-apply", "start-preview", "start", "stop-preview", "stop", "restart-preview", "restart", "status", "fence"} {
 		args = append(args, "--https-deploy-grant", grant)
 	}
@@ -253,7 +259,6 @@ config {
 	// and an ordinary first deployment below; it never saves that seed.
 	server := webhookServer(t)
 	fs := server.store.(*store.FSStore)
-	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	repo := filepath.Join(server.cfg.DataDir, "stacks", stack, "repo")
 	origin := filepath.Join(dir, "origin")
 	gitRun := func(where string, args ...string) string {
@@ -359,6 +364,16 @@ config {
 				http.Error(w, "isolated fixture access required", 403)
 				return
 			}
+		}
+		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/partial-phase" {
+			p := startFault.Phase.Load()
+			rid, _ := startFault.Request.Load().(string)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"phase": p, "request_id": rid})
+			if p == 6 && r.Header.Get("X-Brine-Partial-Proof") == "done" && r.Header.Get("X-Brine-Partial-Request") == rid && rid != "" {
+				startFault.Observed.Store(true)
+			}
+			return
 		}
 		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/loss-phase" {
 			w.Header().Set("Content-Type", "application/json")
@@ -923,5 +938,13 @@ config {
 	if qualifyManual != nil {
 		qualifyManual()
 		qualifySource()
+		qualifyPartialUpdate(t, ctx, server, fs, stack+"-manual", startFault, engine, engineCall, func(intent store.ManualDeploymentIntent) (agentclient.DeploymentStatus, error) {
+			client, ep, e := pair.OpenDeploymentCurrent(ctx, ctx, address, token, func(context.Context) bool { return true })
+			if e != nil {
+				return agentclient.DeploymentStatus{}, e
+			}
+			defer client.Close()
+			return client.JournalDeploymentStatus(ctx, ep, intent.Request, intent.Stack, intent.Journal)
+		})
 	}
 }
