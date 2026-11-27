@@ -204,7 +204,11 @@ func (d *webhookDispatcher) Execute(ctx context.Context, t webhooks.Trigger, req
 		saveCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		if op.Finish(saveCtx, kind, outcome, effects, reason) != nil {
-			result = webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
+			result.Status = "unknown"
+			result.Reason = "operation_history_unavailable"
+			if result.Outcome == "" {
+				result.Outcome = "unknown"
+			}
 		}
 	}
 	if lookupErr != nil || stackName == "" || d.Validate(ctx, t) != nil {
@@ -269,17 +273,21 @@ func (d *webhookDispatcher) Execute(ctx context.Context, t webhooks.Trigger, req
 	default:
 		e = webhooks.ErrUnsupported
 	}
+	effects := "unknown"
+	if t.Action == "plan" {
+		effects = "none"
+	}
 	if e != nil {
 		result.Status = "unknown"
 		result.Outcome = "unknown"
 		result.Reason = "execution_unconfirmed"
-		finish("operation.outcome_unknown", "unknown", "unknown", "execution_unconfirmed")
+		finish("operation.outcome_unknown", "unknown", effects, "execution_unconfirmed")
 		return result
 	}
 	result.Status = "completed"
 	result.Outcome = "success"
 	result.Reason = ""
-	finish("operation.completed", "success", "unknown", "")
+	finish("operation.completed", "success", effects, "")
 	return result
 }
 

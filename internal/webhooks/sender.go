@@ -82,6 +82,8 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
+var errDeliveryExpired = errors.New("delivery expired without send")
+
 type claimedDelivery struct {
 	Delivery
 	url             string
@@ -114,7 +116,7 @@ func (s *Service) claim(ctx context.Context) (claimedDelivery, error) {
 		if tx.Commit() != nil {
 			return c, errStorage
 		}
-		return c, sql.ErrNoRows
+		return c, errDeliveryExpired
 	}
 	c.Attempts++
 	if _, e = tx.ExecContext(ctx, "UPDATE deliveries SET status='sending',attempts=?,updated=? WHERE id=?", c.Attempts, encodeTime(s.now()), c.ID); e != nil {
@@ -131,6 +133,9 @@ func (s *Service) claim(ctx context.Context) (claimedDelivery, error) {
 
 func (s *Service) sendOne(ctx context.Context) (bool, error) {
 	c, e := s.claim(ctx)
+	if errors.Is(e, errDeliveryExpired) {
+		return true, nil
+	}
 	if errors.Is(e, sql.ErrNoRows) {
 		return false, nil
 	}

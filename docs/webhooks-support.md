@@ -94,8 +94,9 @@ of Podman support. `TestLocalEngineAdmissionMatrixIsNotRuntimeQualification`
 checks both local engine selections with a synthetic runner; it must not be cited
 as a Podman runtime pass. Ordinary Dill Docker and Podman integration CI passed on the exact reviewed and
 merged protocol source. That does not qualify the named managed protocol on
-Podman. Remaining protected/operator matrix, final review and required Brine
-CI/merge checks remain open.
+Podman. Broader provider/engine combinations are not qualified by this webhook
+work. The supported file-provider operator boundary above is qualified; final
+review and required Brine CI/merge checks remain release gates.
 
 Current real-pair harness inputs and exact commands are retained in the delivery
 record. Native opt-in tests skip without explicit disposable runtime variables;

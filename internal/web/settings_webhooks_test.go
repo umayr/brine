@@ -109,6 +109,14 @@ func TestWebhooksManagementSessionCSRFAndSecrecy(t *testing.T) {
 		if w.Code != 200 || strings.Contains(w.Body.String(), created.Secret) || strings.Contains(w.Body.String(), `"secret"`) {
 			t.Fatalf("inventory leaked or failed: %d", w.Code)
 		}
+		w = call("GET", "/api/webhooks/requests?unresolved=1", "", mode, false)
+		var page struct {
+			CanManage bool                       `json:"can_manage"`
+			Requests  []webhooks.IncomingRequest `json:"requests"`
+		}
+		if e := json.Unmarshal(w.Body.Bytes(), &page); e != nil || w.Code != 200 || page.CanManage != (mode == "cookie") || page.Requests == nil {
+			t.Fatal("independent recovery permissions", w.Code, e, page.CanManage)
+		}
 	}
 	w = call("POST", "/api/webhooks/endpoints/"+created.Endpoint.ID+"/rotate", `{"version":1}`, "cookie", true)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"secret"`) {

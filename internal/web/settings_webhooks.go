@@ -149,7 +149,7 @@ func (h *Handler) mountWebhooks(r chi.Router) {
 					hooksError(w, e)
 					return
 				}
-				hooksReply(w, 200, map[string]any{"requests": v, "next_cursor": next})
+				hooksReply(w, 200, map[string]any{"requests": v, "next_cursor": next, "can_manage": auth.CookieAuthenticated(r)})
 				return
 			}
 			v, e := h.webhooks.Requests(r.Context(), r.URL.Query().Get("trigger_id"))
