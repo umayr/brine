@@ -30,8 +30,8 @@ func TestIncomingLocalSuccessSurvivesTerminalStorageFailure(t *testing.T) {
 		t.Fatal("runner did not execute", e)
 	}
 	var started int64
-	var terminal []byte
-	if e = db.QueryRow("SELECT started,terminal FROM lifecycle_records WHERE id=?", "req_terminal_outage").Scan(&started, &terminal); e != nil || started == 0 || len(terminal) != 0 {
+	var terminalNull bool
+	if e = db.QueryRow("SELECT started,terminal IS NULL FROM lifecycle_records WHERE id=?", "req_terminal_outage").Scan(&started, &terminalNull); e != nil || started == 0 || !terminalNull {
 		t.Fatal("unresolved operation evidence lost", e, started)
 	}
 }
