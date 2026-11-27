@@ -21,6 +21,7 @@ var ErrJournalCapacity = errors.New("deployment journal capacity reached; preser
 
 type DeploymentStatus struct {
 	RequestID   string `json:"requestId"`
+	Action      string `json:"action,omitempty"`
 	Stack       string `json:"stack"`
 	State       string `json:"state"`
 	Effects     string `json:"effects"`
@@ -36,6 +37,11 @@ func canonicalDeploymentStatusKeys(b []byte) bool {
 	}
 	for key := range fields {
 		switch key {
+		case "action":
+			var action string
+			if json.Unmarshal(fields[key], &action) != nil || !validLifecycleAction(action) {
+				return false
+			}
 		case "requestId", "stack", "state", "effects", "operationId":
 		default:
 			return false
@@ -175,13 +181,26 @@ func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack, postPat
 	if d.Decode(&v) != nil || v.RequestID != id || v.Stack == "" || len(v.Stack) > 128 || (stack != "" && v.Stack != stack) {
 		return empty, failure
 	}
+	if v.Action != "" && !validLifecycleAction(v.Action) {
+		return empty, failure
+	}
+	if body != nil && postPath != "/v1/deploy/fence" {
+		expected := strings.TrimPrefix(postPath, "/v1/deploy/")
+		if validLifecycleAction(expected) {
+			if v.Action != expected {
+				return empty, failure
+			}
+		} else if v.Action != "" {
+			return empty, failure
+		}
+	}
 	op := v.OperationID
 	if op != "" && (!strings.HasPrefix(op, "op_") || !canonicalHex(strings.TrimPrefix(op, "op_"), 16)) {
 		return empty, failure
 	}
 	switch v.State {
 	case "not-admitted":
-		if v.Effects == "none" && op == "" && (body == nil || postPath == "/v1/deploy/fence") {
+		if v.Action == "" && v.Effects == "none" && op == "" && (body == nil || postPath == "/v1/deploy/fence") {
 			return v, nil
 		}
 	case "running", "unknown":
@@ -189,7 +208,7 @@ func (c *Client) deploymentStatus(ctx context.Context, epoch, id, stack, postPat
 			return v, nil
 		}
 	case "succeeded":
-		if v.Effects == "complete" && op != "" {
+		if (v.Effects == "complete" || (validLifecycleAction(v.Action) && v.Effects == "none")) && op != "" {
 			return v, nil
 		}
 	case "failed":

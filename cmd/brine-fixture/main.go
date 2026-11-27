@@ -41,6 +41,7 @@ func main() {
 	port := flag.String("port", "18082", "localhost port")
 	withAuth := flag.Bool("auth", false, "enable disposable admin login (fixture-only-not-a-secret)")
 	syntheticStaging := flag.Bool("synthetic-staging", false, "enable disposable fake local snapshot staging fixture")
+	syntheticWebhooks := flag.Bool("synthetic-webhooks", false, "enable disposable webhook management fixture; never sends HTTP or runs actions")
 	syntheticSecrets := flag.Bool("synthetic-secrets", false, "enable reference-only broker UI fixtures; requires --auth; never acquires values or deploys")
 	flag.Parse()
 	if *syntheticSecrets && !*withAuth {
@@ -118,7 +119,7 @@ printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id
 		}
 	}
 	runner.Variables = variables
-	if *syntheticStaging {
+	if *syntheticStaging || *syntheticWebhooks {
 		*withAuth = true
 	}
 	ag := agent.NewLocalAgent(eng, runner)
@@ -162,8 +163,9 @@ printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			loginOnly := *withAuth && r.Method == http.MethodPost && (r.URL.Path == "/login" || r.URL.Path == "/logout")
 			stagingOnly := *syntheticStaging && r.Method == http.MethodPost && (r.URL.Path == "/web/stacks/homepage/staging/prepare" || r.URL.Path == "/web/stacks/homepage/staging/confirm")
+			hooksOnly := *syntheticWebhooks && strings.HasPrefix(r.URL.Path, "/api/webhooks/")
 			referencesOnly := *syntheticSecrets && r.Method == http.MethodPost && r.URL.Path == "/stacks/homepage/secrets"
-			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !stagingOnly && !referencesOnly {
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !stagingOnly && !referencesOnly && !hooksOnly {
 				http.Error(w, "fixture is read-only", http.StatusMethodNotAllowed)
 				return
 			}
@@ -215,6 +217,13 @@ printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id
 		cfg.StagingIdentity = "fixture-target"
 		webHandler.EnableLocalStaging(cfg)
 		defer webHandler.CloseStaging()
+	}
+	if *syntheticWebhooks {
+		svc, err := enableFixtureWebhooks(webHandler, dir)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer svc.Close()
 	}
 	api.Mount(r, ag, fixtureStacks, rs, gr, "docker", timeouts, 30*time.Second)
 	web.Mount(r, webHandler, timeouts)

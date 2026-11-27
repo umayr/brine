@@ -67,10 +67,11 @@ type stackResponse struct {
 
 // stackReadMetadata reports the effective entrypoint without changing stored metadata.
 func stackReadMetadata(stack *store.Stack) *store.Stack {
-	if stack == nil || (stack.Entrypoint != "" && stack.SourceHistory == nil) {
+	if stack == nil || (stack.Entrypoint != "" && stack.SourceHistory == nil && stack.EventHead == "") {
 		return stack
 	}
 	metadata := *stack
+	metadata.EventHead = ""
 	metadata.SourceHistory = nil // private reachability information is browser-History-only
 	metadata.Entrypoint = stack.EffectiveEntrypoint()
 	return &metadata
@@ -146,7 +147,7 @@ func (h *stackHandler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusCreated, stack)
+	writeJSON(w, http.StatusCreated, stackReadMetadata(stack))
 }
 
 type updateRequest struct {
@@ -590,7 +591,7 @@ func (h *stackHandler) createFromGit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "Git stack creation failed; check the stack name before retrying")
 		return
 	}
-	writeJSON(w, http.StatusCreated, stack)
+	writeJSON(w, http.StatusCreated, stackReadMetadata(stack))
 }
 
 // gitInfo returns the git source configuration and sync status.

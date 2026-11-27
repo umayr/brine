@@ -8,14 +8,16 @@ import (
 
 // ContainerInfo holds runtime information about a container.
 type ContainerInfo struct {
-	ID     string            `json:"id"`
-	Name   string            `json:"name"`
-	Image  string            `json:"image"`
-	State  string            `json:"state"`  // running, exited, paused, created
-	Status string            `json:"status"` // "Up 2 hours", "Exited (0) 3 minutes ago"
-	Ports  []string          `json:"ports"`
-	Labels map[string]string `json:"labels"`
-	Stack  string            `json:"stack"` // dill.stack label value, empty if not managed
+	HealthStatus     *string           `json:"health_status,omitempty"`
+	HealthConfigured *bool             `json:"health_configured,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Image            string            `json:"image"`
+	State            string            `json:"state"`  // running, exited, paused, created
+	Status           string            `json:"status"` // "Up 2 hours", "Exited (0) 3 minutes ago"
+	Ports            []string          `json:"ports"`
+	Labels           map[string]string `json:"labels"`
+	Stack            string            `json:"stack"` // dill.stack label value, empty if not managed
 }
 
 // ImageInfo holds information about a local image.

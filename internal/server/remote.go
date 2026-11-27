@@ -28,12 +28,14 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 		return errors.New("remote registry unavailable or insecure")
 	}
 	transport := remoteagent.Config{LocalDir: s.cfg.RemoteForwardDir, Timeout: s.cfg.RemoteTimeout}
+	s.targetRegistry = registry
 	if provider == nil {
 		provider, err = remoteui.NewRegistryLeaseProvider(registry, transport)
 		if err != nil {
 			return err
 		}
 	}
+	s.remoteReadLeases = provider
 	if observer == nil {
 		observer = remoteui.PinnedObserver{Config: transport}
 	}
@@ -71,6 +73,14 @@ func (s *Server) prepareRemote(provider remoteui.ReadLeaseProvider, observer rem
 	if s.store != nil {
 		if s.remoteDeploy, err = remoteui.NewDeployment(s.authn, registry, s.store); err != nil {
 			return err
+		}
+		if s.cfg.RemoteDeployCredentials != "" {
+			credentials, e := remoteui.LoadDeploymentCredentials(s.cfg.RemoteDeployCredentials, s.cfg.DataDir)
+			if e != nil {
+				s.remoteDeploy.Close()
+				return e
+			}
+			s.remoteDeploy.SetDeploymentCredentials(credentials)
 		}
 		s.remoteDeploy.EnableGit(s.git)
 		deploy = s.remoteDeploy.Protected()

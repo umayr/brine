@@ -210,6 +210,19 @@ func (s *Session) Inventory(ctx context.Context, maxPages int) ([]agentclient.In
 	}
 	return nil, s.fail(ErrInventoryLimit)
 }
+
+// Capabilities is optional for legacy transports; absence is unavailable,
+// never an empty capability set or authorization to invoke a method.
+func (s *Session) Capabilities(ctx context.Context) ([]string, error) {
+	c, ok := s.client.(interface {
+		Capabilities(context.Context, string) ([]string, error)
+	})
+	if !ok {
+		return nil, errors.New("remoteagent: capabilities unavailable")
+	}
+	return c.Capabilities(ctx, s.epoch)
+}
+
 func (s *Session) Inspect(ctx context.Context, id string) (agentclient.InspectResult, error) {
 	v, err := s.client.Inspect(ctx, s.epoch, id)
 	if err != nil {

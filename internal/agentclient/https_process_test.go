@@ -1,9 +1,10 @@
 package agentclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -67,14 +68,19 @@ func TestHTTPSPairProcess(t *testing.T) {
 	}
 	address := reserve.Addr().String()
 	const engineID = "11111111-1111-4111-8111-111111111111"
-	stages, catalog := filepath.Join(dir, "stages"), filepath.Join(dir, "catalog")
-	for _, root := range []string{stages, catalog} {
-		if err := os.Mkdir(root, 0700); err != nil {
-			reserve.Close()
-			t.Fatal(err)
+	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon"}
+	deploymentToken := ""
+	if os.Getenv("DILL_AGENT_DEPLOY_CREDENTIAL_TEST") == "1" {
+		deploymentToken = base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{17}, 32))
+		tokenFile := filepath.Join(dir, "deploy-token")
+		if e := os.WriteFile(tokenFile, []byte(deploymentToken), 0600); e != nil {
+			t.Fatal(e)
 		}
+		staging, catalog := filepath.Join(dir, "stages"), filepath.Join(dir, "catalog")
+		os.Mkdir(staging, 0700)
+		os.Mkdir(catalog, 0700)
+		args = append(args, "--https-deploy-token-file", tokenFile, "--https-deploy-grant", "stage", "--https-deploy-grant", "manifest", "--https-staging-root", staging, "--https-staging-catalog", catalog)
 	}
-	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", engine, "--engine-id", engineID, "--generation", "1", "--daemon-id", "synthetic-daemon", "--https-staging-root", stages, "--https-staging-catalog", catalog}
 	raw, err := agentCommand(append(args, "--print-https-pairing")...).Output()
 	if err != nil {
 		reserve.Close()
@@ -107,6 +113,10 @@ func TestHTTPSPairProcess(t *testing.T) {
 		t.Fatal("authenticated agent session was not established")
 	}
 	defer client.Close()
+	caps, capErr := client.Capabilities(ctx, epoch)
+	if os.Getenv("DILL_AGENT_EXPECT_CAPABILITIES") == "1" && (capErr != nil || len(caps) == 0) {
+		t.Fatal("actual Dill capability report rejected", capErr)
+	}
 	page, err := client.Inventory(ctx, epoch, nil, 20)
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id {
 		t.Fatal("engine inventory did not match synthetic target", err)
@@ -143,24 +153,26 @@ func TestHTTPSPairProcess(t *testing.T) {
 	if _, err := client.Stage(ctx, "wrong-epoch", body); err != ErrProtocol {
 		t.Fatal("staging accepted an unverified session")
 	}
-	stageID, err := client.Stage(ctx, epoch, body)
-	if err != nil || len(stageID) != 32 {
-		t.Fatal("snapshot transfer failed", err)
+	if _, err = client.Stage(ctx, epoch, body); err == nil {
+		t.Fatal("read-only monitor token gained staging authority")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, client.baseURL+"/v1/snapshots/"+stageID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp, err := client.do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var manifest struct {
-		ID  string `json:"stage_id"`
-		SHA string `json:"manifest_sha256"`
-	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&manifest) != nil || manifest.ID != stageID || len(manifest.SHA) != 64 {
-		t.Fatal("catalogued snapshot could not be read back")
+	if deploymentToken != "" {
+		active := true
+		deploy, e, err := bundle.OpenDeploymentCurrent(ctx, ctx, address, deploymentToken, func(context.Context) bool { return active })
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer deploy.Close()
+		stage, err := deploy.Stage(ctx, e, body)
+		if err != nil {
+			t.Fatal("distinct scoped credential staging failed", err)
+		}
+		if _, err = deploy.Snapshot(ctx, e, stage); err != nil {
+			t.Fatal("distinct credential manifest failed", err)
+		}
+		active = false
+		if _, err = deploy.Snapshot(ctx, e, stage); err == nil {
+			t.Fatal("revoked custody revision remained usable")
+		}
 	}
 }

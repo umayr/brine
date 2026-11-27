@@ -23,21 +23,28 @@ import (
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/targetregistry"
 	"github.com/umayr/brine/internal/web"
+	"github.com/umayr/brine/internal/webhooks"
 )
 
 // Server is the brine HTTP server.
 type Server struct {
-	cfg               *config.Config
-	agent             agent.Agent
-	store             store.StackStore
-	recipes           store.RecipeStore
-	git               *git.Runner
-	router            http.Handler
-	web               *web.Handler
-	authn             *auth.Authenticator
-	remoteCancel      context.CancelFunc
-	remoteDeploy      *remoteui.Deployment
-	testRevealFactory func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
+	cfg                *config.Config
+	agent              agent.Agent
+	store              store.StackStore
+	recipes            store.RecipeStore
+	git                *git.Runner
+	router             http.Handler
+	web                *web.Handler
+	authn              *auth.Authenticator
+	remoteCancel       context.CancelFunc
+	remoteDeploy       *remoteui.Deployment
+	targetRegistry     *targetregistry.Registry
+	remoteReadLeases   remoteui.ReadLeaseProvider
+	remoteSampleOffset int
+	targetJournalScope string
+	webhooks           *webhooks.Service
+	webhookDispatcher  webhooks.TriggerDispatcher
+	testRevealFactory  func(*auth.Authenticator, *targetregistry.Registry) (*remoteui.RevealHandler, error) // synthetic tests only
 }
 
 // New wires up all dependencies and returns a ready-to-run server.
@@ -70,7 +77,11 @@ func New(cfg *config.Config, ag agent.Agent, st store.StackStore, rs store.Recip
 	}
 	web.Mount(r, h, timeouts)
 
-	return &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, router: r, web: h, authn: authn}
+	s := &Server{cfg: cfg, agent: ag, store: st, recipes: rs, git: gr, router: r, web: h, authn: authn}
+	if cfg.WebhooksEnabled {
+		s.router = s.withWebhookIngress(r)
+	}
+	return s
 }
 
 // Run starts HTTP and any configured remote Git worker until ctx is cancelled.
@@ -94,28 +105,7 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 		if local, ok := s.agent.(*agent.LocalAgent); ok {
 			local.AddSecretRecordLookup(broker.Protected)
 		}
-		runner := s.agent.Dill()
-		if runner != nil {
-			oldAction, oldValidate := runner.BeforeLegacyAction, runner.BeforeLegacyValidate
-			runner.BeforeLegacyAction = func(ctx context.Context, stack string) error {
-				if err := broker.RequireUnprotected(stack); err != nil {
-					return err
-				}
-				if oldAction != nil {
-					return oldAction(ctx, stack)
-				}
-				return nil
-			}
-			runner.BeforeLegacyValidate = func(ctx context.Context, stack string) error {
-				if err := broker.RequireUnprotected(stack); err != nil {
-					return err
-				}
-				if oldValidate != nil {
-					return oldValidate(ctx, stack)
-				}
-				return nil
-			}
-		}
+		installBrokerLegacyGates(s.agent.Dill(), broker)
 	}
 	if s.cfg.SourceHistoryDir != "" {
 		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir, s.cfg.SourceHistoryLimits)
@@ -147,6 +137,16 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 	// Do not start background mutations until the configuration is validated.
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
+	if err := s.prepareWebhooks(workerCtx); err != nil {
+		return err
+	}
+	defer func() {
+		if s.webhooks != nil {
+			if err := s.webhooks.Close(); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		}
+	}()
 	// Local Git auto-deploy is paused until it can apply a reviewed candidate.
 	if s.remoteDeploy != nil {
 		go s.remoteDeploy.RunGit(workerCtx)

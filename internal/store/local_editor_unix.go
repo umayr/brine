@@ -72,7 +72,7 @@ func (s *FSStore) ReadLocalEditorFile(name, filename string) (string, error) {
 	b, err := readWorkspaceFile(fd, leaf)
 	return string(b), err
 }
-func (s *FSStore) WriteLocalEditorFile(name, filename, content string) error {
+func (s *FSStore) WriteLocalEditorFile(name, filename, content string) (resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fd, leaf, err := s.localEditorParent(name, filename)
@@ -86,6 +86,16 @@ func (s *FSStore) WriteLocalEditorFile(name, filename, content string) error {
 		return err
 	}
 	defer f.Close()
+	stack, err := s.readMeta(name)
+	if err != nil {
+		return err
+	}
+	stack.UpdatedAt = time.Now()
+	commit, e := s.prepareMetadata(stack, "write", name)
+	if e != nil {
+		return e
+	}
+	defer func() { commit.Done(resultErr) }()
 	if err = unix.Fchmod(int(f.Fd()), 0600); err != nil {
 		return err
 	}
@@ -95,12 +105,7 @@ func (s *FSStore) WriteLocalEditorFile(name, filename, content string) error {
 	if _, err = f.WriteString(content); err != nil {
 		return err
 	}
-	stack, err := s.readMeta(name)
-	if err != nil {
-		return err
-	}
-	stack.UpdatedAt = time.Now()
-	return s.writeMeta(stack)
+	return s.writeMetaRaw(stack)
 }
 
 func (s *FSStore) LocalEditorFiles(name string) ([]string, error) {

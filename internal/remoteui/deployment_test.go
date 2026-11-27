@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -63,6 +64,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 	pub := priv.Public().(ed25519.PublicKey)
 	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{2}, 32))
+	deployToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{3}, 32))
 	const socket = "unix:///run/docker.sock"
 	const engine = "11111111-1111-4111-8111-111111111111"
 	const epoch = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -97,6 +99,10 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var removePreviews, removeCalls, removeGETs atomic.Int32
 	var removalRequest atomic.Value
 	var calls atomic.Int32
+	var checkedMode atomic.Bool
+	var outsideOwner atomic.Bool
+	var checkedCalls, checkedStatusCalls atomic.Int32
+	var checkedPrior atomic.Value
 	var manifest, catalogDigest atomic.Value
 	var differentManifest atomic.Bool
 	var catalogReads, previewCalls atomic.Int32
@@ -110,7 +116,11 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	enabled := atomic.Bool{}
 	enabled.Store(true)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+token {
+		expected := token
+		if r.URL.Path != "/v1/session" {
+			expected = deployToken
+		}
+		if r.Header.Get("Authorization") != "Bearer "+expected {
 			t.Error("missing bearer credential")
 			w.WriteHeader(401)
 			return
@@ -187,6 +197,40 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		case "/v1/snapshots/" + stage:
 			catalogReads.Add(1)
 			fmt.Fprint(w, manifest.Load().(string))
+		case "/v1/deploy/journal":
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			fmt.Fprintf(w, `{"journalId":%q}`, journal)
+		case "/v1/deploy/stop-preview":
+			if !checkedMode.Load() {
+				t.Error("unexpected owner probe")
+				w.WriteHeader(409)
+				return
+			}
+			var owner map[string]any
+			fixture, err := os.ReadFile("../dill/testdata/preflight-v1/preview-up-config-noop.json")
+			var envelope struct{ Stdout map[string]any }
+			if err != nil || json.Unmarshal(fixture, &envelope) != nil {
+				t.Error("owner fixture")
+				return
+			}
+			owner = envelope.Stdout
+			owner["operation"], owner["stack"] = "stop", "synthetic"
+			owner["target"].(map[string]any)["endpointDigest"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(socket)))
+			for _, v := range owner["resources"].([]any) {
+				row := v.(map[string]any)
+				row["action"] = "retain"
+				if row["kind"] == "container" {
+					row["action"] = "stop"
+				}
+			}
+			prior := checkedPrior.Load().(string)
+			if outsideOwner.Load() {
+				prior = strings.Repeat("9", 32)
+			}
+			w.Header().Set("X-Dill-Journal-Id", journal)
+			w.Header().Set("X-Dill-Deployment-Mode", "stop")
+			w.Header().Set("X-Dill-Prior-Request", prior)
+			json.NewEncoder(w).Encode(owner)
 		case "/v1/deploy/preview":
 			previewCalls.Add(1)
 			var f map[string]string
@@ -194,10 +238,31 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				t.Error("preview not bound to staged catalog")
 			}
 			w.Header().Set("X-Dill-Journal-Id", journal)
+			if checkedMode.Load() {
+				w.Header().Set("X-Dill-Deployment-Mode", "update")
+				w.Header().Set("X-Dill-Prior-Request", checkedPrior.Load().(string))
+			}
 			if enabled.Load() {
 				w.Header().Set("X-Dill-Create-Enabled", "1")
 			}
 			_, _ = w.Write(plan)
+		case "/v1/deploy/checked-apply":
+			checkedCalls.Add(1)
+			var f map[string]string
+			if !checkedMode.Load() || r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&f) != nil || len(f) != 7 || f["confirm"] != "update" || f["priorRequestId"] != checkedPrior.Load().(string) || f["stack"] != "synthetic" || f["stageId"] != stage || f["manifestSha256"] != catalogDigest.Load() || f["selectionDigest"] != previewResult.Selection || f["requestId"] != strings.Repeat("7", 32) || r.Header.Get("X-Dill-Journal-Id") != journal {
+				t.Error("checked update lost exact owner binding")
+			}
+			persisted, err := store.NewFSStore(data)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			s, err := persisted.Get("synthetic")
+			if err != nil || s.RemoteGit.Request != f["requestId"] || s.RemoteGit.Phase != "pending" || s.RemoteGit.Journal != journal {
+				t.Error("checked apply preceded durable pending intent")
+			}
+			// An HTTP error response is not a target receipt.
+			w.WriteHeader(http.StatusBadGateway)
 		case "/v1/deploy/apply", "/v1/deploy/journal-apply":
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			calls.Add(1)
@@ -306,6 +371,12 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				return
 			}
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"not-admitted","effects":"none"}`, stranded)
+		case "/v1/deploy/operations/" + strings.Repeat("7", 32), "/v1/deploy/operations/" + strings.Repeat("8", 32):
+			checkedStatusCalls.Add(1)
+			if r.Method != http.MethodGet || r.Header.Get("X-Dill-Journal-Id") != journal {
+				t.Error("checked recovery status lost exact journal")
+			}
+			w.WriteHeader(http.StatusNotFound)
 		case "/v1/deploy/operations/" + stranded:
 			http.NotFound(w, r)
 		case "/v1/deploy/operations/" + unknown:
@@ -368,10 +439,24 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err := NewDeployment(a, reg, fs)
+	if err == nil {
+		h.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer h.Close()
+	normalObserved := &executionFixture{}
+	observedActions := map[string]int{}
+	h.SetExecutionObserver(func(_ context.Context, m ExecutionMetadata) (ExecutionObservation, error) {
+		observedActions[m.Action]++
+		return normalObserved, nil
+	})
+	t.Cleanup(func() {
+		if observedActions["plan"] == 0 || observedActions["deploy"] == 0 || observedActions["remove"] == 0 || normalObserved.starts != normalObserved.finishes {
+			t.Fatal("normal reviewed UI paths bypassed execution observation", observedActions, normalObserved)
+		}
+	})
 	login := httptest.NewRecorder()
 	r := httptest.NewRequest("POST", "/login", strings.NewReader("user=admin&password=secret"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -399,6 +484,18 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	csrf := field(invoke("GET", deployPath+"?host=demo", nil), "_csrf")
 	session := fmt.Sprintf("%x", sha256.Sum256([]byte("brine-remote-deployment\x00"+csrf)))
+	t.Run("history-removal-refuses-rotated-credential", func(t *testing.T) {
+		oldHistory, oldCredentials := h.history, h.credentials
+		defer func() { h.history, h.credentials = oldHistory, oldCredentials }()
+		h.history = &attendedHistory{}
+		id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+		h.credentials = testDeploymentCredentials(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{4}, 32)))
+		before := removeCalls.Load()
+		w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"remove"}})
+		if w.Code != 409 || removeCalls.Load() != before {
+			t.Fatal("history removal dispatched under unreviewed credential", w.Code)
+		}
+	})
 	for _, mode := range []string{"create", "update", "remove"} {
 		for _, tc := range []struct {
 			name  string
@@ -419,7 +516,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				h.stacks = overlapErrorStore{StackStore: original, err: tc.err, stack: tc.stack}
 				defer func() { h.stacks = original }()
 				beforeApply, beforeRemove := calls.Load(), removeCalls.Load()
-				id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: mode, TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+				id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: mode, TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 				w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {mode}})
 				if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") {
 					t.Fatalf("expected fail-closed overlap rejection: %d %s", w.Code, w.Body.String())
@@ -444,7 +541,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				t.Fatal(err)
 			}
 		}()
-		id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+		id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "remove", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 		before := removeCalls.Load()
 		w := invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {id}, "confirm": {"remove"}})
 		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Cannot verify remote Git overlap") || removeCalls.Load() != before {
@@ -459,7 +556,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		{"changed target", "different-reviewed-target", "Target was re-paired; no creation sent", time.Now().Add(time.Minute)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			id := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Mode: "create", TargetDigest: tc.target, Expiry: tc.expiry})
+			id := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Mode: "create", TargetDigest: tc.target, Expiry: tc.expiry})
 			if id == "" {
 				t.Fatal("could not create confirmation fixture")
 			}
@@ -474,7 +571,7 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	}
 	// Exercise the immediate result and a later GET against the same validated status.
 	partial.Store(true)
-	partialID := h.add(deploymentReview{Session: session, Host: "demo", Stack: "synthetic", Journal: journal, StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
+	partialID := h.add(deploymentReview{CredentialRevision: testCredentialRevision(h, row), Session: session, Host: "demo", Stack: "synthetic", Journal: journal, StageID: stage, Manifest: strings.Repeat("a", 64), Selection: "sha256:" + strings.Repeat("b", 64), Mode: "create", TargetDigest: targetDigest(row), Expiry: time.Now().Add(time.Minute)})
 	partialPath := deployPath + "?host=demo&id=" + partialID
 	for _, w := range []*httptest.ResponseRecorder{
 		invoke("POST", deployPath+"/create", url.Values{"_csrf": {csrf}, "id": {partialID}, "confirm": {"create"}}),
@@ -549,6 +646,24 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	partial.Store(false)
 	calls.Store(0)
 	params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
+	t.Run("manual transfer review pins custody before upload", func(t *testing.T) {
+		params := url.Values{"_csrf": {csrf}, "host": {"demo"}, "stack": {"synthetic"}}
+		w := invoke("POST", deployPath+"/review", params)
+		id := field(w, "id")
+		if id == "" {
+			t.Fatal("missing file review")
+		}
+		before := catalogReads.Load()
+		old := h.credentials
+		h.SetDeploymentCredentials(testDeploymentCredentials(base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{8}, 32))))
+		defer h.SetDeploymentCredentials(old)
+		params.Set("id", id)
+		params.Set("confirm", "transfer")
+		w = invoke("POST", deployPath+"/stage", params)
+		if w.Code != 409 || catalogReads.Load() != before {
+			t.Fatal("stale custody review transferred", w.Code)
+		}
+	})
 	t.Run("catalog must match reviewed bytes before preview", func(t *testing.T) {
 		differentManifest.Store(true)
 		defer differentManifest.Store(false)
@@ -611,6 +726,13 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	h, err = NewDeployment(a, reg, reopenedStore)
+	if err == nil {
+		h.SetExecutionObserver(func(_ context.Context, m ExecutionMetadata) (ExecutionObservation, error) {
+			observedActions[m.Action]++
+			return normalObserved, nil
+		})
+		h.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,6 +891,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 			t.Fatal(err)
 		}
 		restarted, err := NewDeployment(a, reg, fs2)
+		if err == nil {
+			restarted.SetDeploymentCredentials(testDeploymentCredentials(deployToken))
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -827,6 +952,102 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		restarted.pollGit(ctx)
 		if calls.Load() != 2 || fenceCalls.Load() != 4 {
 			t.Fatal("recovery caused an automatic submission")
+		}
+		for _, failRollback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("checked dispatch recovery rollback=%v", failRollback), func(t *testing.T) {
+				run("commit", "--allow-empty", "-m", fmt.Sprintf("new reviewed revision %v", failRollback))
+				current, err := fs2.Get("synthetic")
+				if err != nil {
+					t.Fatal(err)
+				}
+				ready := *current.RemoteGit
+				ready.Enabled, ready.Phase, ready.Reason = true, "succeeded", ""
+				ready.Request, ready.Journal = "", ""
+				if ready.DeploymentRequest == "" || ready.DeploymentJournal != journal {
+					t.Fatal("missing real fixture predecessor")
+				}
+				if err := fs2.SwapRemoteGit("synthetic", ready.Source, current.RemoteGit, &ready); err != nil {
+					t.Fatal(err)
+				}
+				checkedPrior.Store(ready.DeploymentRequest)
+				checkedMode.Store(true)
+				defer checkedMode.Store(false)
+				rollback := &failedGitPreDispatchRollback{RemoteGitStore: fs2}
+				if failRollback {
+					restarted.gitStore = rollback
+				}
+				defer func() { restarted.gitStore = fs2 }()
+				record, enrollment, lease, err := restarted.acquireDeploymentTarget(ctx, ready.Host, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				boundCtx := context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
+				fresh, _ := fs2.Get("synthetic")
+				binding := lifecycleBinding(fresh, record, enrollment, restarted.deploymentCredentialRevision(boundCtx, record))
+				lease.Close()
+				// A replaced live owner must be refused before Git capture, even
+				// when the reviewed branch is already in the Seen history.
+				savedRunner := restarted.git
+				marker := filepath.Join(t.TempDir(), "capture-called")
+				probe := filepath.Join(t.TempDir(), "git")
+				if err = os.WriteFile(probe, []byte(fmt.Sprintf("#!/bin/sh\nprintf hit >> %q\nexit 1\n", marker)), 0700); err != nil {
+					t.Fatal(err)
+				}
+				outsideOwner.Store(true)
+				restarted.git = &git.Runner{Binary: probe}
+				unseenTip := run("rev-parse", "HEAD")
+				for _, seen := range []bool{false, true} {
+					tip := unseenTip
+					if seen {
+						tip = commit
+					}
+					run("update-ref", "refs/heads/deploy", tip) // Disposable fixture, unchanged tree.
+					before := catalogReads.Load()
+					denied := restarted.RunGitDeployment(ctx, "synthetic", binding, strings.Repeat("6", 32), func() bool { t.Fatal("outside owner reached dispatch"); return false })
+					if denied.Submitted || denied.Unchanged || catalogReads.Load() != before {
+						t.Fatal("outside owner captured/staged/claimed unchanged")
+					}
+					if _, e := os.Stat(marker); !os.IsNotExist(e) {
+						t.Fatal("outside owner invoked Git", e)
+					}
+				}
+				run("update-ref", "refs/heads/deploy", unseenTip)
+				outsideOwner.Store(false)
+				restarted.git = savedRunner
+				request := strings.Repeat("7", 32)
+				if failRollback {
+					request = strings.Repeat("8", 32)
+				}
+				beforeCalls, applies := 0, checkedCalls.Load()
+				result := restarted.RunGitDeployment(ctx, "synthetic", binding, request, func() bool { beforeCalls++; return !failRollback })
+				retained := readPolicy()
+				if beforeCalls != 1 || retained.Request != request || retained.Journal != journal || retained.Phase != "pending" || result.Error == nil {
+					t.Fatalf("lost recovery/error boundary: submitted=%v error=%v before=%d request=%q journal=%q phase=%q", result.Submitted, result.Error, beforeCalls, retained.Request, retained.Journal, retained.Phase)
+				}
+				if failRollback {
+					if result.Submitted || !errors.Is(result.Error, ErrAutomationRecovery) || checkedCalls.Load() != applies || rollback.calls != 1 || rollback.request != request || rollback.journal != journal || rollback.unsent == nil || rollback.unsent.Enabled || rollback.unsent.Phase != "blocked" || rollback.unsent.Reason != "not-admitted" {
+						t.Fatal("failed rollback treated as clean or sent", result)
+					}
+				} else if !result.Submitted || result.Status != (agentclient.DeploymentStatus{}) || checkedCalls.Load() != applies+1 {
+					t.Fatal("apply error lost or invented receipt", result)
+				}
+				_ = restarted.RunGitDeployment(ctx, "synthetic", binding, request, func() bool { t.Fatal("uncertain work redispatched"); return true })
+				wantApplies := applies
+				if !failRollback {
+					wantApplies++
+				}
+				if checkedCalls.Load() != wantApplies {
+					t.Fatal("pending checked apply replayed")
+				}
+				// Incoming grants cannot execute or reconcile a pending owner.
+				// Ordinary polling has separate, read-only recovery authority.
+				statusReads := checkedStatusCalls.Load()
+				restarted.pollGitStack(ctx, "synthetic")
+				stillPending := readPolicy()
+				if checkedStatusCalls.Load() != statusReads+1 || checkedCalls.Load() != wantApplies || stillPending.Request != request || stillPending.Journal != journal || stillPending.Phase != "pending" || stillPending.Reason != "status-unavailable" {
+					t.Fatal("pending request was not read-only and retained after unavailable status")
+				}
+			})
 		}
 	})
 }

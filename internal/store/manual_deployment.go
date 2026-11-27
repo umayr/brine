@@ -44,9 +44,11 @@ func (i ManualDeploymentIntent) valid() bool {
 		return false
 	}
 	switch i.Mode {
-	case "create", "update":
+	case "create":
 		return i.PriorRequest == "" && remoteGitHex(i.Stage, 16) && remoteGitHex(i.Manifest, 32)
-	case "remove":
+	case "update":
+		return (i.PriorRequest == "" || (remoteGitHex(i.PriorRequest, 16) && i.PriorRequest != i.Request)) && remoteGitHex(i.Stage, 16) && remoteGitHex(i.Manifest, 32)
+	case "remove", "start", "stop", "restart":
 		return remoteGitHex(i.PriorRequest, 16) && i.PriorRequest != i.Request && i.Stage == "" && i.Manifest == ""
 	}
 	return false
@@ -222,15 +224,34 @@ func (s *FSStore) SaveManualIntent(i ManualDeploymentIntent) error {
 		return ErrManualIntent
 	}
 	return s.manualTransaction(func(rows *[]ManualDeploymentIntent) error {
-		if len(*rows) >= maxManualIntents {
-			return ErrManualIntent
-		}
 		for _, r := range *rows {
 			if r.Request == i.Request || (!r.Resolved && r.Stack == i.Stack) {
 				return ErrManualIntent
 			}
 		}
-		*rows = append(*rows, i)
+		// Lifecycle replay evidence belongs to Dill and the incoming journal.
+		// Bound only resolved lifecycle recovery rows; never evict unresolved or
+		// existing manual deployment evidence, and check conflicts before pruning.
+		retained := make([]ManualDeploymentIntent, 0, len(*rows))
+		count := 0
+		for j := len(*rows) - 1; j >= 0; j-- {
+			r := (*rows)[j]
+			life := r.Mode == "start" || r.Mode == "stop" || r.Mode == "restart"
+			if r.Resolved && life {
+				count++
+				if count > 128 {
+					continue
+				}
+			}
+			retained = append(retained, r)
+		}
+		for a, b := 0, len(retained)-1; a < b; a, b = a+1, b-1 {
+			retained[a], retained[b] = retained[b], retained[a]
+		}
+		if len(retained) >= maxManualIntents {
+			return ErrManualIntent
+		}
+		*rows = append(retained, i)
 		return nil
 	}, true)
 }

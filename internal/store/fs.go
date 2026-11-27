@@ -16,8 +16,10 @@ import (
 //
 //	{dataDir}/stacks/{name}/meta.json
 type FSStore struct {
-	dataDir string
-	mu      sync.RWMutex
+	dataDir          string
+	mu               sync.RWMutex
+	metadataObserver MetadataObserver
+	metadataSync     func(int) error // test-only directory sync fault injection
 }
 
 // NewFSStore creates an FSStore rooted at dataDir, creating the stacks
@@ -116,7 +118,15 @@ func (s *FSStore) readMeta(name string) (*Stack, error) {
 	return &stack, nil
 }
 
-func (s *FSStore) writeMeta(stack *Stack) error {
+func (s *FSStore) writeMeta(stack *Stack) (resultErr error) {
+	commit, e := s.prepareMetadata(stack, "write", stack.Name)
+	if e != nil {
+		return e
+	}
+	defer func() { commit.Done(resultErr) }()
+	return s.writeMetaRaw(stack)
+}
+func (s *FSStore) writeMetaRaw(stack *Stack) error {
 	data, err := json.MarshalIndent(stack, "", "  ")
 	if err != nil {
 		return err
@@ -126,7 +136,10 @@ func (s *FSStore) writeMeta(stack *Stack) error {
 		return err
 	}
 	defer unix.Close(fd)
-	return writeWorkspaceMetadata(fd, data)
+	if err = writeWorkspaceMetadata(fd, data); err != nil {
+		return err
+	}
+	return s.syncInventory()
 }
 
 func (s *FSStore) List() ([]*Stack, error) {
@@ -169,7 +182,7 @@ func (s *FSStore) Get(name string) (*Stack, error) {
 	return stack, nil
 }
 
-func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
+func (s *FSStore) Create(name, pklContent string) (result *Stack, resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.sourceInterrupted(name); err != nil {
@@ -179,6 +192,13 @@ func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
 	if _, err := os.Stat(dir); err == nil {
 		return nil, fmt.Errorf("stack %q already exists", name)
 	}
+	now := time.Now()
+	stack := &Stack{Name: name, CreatedAt: now, UpdatedAt: now, PklPath: s.pklPath(name), Entrypoint: "compose.pkl"}
+	commit, e := s.prepareMetadata(stack, "write", name)
+	if e != nil {
+		return nil, e
+	}
+	defer func() { commit.Done(resultErr) }()
 	if err := mkdirPrivate(dir); err != nil {
 		return nil, fmt.Errorf("create stack dir: %w", err)
 	}
@@ -186,22 +206,14 @@ func (s *FSStore) Create(name, pklContent string) (*Stack, error) {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("write pkl: %w", err)
 	}
-	now := time.Now()
-	stack := &Stack{
-		Name:       name,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		PklPath:    s.pklPath(name),
-		Entrypoint: "compose.pkl",
-	}
-	if err := s.writeMeta(stack); err != nil {
+	if err := s.writeMetaRaw(stack); err != nil {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("write meta: %w", err)
 	}
 	return stack, nil
 }
 
-func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
+func (s *FSStore) Update(name, pklContent string) (result *Stack, resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
@@ -220,11 +232,16 @@ func (s *FSStore) Update(name, pklContent string) (*Stack, error) {
 		return nil, fmt.Errorf("unsafe workspace")
 	}
 	defer unix.Close(fd)
+	stack.UpdatedAt = time.Now()
+	commit, e := s.prepareMetadata(stack, "write", name)
+	if e != nil {
+		return nil, e
+	}
+	defer func() { commit.Done(resultErr) }()
 	if err := writeWorkspaceFile(fd, ep, []byte(pklContent)); err != nil {
 		return nil, fmt.Errorf("write pkl: %w", err)
 	}
-	stack.UpdatedAt = time.Now()
-	if err := s.writeMeta(stack); err != nil {
+	if err := s.writeMetaRaw(stack); err != nil {
 		return nil, fmt.Errorf("write meta: %w", err)
 	}
 	return stack, nil
@@ -243,7 +260,16 @@ func (s *FSStore) Delete(name string) error {
 	if stack.protectsRemoteGit() {
 		return ErrRemoteGit
 	}
-	return os.RemoveAll(s.stackDir(name))
+	commit, e := s.prepareMetadata(nil, "delete", name)
+	if e != nil {
+		return e
+	}
+	err = os.RemoveAll(s.stackDir(name))
+	if err == nil {
+		err = s.syncInventory()
+	}
+	commit.Done(err)
+	return err
 }
 
 func (s *FSStore) ReadPkl(name string) (string, error) {
@@ -334,7 +360,7 @@ func (s *FSStore) ReadFile(name, filename string) (string, error) {
 }
 
 // WriteFile creates or overwrites a .pkl file within a stack.
-func (s *FSStore) WriteFile(name, filename, content string) error {
+func (s *FSStore) WriteFile(name, filename, content string) (resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
@@ -355,15 +381,20 @@ func (s *FSStore) WriteFile(name, filename, content string) error {
 		return fmt.Errorf("unsafe workspace")
 	}
 	defer unix.Close(fd)
+	stack.UpdatedAt = time.Now()
+	commit, e := s.prepareMetadata(stack, "write", name)
+	if e != nil {
+		return e
+	}
+	defer func() { commit.Done(resultErr) }()
 	if err := writeWorkspaceFile(fd, filename, []byte(content)); err != nil {
 		return fmt.Errorf("write file %q: %w", filename, err)
 	}
-	stack.UpdatedAt = time.Now()
-	return s.writeMeta(stack)
+	return s.writeMetaRaw(stack)
 }
 
 // DeleteFile removes a .pkl file from a stack. Returns an error if it is the entrypoint or read-only.
-func (s *FSStore) DeleteFile(name, filename string) error {
+func (s *FSStore) DeleteFile(name, filename string) (resultErr error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ValidateStackName(name); err != nil {
@@ -392,11 +423,16 @@ func (s *FSStore) DeleteFile(name, filename string) error {
 		return err
 	}
 	f.Close()
+	stack.UpdatedAt = time.Now()
+	commit, e := s.prepareMetadata(stack, "write", name)
+	if e != nil {
+		return e
+	}
+	defer func() { commit.Done(resultErr) }()
 	if err := unix.Unlinkat(fd, filename, 0); err != nil {
 		return err
 	}
-	stack.UpdatedAt = time.Now()
-	return s.writeMeta(stack)
+	return s.writeMetaRaw(stack)
 }
 
 // SetEntrypoint changes the entrypoint file for a stack.

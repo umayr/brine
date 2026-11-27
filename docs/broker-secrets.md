@@ -1,6 +1,6 @@
 # Central broker integration
 
-Brine bundles Dill v0.12.0 and Pkl 0.31.1. Broker execution requires explicit operator provisioning. See [operator policy](broker-operator-policy.md) and [runtime qualification](broker-runtime-qualification.md) for setup and scoped evidence.
+Brine bundles Dill v0.13.0 and Pkl 0.31.1. Broker execution requires explicit operator provisioning. See [operator policy](broker-operator-policy.md) and [runtime qualification](broker-runtime-qualification.md) for setup and scoped evidence.
 
 ## Operator workflow
 

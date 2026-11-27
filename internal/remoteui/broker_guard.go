@@ -12,6 +12,20 @@ import (
 func (h *Deployment) SetLegacyGuard(fn func(context.Context, string, func()) error) {
 	h.legacyGuard = fn
 }
+
+// automationUnprotected holds the broker's existing admission lock for the
+// complete callback. Callers that execute must acquire gitAdmission first,
+// matching ordinary Git polling. Recovery/status reads do not use this guard.
+func automationUnprotected[T any](h *Deployment, ctx context.Context, stack string, fn func() (T, error)) (out T, err error) {
+	if h.legacyGuard == nil {
+		return fn()
+	}
+	guardErr := h.legacyGuard(ctx, stack, func() { out, err = fn() })
+	if guardErr != nil {
+		return out, ErrAutomationAdmission
+	}
+	return
+}
 func (h *Deployment) guardOrdinary(w http.ResponseWriter, r *http.Request, ctx context.Context, session string, fn func(http.ResponseWriter)) bool {
 	if h.legacyGuard == nil || r.Method != http.MethodPost {
 		return false

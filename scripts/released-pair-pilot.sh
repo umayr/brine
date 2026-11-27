@@ -16,6 +16,10 @@ fi
 root=$(mktemp -d "$HOME/brine-released-pair.XXXXXX")
 volume=${root##*/}
 export PILOT_RESOURCE_PREFIX="brine-pilot-$(openssl rand -hex 6)"
+volume_created=false
+if d volume inspect "$volume" >/dev/null 2>&1; then
+  echo 'Refusing conflicting pilot data volume' >&2; exit 1
+fi
 pilot_names=("$PILOT_RESOURCE_PREFIX-manual" "$PILOT_RESOURCE_PREFIX-pause" "$PILOT_RESOURCE_PREFIX-witness")
 for name in "${pilot_names[@]}"; do
   if d network inspect "$name" >/dev/null 2>&1 || d volume inspect "$name" >/dev/null 2>&1; then
@@ -30,34 +34,44 @@ cleanup() {
     while IFS= read -r id; do [[ -z $id ]] || d rm -fv "$id" >/dev/null 2>&1 || true; done < <(d ps -aq --filter "label=dill.stack=$name")
     d network rm "$name" >/dev/null 2>&1 || true
   done
-  d volume rm "$volume" >/dev/null 2>&1 || true
+  if [[ $volume_created == true && $(d volume inspect --format '{{index .Labels "brine.pilot"}}' "$volume" 2>/dev/null) == "$PILOT_RESOURCE_PREFIX" ]]; then
+    d volume rm "$volume" >/dev/null 2>&1 || true
+  fi
+  if [[ ${PILOT_CANDIDATE:-} == true && -d $root/custody ]]; then sudo rm -rf -- "$root/custody"; fi
   rm -rf -- "$root"
 }
 trap cleanup EXIT
 image=ghcr.io/umayr/brine@sha256:72ac691e8998c18a91b98c6a95f50bd8bf676109529593e6356de34e5430c5aa
 dill_sha=e27c4e6597f5b8fd12518a82d2f3e59d87ca59625f43bbdda6cc47fa85943cc0
 pkl_sha=618f13955d755cafbfe8c9cba1d27635848cd49dbc6abffd398d2751db1231bf
-curl -fsSL --retry 3 https://github.com/umayr/dill/releases/download/v0.8.1/dill-linux-amd64 -o "$root/dill"
+agent_version=0.8.1
+schema_sha=47a8dbdc127e947238308cb7a863122e6de128ee6d2e893c677d3117f36f0948
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  agent_version=0.13.0
+  dill_sha=2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525
+  schema_sha=2f2c1c622b9aa7f386c7d401bd912abe289a68554e1974da1bde0b6cceb6b413
+fi
+curl -fsSL --retry 3 "https://github.com/umayr/dill/releases/download/v${agent_version}/dill-linux-amd64" -o "$root/dill"
 curl -fsSL --retry 3 https://github.com/apple/pkl/releases/download/0.31.1/pkl-linux-amd64 -o "$root/pkl"
 printf '%s  %s\n%s  %s\n' "$dill_sha" "$root/dill" "$pkl_sha" "$root/pkl" | sha256sum --check
 # Use the checked release schema locally: an unavailable public package
 # registry must not mask the remote agent compatibility test.
-curl -fsSL --retry 3 'https://github.com/umayr/dill/releases/download/v0.8.1/dill%400.8.1.zip' -o "$root/schema.zip"
-printf '%s  %s\n' 47a8dbdc127e947238308cb7a863122e6de128ee6d2e893c677d3117f36f0948 "$root/schema.zip" | sha256sum --check
+curl -fsSL --retry 3 "https://github.com/umayr/dill/releases/download/v${agent_version}/dill%40${agent_version}.zip" -o "$root/schema.zip"
+printf '%s  %s\n' "$schema_sha" "$root/schema.zip" | sha256sum --check
 export PILOT_SCHEMA="$root/dill.pkl"
 unzip -p "$root/schema.zip" dill.pkl > "$PILOT_SCHEMA"
 test -s "$PILOT_SCHEMA"
 chmod 700 "$root/dill" "$root/pkl"
-[[ $("$root/dill" version) == v0.8.1 ]]
-# Keep the remote agent and historical image on the qualified v0.8.1 pair.
-# The candidate must test its actual bundled local CLI, not override the pin.
+[[ $("$root/dill" version) == "v$agent_version" ]]
+# Historical image retains its original pair. Candidate uses its real released
+# pair and separately provisioned deployment custody; no monitor fallback.
 echo "Brine fixture image: $image; remote Dill agent sha256:$dill_sha"
-bundled_version=0.8.1
+bundled_version=$agent_version
 bundled_sha=$dill_sha
 if [[ ${PILOT_CANDIDATE:-} == true ]]; then
   image=brine-hardening-candidate:local
-  bundled_version=0.12.0
-  bundled_sha=27e4298ccb60609f4405fbcdf387617617c2e4dcd74119191f86062cf791c126
+  bundled_version=0.13.0
+  bundled_sha=2dd7fffeec2b7c3038632a1116c4ecd65a2345c99b639be3f36a03f47d252525
   grep -qx "ARG DILL_VERSION=$bundled_version" Dockerfile
   d build -t "$image" .
   echo "Candidate image: $(d image inspect --format '{{.Id}}' "$image"); source: $(git rev-parse HEAD)"
@@ -68,6 +82,8 @@ fi
 [[ $(d run --rm --entrypoint sha256sum "$image" /usr/local/bin/dill | awk '{print $1}') == "$bundled_sha" ]]
 d pull docker.io/library/alpine:3.22
 mkdir -m 700 "$root"/{stages,catalog,coordination,operations}
+d volume create --label "brine.pilot=$PILOT_RESOURCE_PREFIX" "$volume" >/dev/null
+volume_created=true
 d run --rm --entrypoint /bin/mkdir -v "$volume:/data" "$image" -m 0700 /data/remote
 d run --rm -v "$volume:/data" "$image" --init-remote-registry --remote-registry-dir /data/remote
 "$root/dill" agent init-https --dir "$root/agent"
@@ -100,6 +116,13 @@ agent=( "$root/dill" agent --https-dir "$root/agent" --https-listen "$PILOT_AGEN
         --daemon-id "$daemon_id" --https-staging-root "$root/stages"
         --https-staging-catalog "$root/catalog" --https-preview-state "$root/coordination"
         --https-preview-pkl "$root/pkl" --https-apply-state "$root/operations" )
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  openssl rand -base64 32 | tr -- '+/' '-_' | tr -d '=\n' > "$root/deploy-token"
+  agent+=( --https-deploy-token-file "$root/deploy-token" )
+  for grant in stage manifest preview journal journal-apply status fence remove-preview remove; do
+    agent+=( --https-deploy-grant "$grant" )
+  done
+fi
 echo 'Exporting pairing for the disposable native Dill agent'
 "${agent[@]}" --print-https-pairing > "$PILOT_PAIRING"
 "${agent[@]}" > "$root/agent.log" 2>&1 &
@@ -113,6 +136,37 @@ for _ in {1..30}; do
   sleep 1
 done
 curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null
+if [[ ${PILOT_CANDIDATE:-} == true ]]; then
+  # Enroll through the real browser before deriving the exact non-secret
+  # enrollment/custody ceiling. No fabricated cookie or mutable live index.
+  node scripts/released-pair-pilot.cjs --pair-only
+  d stop "$(< "$root/container-id")" >/dev/null
+  d rm "$(< "$root/container-id")" >/dev/null
+  rm "$root/container-id"
+  d run --rm -v "$volume:/data" "$image" --remote-registry-dir /data/remote \
+    --remote-deploy-binding released-pilot > "$root/binding.json"
+  mkdir -m 700 "$root/custody"
+  cp "$root/deploy-token" "$root/custody/deploy-token"
+  node - "$root/binding.json" "$root/custody/index.json" <<'NODE'
+const fs=require('node:fs');
+const binding=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+if(binding.target_id!=='released-pilot'||!binding.binding||!binding.enrollment)throw Error('Missing enrolled custody binding');
+fs.writeFileSync(process.argv[3],JSON.stringify({version:1,targets:{[binding.target_id]:{binding:binding.binding,enrollment:binding.enrollment,token_file:'/custody/deploy-token'}}}),{mode:0o600});
+NODE
+  # Container CLI runs as root; its externally mounted custody has that owner.
+  # The native runner's separate token copy remains private to the runner UID.
+  sudo chown -R root:root "$root/custody"
+  d run --detach --network host --cidfile "$root/container-id" -v "$volume:/data" \
+    -v /var/run/docker.sock:/var/run/docker.sock -v "$root/custody:/custody:ro" \
+    -e BRINE_AUTH_PASSWORD -e BRINE_API_TOKEN "$image" \
+    --bind 127.0.0.1 --port 17642 --remote-enabled --remote-timeout 20s \
+    --remote-registry-dir /data/remote --remote-deploy-credentials /custody/index.json >/dev/null
+  for _ in {1..30}; do
+    if curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null 2>&1; then break; fi
+    sleep 1
+  done
+  curl -fsS "$PILOT_BRINE_URL/api/health" >/dev/null
+fi
 node scripts/released-pair-pilot.cjs
 kill "$agent_pid"
 wait "$agent_pid" || [[ $? == 143 ]]

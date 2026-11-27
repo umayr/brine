@@ -169,6 +169,7 @@ type Client struct {
 	http         *http.Client
 	baseURL      string
 	bearer       string
+	deployBearer string
 	requestGate  func(*http.Request) bool // immutable after construction; nil for existing clients
 	mu           sync.Mutex
 	sessionMu    sync.Mutex
@@ -223,7 +224,16 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 		return nil, ErrProtocol
 	}
 	if c.bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+c.bearer)
+		credential := c.bearer
+		if requiresDeploymentCredential(req) {
+			if (c.deployBearer == "" && c.requestGate == nil) || !deploymentRoute(req) {
+				return nil, ErrProtocol
+			}
+			if c.deployBearer != "" {
+				credential = c.deployBearer
+			}
+		}
+		req.Header.Set("Authorization", "Bearer "+credential)
 	}
 	return c.http.Do(req)
 }

@@ -37,18 +37,26 @@ type Config struct {
 	Dev                  bool   // hot-reload templates in dev mode
 
 	// Remote read-only access is opt-in; paths must be operator-controlled.
-	RemoteEnabled        bool
-	RemoteRegistryDir    string
-	RemoteForwardDir     string
-	RemoteTimeout        time.Duration
-	RemoteRevealEnabled  bool
-	RemoteRevealSeedPath string
-	RemoteRevealAuditDir string
+	RemoteEnabled           bool
+	RemoteRegistryDir       string
+	RemoteDeployCredentials string
+	RemoteForwardDir        string
+	RemoteTimeout           time.Duration
+	RemoteRevealEnabled     bool
+	RemoteRevealSeedPath    string
+	RemoteRevealAuditDir    string
 
 	// Restart-only metrics history settings. These are not write authorization.
 	MetricsHistoryEnabled  bool
 	MetricsHistoryDir      string
 	MetricsHistoryMaxPages int
+
+	WebhooksEnabled           bool
+	WebhooksDir               string
+	WebhooksKeyFile           string
+	WebhooksAllowPrivateCIDRs []string
+	WebhooksMaxPending        int
+	WebhooksRetention         time.Duration
 
 	// Authentication. Password/APIToken may be empty, in which case
 	// credentials are loaded from {DataDir}/credentials.json or generated.
@@ -85,6 +93,9 @@ func Default() *Config {
 
 // Validate rejects ambiguous binds and prevents unauthenticated non-loopback serving.
 func (c *Config) Validate() error {
+	if err := c.validateWebhooks(); err != nil {
+		return err
+	}
 	if c.BrokerPolicy != "" && (c.NoAuth || !filepath.IsAbs(c.BrokerPolicy) || filepath.Clean(c.BrokerPolicy) != c.BrokerPolicy) {
 		return fmt.Errorf("central secret broker requires authentication and an absolute private operator policy")
 	}
@@ -112,12 +123,15 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("remote reveal settings require explicit enablement")
 	}
 	if !c.RemoteEnabled {
-		if c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 {
+		if c.RemoteRegistryDir != "" || c.RemoteForwardDir != "" || c.RemoteTimeout != 0 || c.RemoteDeployCredentials != "" {
 			return fmt.Errorf("remote settings require explicit enablement")
 		}
 	} else {
 		validPath := func(p string) bool {
 			return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")
+		}
+		if c.RemoteDeployCredentials != "" && !validPath(c.RemoteDeployCredentials) {
+			return fmt.Errorf("remote deployment credential index must be an absolute path")
 		}
 		if c.NoAuth || !validPath(c.RemoteRegistryDir) || c.RemoteTimeout <= 0 {
 			return fmt.Errorf("remote access requires authentication, an absolute private registry and a positive timeout")

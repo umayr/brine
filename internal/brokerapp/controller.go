@@ -35,6 +35,7 @@ type PlanReview struct {
 	Native                   *dill.BrokerReview
 }
 type Controller struct {
+	observer ExecutionObserver
 	service  *Service
 	guard    Guard
 	mu       sync.Mutex
@@ -104,6 +105,24 @@ func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity,
 	c.reserved++
 	c.mu.Unlock()
 	defer func() { c.mu.Lock(); c.reserved--; c.mu.Unlock() }()
+	observation, err := c.observe(ctx, c.executionMetadata(i, "plan", ""))
+	if err != nil {
+		return PlanReview{}, ErrUnavailable
+	}
+	planAccepted := false
+	if observation != nil {
+		if observation.Started() != nil {
+			observation.Finished(Outcome{}, ErrUnavailable, false)
+			return PlanReview{}, ErrUnavailable
+		}
+		defer func() {
+			var resultErr error = ErrUnavailable
+			if planAccepted {
+				resultErr = nil
+			}
+			observation.Finished(Outcome{}, resultErr, true)
+		}()
+	}
 	info, err := target.Info(ctx)
 	if err != nil || !brokerwire.ValidHandle(info.Journal) || info.TargetDigest != i.TargetDigest {
 		return PlanReview{}, ErrUnavailable
@@ -180,6 +199,7 @@ func (c *Controller) Prepare(ctx context.Context, i secretbroker.ReviewIdentity,
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pending[review.ID] = copyReview(review)
+	planAccepted = true
 	return copyReview(review), nil
 }
 func randomID() (string, error) {
@@ -220,15 +240,27 @@ func (c *Controller) Submit(ctx context.Context, id string, i secretbroker.Revie
 		return record, err
 	}
 	intent := secretbroker.DeploymentIntent{ID: request, Identity: i, Reference: review.Reference, StageID: review.StageID, JournalID: review.JournalID, SelectionDigest: *review.Native.Preflight.SelectionDigest, Mode: review.Mode, Revisions: review.Revisions, Retirement: review.Retirement}
+	observation, err := c.observe(ctx, c.executionMetadata(i, "deploy", request))
+	if err != nil {
+		return record, ErrUnavailable
+	}
+	sent := false
+	var observed Outcome
+	observationErr := ErrUnavailable
+	if observation != nil {
+		defer func() { observation.Finished(observed, observationErr, sent) }()
+	}
 	if err := c.service.State.BeginDeployment(intent); err != nil {
 		return record, ErrUnavailable
 	}
 	record.Intent = intent
 	record.At = c.now()
-	sent := false
 	var outcome Outcome
 	var sendErr error
 	err = c.service.Manager.WithCurrent(ctx, i, func() error {
+		if observation != nil && observation.Started() != nil {
+			return ErrUnavailable
+		}
 		sent = true
 		outcome, sendErr = target.Apply(ctx, review.JournalID, review.StageID, request, intent.SelectionDigest, review.Mode, review.Reference)
 		return nil
@@ -237,10 +269,15 @@ func (c *Controller) Submit(ctx context.Context, id string, i secretbroker.Revie
 	if !sent {
 		event.State = "not-admitted"
 		event.Effects = "none"
-	} else if err == nil && sendErr == nil && outcome.RequestID == request && outcome.Stack == i.Scope.StackName {
+	} else if sendErr == nil && outcome.RequestID == request && outcome.Stack == i.Scope.StackName {
 		candidate := secretbroker.DeploymentEvent{Sequence: 1, State: outcome.State, Effects: outcome.Effects, OperationID: outcome.OperationID}
 		if candidate.Valid() && candidate.State != "pending" && candidate.State != "not-admitted" {
-			event = candidate
+			// The pinned local transaction can fail after a valid target reply.
+			// Retain its recovery fence, but never downgrade that reported fact.
+			if err == nil {
+				event = candidate
+			}
+			observed, observationErr = outcome, nil
 		}
 	}
 	if c.service.State.AppendDeploymentEvent(i.Scope, request, 0, event) != nil {

@@ -219,6 +219,7 @@ func (r Record) Verify(i Identity) error {
 
 type disk struct {
 	Version             int               `json:"version"`
+	EventHead           string            `json:"event_head,omitempty"`
 	Targets             []Record          `json:"targets"`
 	HistoryIncarnations map[string]string `json:"history_incarnations,omitempty"`
 }
@@ -226,12 +227,15 @@ type disk struct {
 // Registry uses an operator-chosen private directory. All cooperating processes
 // must use this API and the same canonical directory.
 type Registry struct {
-	dir           string
-	strict        bool
-	lockIdentity  os.FileInfo
-	beforePublish func()               // test-only synchronization hook
-	closeFile     func(*os.File) error // test-only fault injection
-	onLockWait    func()               // test-only lock contention signal
+	dir            string
+	observerMu     sync.RWMutex
+	commitObserver CommitObserver
+	syncDirectory  func() error // test-only sync fault injection
+	strict         bool
+	lockIdentity   os.FileInfo
+	beforePublish  func()               // test-only synchronization hook
+	closeFile      func(*os.File) error // test-only fault injection
+	onLockWait     func()               // test-only lock contention signal
 }
 
 func Open(dir string) (*Registry, error) {
@@ -434,7 +438,7 @@ func (r *Registry) load() (disk, error) {
 	if dec.Decode(new(any)) != io.EOF {
 		return d, errors.New("trailing registry data")
 	}
-	if d.Version != 2 || d.Targets == nil {
+	if d.Version != 2 || d.Targets == nil || (d.EventHead != "" && !token.MatchString(d.EventHead)) {
 		return d, errors.New("invalid registry version or targets")
 	}
 	canonical, err := json.MarshalIndent(d, "", "  ")
@@ -477,7 +481,7 @@ func rejectDuplicateKeys(b []byte) error {
 					return err
 				}
 				s, ok := k.(string)
-				allowed := kind == "envelope" && (s == "version" || s == "targets" || s == "history_incarnations") || kind == "incarnations" && token.MatchString(s) || kind == "record" && (s == "https_address" || s == "https_pairing" || s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
+				allowed := kind == "envelope" && (s == "version" || s == "event_head" || s == "targets" || s == "history_incarnations") || kind == "incarnations" && token.MatchString(s) || kind == "record" && (s == "https_address" || s == "https_pairing" || s == "id" || s == "revision" || s == "host" || s == "port" || s == "user" || s == "key_path" || s == "host_public_key" || s == "host_key_sha256" || s == "agent_installation_id" || s == "engine_id" || s == "remote_socket" || s == "agent_public_key" || s == "agent_fingerprint" || s == "engine_kind" || s == "engine_socket" || s == "daemon_id" || s == "generation" || s == "reveal_key_fingerprint")
 				if !ok || !allowed || seen[s] {
 					return errors.New("noncanonical, unknown or duplicate JSON key")
 				}
@@ -510,10 +514,15 @@ func rejectDuplicateKeys(b []byte) error {
 	}
 	return walk("envelope")
 }
-func (r *Registry) save(ctx context.Context, d disk) error {
+func (r *Registry) save(ctx context.Context, d disk) (resultErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	receipt, observeErr := r.prepareCommit(ctx, &d)
+	if observeErr != nil {
+		return observeErr
+	}
+	defer func() { receipt.Done(resultErr) }()
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
 		return err
@@ -564,12 +573,7 @@ func (r *Registry) save(ctx context.Context, d disk) error {
 	if err = os.Rename(name, filepath.Join(r.dir, "targets.json")); err != nil {
 		return err
 	}
-	dir, err := os.Open(r.dir)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	if err := dir.Sync(); err != nil {
+	if err := r.syncCommitDirectory(); err != nil {
 		return err
 	}
 	// The rename may already have committed even if the context has expired.

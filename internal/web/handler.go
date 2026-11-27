@@ -13,28 +13,32 @@ import (
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/projectreview"
 	"github.com/umayr/brine/internal/store"
+	"github.com/umayr/brine/internal/webhooks"
 )
 
 // Handler holds shared dependencies for all web handlers.
 type Handler struct {
-	agent            agent.Agent
-	store            store.StackStore
-	recipes          store.RecipeStore
-	git              *git.Runner
-	auth             *auth.Authenticator
-	dev              bool // read templates and static files from the source tree
-	devFS            fs.FS
-	engine           string
-	deployTimeout    time.Duration
-	stagingConfig    *config.Config
-	stagingStore     *projectreview.Store
-	stagingAdmission chan struct{}
-	stagingLifecycle *stagingLifecycle
-	remoteEnabled    bool
-	sourceHistory    *sourceHistoryAccess
-	broker           *brokerapp.Service
-	brokerController *brokerapp.Controller
-	brokerTargets    brokerTargetOpener
+	agent             agent.Agent
+	store             store.StackStore
+	recipes           store.RecipeStore
+	git               *git.Runner
+	auth              *auth.Authenticator
+	dev               bool // read templates and static files from the source tree
+	devFS             fs.FS
+	engine            string
+	deployTimeout     time.Duration
+	stagingConfig     *config.Config
+	stagingStore      *projectreview.Store
+	stagingAdmission  chan struct{}
+	stagingLifecycle  *stagingLifecycle
+	remoteEnabled     bool
+	sourceHistory     *sourceHistoryAccess
+	webhooks          *webhooks.Service
+	webhookDispatcher webhooks.TriggerDispatcher
+	broker            *brokerapp.Service
+	brokerController  *brokerapp.Controller
+	brokerTargets     brokerTargetOpener
+	brokerObserver    brokerapp.ExecutionObserver
 
 	mu sync.RWMutex
 	ts *templateSet // cached template set (nil in dev mode)
@@ -60,6 +64,17 @@ func (h *Handler) EnableBroker(service *brokerapp.Service) {
 	h.broker = service
 	if service.Enabled() {
 		h.brokerController, _ = brokerapp.NewController(service, h.brokerGuard)
+		if h.brokerController != nil {
+			h.brokerController.SetExecutionObserver(h.brokerObserver)
+		}
+	}
+}
+
+// SetBrokerExecutionObserver is startup-only and preserves initialization order.
+func (h *Handler) SetBrokerExecutionObserver(observer brokerapp.ExecutionObserver) {
+	h.brokerObserver = observer
+	if h.brokerController != nil {
+		h.brokerController.SetExecutionObserver(observer)
 	}
 }
 

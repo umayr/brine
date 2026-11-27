@@ -97,10 +97,25 @@ func ParsePairing(input []byte) (*Pairing, error) {
 // its session epoch. It makes no persistence or enrollment decision.
 // The caller owns the client.
 func (p *Pairing) Open(lifetime, request context.Context, address string) (*Client, string, error) {
+	return p.open(lifetime, request, address, "")
+}
+func (p *Pairing) OpenDeployment(lifetime, request context.Context, address, credential string) (*Client, string, error) {
+	if p == nil || !validDeployCredential(p.token, credential) {
+		return nil, "", ErrProtocol
+	}
+	return p.open(lifetime, request, address, credential)
+}
+func (p *Pairing) open(lifetime, request context.Context, address, deploy string) (*Client, string, error) {
 	if p == nil || request == nil {
 		return nil, "", ErrProtocol
 	}
-	c, err := NewHTTPS(lifetime, address, p.pin, p.token, p.binding)
+	var c *Client
+	var err error
+	if deploy == "" {
+		c, err = NewHTTPS(lifetime, address, p.pin, p.token, p.binding)
+	} else {
+		c, err = NewHTTPSWithDeploymentCredential(lifetime, address, p.pin, p.token, deploy, p.binding)
+	}
 	if err != nil {
 		return nil, "", ErrProtocol
 	}

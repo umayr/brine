@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/umayr/brine/internal/remoteui"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
@@ -79,11 +82,13 @@ func run() error {
 	flag.BoolVar(&cfg.Dev, "dev", false, "dev mode: serve templates and static files from the repository (run from repo root)")
 	flag.BoolVar(&cfg.RemoteEnabled, "remote-enabled", false, "enable authenticated remote read-only UI")
 	flag.StringVar(&cfg.RemoteRegistryDir, "remote-registry-dir", "", "absolute private remote registry directory")
+	flag.StringVar(&cfg.RemoteDeployCredentials, "remote-deploy-credentials", "", "absolute private external target-bound deployment credential index")
 	flag.StringVar(&cfg.RemoteForwardDir, "remote-forward-dir", "", "existing private directory for remote Unix socket forwards")
 	flag.DurationVar(&cfg.RemoteTimeout, "remote-timeout", 0, "explicit remote connection and transport timeout")
 	flag.BoolVar(&cfg.RemoteRevealEnabled, "remote-reveal-enabled", false, "enable audited remote reveal (requires provisioned seed and initialized audit)")
 	flag.StringVar(&cfg.RemoteRevealSeedPath, "remote-reveal-seed-path", "", "absolute path to operator-provisioned reveal signing seed")
 	flag.StringVar(&cfg.RemoteRevealAuditDir, "remote-reveal-audit-dir", "", "absolute path to pre-initialized private reveal audit directory")
+	remoteDeployBinding := flag.String("remote-deploy-binding", "", "print non-secret deployment custody bindings for an existing HTTPS target and exit")
 	initRemoteRegistry := flag.Bool("init-remote-registry", false, "initialize a new remote registry in the existing private directory and exit")
 	flag.StringVar(&cfg.SourceHistoryDir, "source-history-dir", "", "pre-initialized private source-revision archive outside Brine data (opt-in)")
 	flag.StringVar(&cfg.SourceHistoryKey, "source-history-key", "", "separately provisioned private 32-byte source archive key file")
@@ -91,6 +96,16 @@ func run() error {
 	flag.Int64Var(&cfg.SourceHistoryLimits.Bytes, "source-history-max-bytes", 0, fmt.Sprintf("maximum logical sealed source archive bytes (0: %d MiB, maximum %d MiB)", snapshothistory.DefaultSourceArchiveBytes>>20, snapshothistory.MaxSourceArchiveBytes>>20))
 	initSourceHistory := flag.Bool("init-source-history", false, "initialize an empty, externally provisioned source archive and exit; never generate keys")
 	registerMetricsHistoryFlags(flag.CommandLine, cfg)
+	initWebhooks := flag.Bool("init-webhooks", false, "initialize new webhook state using a pre-provisioned external key, then exit; never repair missing state")
+	flag.BoolVar(&cfg.WebhooksEnabled, "webhooks-enabled", false, "enable authenticated webhook management and signed event delivery")
+	flag.StringVar(&cfg.WebhooksDir, "webhooks-dir", "", "absolute private directory for durable webhook state")
+	flag.StringVar(&cfg.WebhooksKeyFile, "webhooks-key-file", "", "separately provisioned private file containing exactly 32 raw key bytes, outside Brine data")
+	flag.IntVar(&cfg.WebhooksMaxPending, "webhooks-max-pending", 0, "maximum pending webhook deliveries (0: 10000, maximum 100000)")
+	flag.DurationVar(&cfg.WebhooksRetention, "webhooks-retention", 0, "webhook event/delivery retention (0: 168h; range 24h–2160h)")
+	flag.Func("webhooks-allow-private-cidr", "explicit private receiver subnet; repeatable; metadata, loopback and link-local remain forbidden", func(value string) error {
+		cfg.WebhooksAllowPrivateCIDRs = append(cfg.WebhooksAllowPrivateCIDRs, value)
+		return nil
+	})
 
 	flag.StringVar(&cfg.AuthUser, "auth-user", cfg.AuthUser, "admin username (default: stored or admin)")
 	flag.StringVar(&cfg.AuthPassword, "auth-password", cfg.AuthPassword, "admin password (default: generated and persisted)")
@@ -110,6 +125,12 @@ func run() error {
 		return nil
 	}
 
+	if *initWebhooks {
+		if err := normalizeDataDir(cfg); err != nil {
+			return err
+		}
+		return server.InitializeWebhooks(cfg)
+	}
 	if *initBrokerState {
 		if normalizeDataDir(cfg) != nil {
 			return brokerapp.ErrUnavailable
@@ -135,6 +156,19 @@ func run() error {
 		return err
 	}
 
+	if *remoteDeployBinding != "" {
+		registry, e := targetregistry.OpenExisting(cfg.RemoteRegistryDir)
+		if e != nil {
+			return fmt.Errorf("remote registry unavailable")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		binding, e := remoteui.DeploymentBindingMetadata(ctx, registry, *remoteDeployBinding)
+		if e != nil {
+			return fmt.Errorf("deployment custody binding unavailable")
+		}
+		return json.NewEncoder(os.Stdout).Encode(binding)
+	}
 	if *initRemoteRegistry {
 		// Initialization is an explicit local operation; it never starts the server.
 		if err := targetregistry.Init(cfg.RemoteRegistryDir); err != nil {

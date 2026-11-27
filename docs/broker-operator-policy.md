@@ -1,6 +1,6 @@
 # Central broker operator policy
 
-Brine bundles Dill v0.12.0 and Pkl 0.31.1. Broker execution is explicitly provisioned, not a fallback for ordinary or retired secret paths. See [runtime qualification](broker-runtime-qualification.md) for scoped evidence and limits.
+Brine bundles Dill v0.13.0 and Pkl 0.31.1. Broker execution is explicitly provisioned, not a fallback for ordinary or retired secret paths. See [runtime qualification](broker-runtime-qualification.md) for scoped evidence and limits.
 
 ## Provisioning and startup
 

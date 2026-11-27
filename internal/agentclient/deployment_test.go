@@ -86,6 +86,7 @@ func TestJournalDeploymentStatusRequiresMatchingEvidence(t *testing.T) {
 				fmt.Fprint(w, tc.body)
 			})
 			c.bearer = "synthetic"
+			c.deployBearer = "synthetic-deploy"
 			c.epochCtx = context.Background()
 			var got DeploymentStatus
 			var err error
@@ -120,6 +121,7 @@ func TestJournalDeploymentStatusTransportTimeout(t *testing.T) {
 		t.Error("timeout fixture unexpectedly contacted the test server")
 	})
 	c.bearer = "synthetic"
+	c.deployBearer = "synthetic-deploy"
 	c.epochCtx = context.Background()
 	calls := 0
 	// Inject the transport error directly so the check never depends on timers.
@@ -155,10 +157,15 @@ func TestHTTPSPreviewVerifiesReceiptTarget(t *testing.T) {
 	priv := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 	pub := priv.Public().(ed25519.PublicKey)
 	token := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 32))
+	deployToken := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{10}, 32))
 	var mismatch atomic.Bool
 	var calls atomic.Int32
 	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+token {
+		expected := token
+		if requiresDeploymentCredential(r) {
+			expected = deployToken
+		}
+		if r.Header.Get("Authorization") != "Bearer "+expected {
 			t.Error("missing credential")
 			w.WriteHeader(401)
 			return
@@ -195,7 +202,7 @@ func TestHTTPSPreviewVerifiesReceiptTarget(t *testing.T) {
 	defer s.Close()
 	pin := sha256.Sum256(s.Certificate().Raw)
 	ctx := context.Background()
-	client, err := NewHTTPS(ctx, strings.TrimPrefix(s.URL, "https://"), hex.EncodeToString(pin[:]), token, Binding{pub, fixtureEngine, 1, "docker", socket, "daemon"})
+	client, err := NewHTTPSWithDeploymentCredential(ctx, strings.TrimPrefix(s.URL, "https://"), hex.EncodeToString(pin[:]), token, deployToken, Binding{pub, fixtureEngine, 1, "docker", socket, "daemon"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,24 +33,27 @@ const deployPath = "/remote/deployment"
 var captureLimits = projectsnapshot.Limits{MaxFiles: 1000, MaxEntries: 2000, MaxDepth: 32, MaxFileBytes: 4 << 20, MaxTotalBytes: 16 << 20}
 
 type Deployment struct {
-	auth          *auth.Authenticator
-	registry      *targetregistry.Registry
-	stacks        store.StackStore
-	reviews       *projectreview.Store
-	slot          chan struct{}
-	mu            sync.Mutex
-	pending       map[string]deploymentReview
-	attendedBytes int
-	closed        bool
-	history       *attendedHistory // nil for every production constructor
-	git           *git.Runner
-	gitStore      store.RemoteGitStore
-	gitAdmission  deploymentAdmission
-	legacyGuard   func(context.Context, string, func()) error
+	observeExecution ExecutionObserver
+	auth             *auth.Authenticator
+	credentials      DeploymentCredentials
+	registry         *targetregistry.Registry
+	stacks           store.StackStore
+	reviews          *projectreview.Store
+	slot             chan struct{}
+	mu               sync.Mutex
+	pending          map[string]deploymentReview
+	attendedBytes    int
+	closed           bool
+	history          *attendedHistory // nil for every production constructor
+	git              *git.Runner
+	gitStore         store.RemoteGitStore
+	gitAdmission     deploymentAdmission
+	legacyGuard      func(context.Context, string, func()) error
 }
 
 type deploymentReview struct {
 	Session, Host, Stack, StageID, Manifest, Selection, TargetDigest, Journal string
+	CredentialRevision                                                        string
 	Mode, PriorRequestID                                                      string
 	Expiry                                                                    time.Time
 	Attended                                                                  *attendedReview
@@ -223,7 +227,8 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			return
 		}
 		defer releaseRecord.Close()
-		if targetDigest(record) != review.TargetDigest {
+		ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
+		if targetDigest(record) != review.TargetDigest || (!historyRequired && h.deploymentCredentialRevision(ctx, record) != review.CredentialRevision) {
 			http.Error(w, "Target was re-paired; no creation sent", 409)
 			return
 		}
@@ -231,7 +236,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			h.submitAttended(ctx, w, p, review, record, enrollment)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record, review.CredentialRevision)
 		if err != nil {
 			http.Error(w, "Target unavailable; no creation sent", 409)
 			return
@@ -244,11 +249,13 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			return
 		}
 		var status agentclient.DeploymentStatus
-		if review.Mode == "remove" {
-			status, err = c.RemoveJournalDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID, review.Journal)
-		} else {
-			status, err = c.ApplyJournalDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode, review.Journal)
-		}
+		status, err = h.observeTarget(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: review.Stack, Action: map[bool]string{true: "remove", false: "deploy"}[review.Mode == "remove"], Request: p.ID, RuntimeOnly: review.Mode == "remove"}, func() (agentclient.DeploymentStatus, error) {
+			if review.Mode == "remove" {
+				return c.RemoveJournalDeployment(ctx, epoch, review.Stack, review.Selection, p.ID, review.PriorRequestID, review.Journal)
+			} else {
+				return c.ApplyJournalDeployment(ctx, epoch, review.StageID, review.Manifest, review.Stack, review.Selection, p.ID, review.Mode, review.Journal)
+			}
+		})
 		if err == nil {
 			p.Status = &status
 		} else {
@@ -276,6 +283,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 		return
 	}
 	defer releaseRecord.Close()
+	ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
 	if r.Method == http.MethodGet {
 		if h.history != nil && h.history.operator != nil {
 			p.Error = deploymentStatusUnavailable
@@ -302,7 +310,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			h.renderStatus(w, p, http.StatusConflict)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record)
 		if err == nil {
 			defer c.Close()
 			var status agentclient.DeploymentStatus
@@ -327,6 +335,15 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 		return
 	}
 	current := projectreview.Current{Stack: p.Stack, Target: projectreview.Target{Kind: projectreview.HTTPS, Identity: targetDigest(record), Socket: record.HTTPSAddress, Endpoint: p.Host}}
+	transferRevision := ""
+	if h.history == nil && (r.URL.Path == deployPath+"/review" || r.URL.Path == deployPath+"/stage") {
+		transferRevision = h.deploymentCredentialRevision(ctx, record)
+		if transferRevision == "" {
+			http.Error(w, "Deployment custody unavailable; no transfer sent", 409)
+			return
+		}
+		current.Options = map[string]string{"deployment_custody": fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("transfer/1\\x00%s\\x00%v", transferRevision, enrollment))))}
+	}
 	switch r.URL.Path {
 	case deployPath + "/git", deployPath + "/git-config":
 		h.gitSettings(ctx, w, r, &p, record)
@@ -375,6 +392,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
+		credentialRevision := transferRevision
 		var stager deploymentStager
 		var epoch string
 		var binding attendedBinding
@@ -387,7 +405,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			defer c.client.Close()
 			stager, epoch, binding = c.client, c.epoch, c.binding
 		} else {
-			c, e, err := openDeploymentSession(ctx, record)
+			c, e, err := h.openDeploymentSession(ctx, record, transferRevision)
 			if err != nil {
 				http.Error(w, "Target unavailable; no transfer sent", 409)
 				return
@@ -399,8 +417,8 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			http.Error(w, "Archived configuration is not authorized for review; no transfer sent", http.StatusConflict)
 			return
 		}
-		stage, manifest, plan, err := stageAndPreview(ctx, stager, epoch, p.Stack, intent.Snapshot)
-		if err != nil {
+		stage, manifest, plan, err := h.observePlan(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: p.Stack}, stager, epoch, p.Stack, intent.Snapshot)
+		if err != nil || (h.history == nil && (credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision)) {
 			p.Error = "Staging or preview could not be confirmed. Inspect the receiver before preparing another transfer. No retry was sent."
 			p.ID = ""
 			h.render(w, p)
@@ -417,24 +435,30 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 			}
 			review.prior = intent.PriorDeployment
 		}
-		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review)
+		h.renderPlan(&p, session, current.Target.Identity, stage, manifest, plan, review, credentialRevision)
 	case deployPath + "/remove-preview":
+		credentialRevision := h.deploymentCredentialRevision(ctx, record)
 		if h.history != nil && h.history.operator != nil {
 			http.Error(w, "Operator-configured authority is for new deployments only", http.StatusConflict)
 			return
 		}
-		c, epoch, err := openDeploymentSession(ctx, record)
+		c, epoch, err := h.openDeploymentSession(ctx, record)
 		if err != nil {
 			http.Error(w, "Target unavailable", 409)
 			return
 		}
 		defer c.Close()
-		plan, err := c.PreviewRemoval(ctx, epoch, p.Stack)
-		if err != nil {
+		var plan *agentclient.DeploymentPreview
+		_, err = h.observeTarget(ctx, ExecutionMetadata{Host: record.ID, Target: targetDigest(record), Stack: p.Stack, Action: "plan", RuntimeOnly: true}, func() (agentclient.DeploymentStatus, error) {
+			var previewErr error
+			plan, previewErr = c.PreviewRemoval(ctx, epoch, p.Stack)
+			return agentclient.DeploymentStatus{}, previewErr
+		})
+		if err != nil || credentialRevision == "" || h.deploymentCredentialRevision(ctx, record) != credentialRevision {
 			p.Error = "Managed removal preview unavailable. No operation was sent."
 			break
 		}
-		h.renderPlan(&p, session, current.Target.Identity, "", "", plan, nil)
+		h.renderPlan(&p, session, current.Target.Identity, "", "", plan, nil, credentialRevision)
 	default:
 		http.NotFound(w, r)
 		return
@@ -442,7 +466,7 @@ func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease
 	h.render(w, p)
 }
 
-func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview, attended *attendedReview) {
+func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manifest string, plan *agentclient.DeploymentPreview, attended *attendedReview, credentialRevision string) {
 	p.JournalCapacityLow = plan.JournalCapacityLow
 	p.Plan, p.ID = plan.PreflightResult, ""
 	if plan.Mode == "" || plan.SelectionDigest == nil || len(plan.Resources) == 0 {
@@ -455,7 +479,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 			}
 		}
 	}
-	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, Journal: plan.JournalID, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
+	p.ID = h.add(deploymentReview{Session: session, Host: p.Host, Stack: p.Stack, StageID: stage, Manifest: manifest, Selection: *plan.SelectionDigest, Mode: plan.Mode, PriorRequestID: plan.PriorRequestID, TargetDigest: target, CredentialRevision: credentialRevision, Journal: plan.JournalID, Expiry: time.Now().Add(5 * time.Minute), Attended: attended})
 	if p.ID != "" {
 		p.Mode = plan.Mode
 	}
@@ -464,7 +488,7 @@ func (h *Deployment) renderPlan(p *deploymentPage, session, target, stage, manif
 // New operator-authorized actions pin the active history enrollment and target
 // under one lease. Legacy reads and removal retain their existing behavior.
 func (h *Deployment) acquireDeploymentTarget(ctx context.Context, host string, attended bool) (targetregistry.Record, targetregistry.HistoryIncarnation, *targetregistry.ReadLease, error) {
-	if attended && h.history != nil && h.history.operator != nil {
+	if h.credentials != nil || (attended && h.history != nil && h.history.operator != nil) {
 		return h.registry.AcquireHistoryRead(ctx, host)
 	}
 	r, lease, err := h.registry.AcquireRead(ctx, host)
@@ -475,7 +499,7 @@ func targetDigest(record targetregistry.Record) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(record.HTTPSAddress+"\x00"+string(record.HTTPSPairing))))
 }
 
-func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agentclient.Client, string, error) {
+func (h *Deployment) openDeploymentSession(ctx context.Context, r targetregistry.Record, expected ...string) (*agentclient.Client, string, error) {
 	if r.HTTPSAddress == "" {
 		return nil, "", agentclient.ErrProtocol
 	}
@@ -483,7 +507,17 @@ func openDeploymentSession(ctx context.Context, r targetregistry.Record) (*agent
 	if err != nil {
 		return nil, "", err
 	}
-	return p.Open(ctx, ctx, r.HTTPSAddress)
+	if h.credentials == nil {
+		return nil, "", errDeployCredential
+	}
+	credential, e := h.credentials.Credential(ctx, r)
+	if e != nil || (len(expected) > 0 && (expected[0] == "" || deploymentRevision(ctx, r, credential) != expected[0])) {
+		return nil, "", errDeployCredential
+	}
+	return p.OpenDeploymentCurrent(ctx, ctx, r.HTTPSAddress, credential, func(ctx context.Context) bool {
+		latest, err := h.credentials.Credential(ctx, r)
+		return err == nil && subtle.ConstantTimeCompare([]byte(latest), []byte(credential)) == 1
+	})
 }
 
 func stageAndPreview(ctx context.Context, c deploymentStager, epoch, stack string, snap projectsnapshot.Snapshot) (string, string, *agentclient.DeploymentPreview, error) {
@@ -625,7 +659,7 @@ var deploymentView = template.Must(template.New("deployment").Parse(`<!doctype h
 {{with .GitPolicy.Reason}}<p>{{if eq . "awaiting-status"}}No terminal status has been recorded yet.{{else if eq . "running"}}Dill admitted the request and it is running.{{else if eq . "unknown"}}Dill admitted the request but cannot prove its outcome. Inspect the target; do not retry.{{else if eq . "status-unavailable"}}The exact request or its original journal could not be verified.{{else if eq . "staging-or-preview"}}Staging or preview did not complete. Inspect the receiver before taking further action.{{else if eq . "journal-capacity"}}Dill reports that its journal is near capacity. No apply was sent. Preserve the journal and inspect agent state.{{else if eq . "no-journal"}}The agent does not advertise a recoverable journal. No apply was sent.{{else if eq . "not-admitted"}}Dill fenced the request without admitting it. Automation is disabled and the same commit will not be resubmitted.{{else if eq . "failed"}}Dill reported a failure. Inspect the target before re-enabling automation.{{end}}</p>{{end}}
 {{if .GitPolicy.Request}}<p><a href="/remote/deployment?host={{.GitPolicy.Host|urlquery}}&amp;id={{.GitPolicy.Request|urlquery}}">Look up pending request <code>{{.GitPolicy.Request}}</code></a>. A missing result is not evidence of no effects.</p>
 {{if and .GitPolicy.Journal (eq .Target .GitPolicy.Target)}}<form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}"><input type="hidden" name="request" value="{{.GitPolicy.Request}}"><label><input type="checkbox" name="confirm" value="fence-unadmitted" required> Forbid this exact request from ever starting if Dill has not admitted it. This cannot cancel an admitted operation.</label><button name="mode" value="recover">Check and fence request</button></form>{{else}}<p>Fencing is unavailable without the original target and a journal binding.</p>{{end}}{{end}}
-<form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}">{{if .GitPolicy.Enabled}}<button name="mode" value="disable">Disable remote auto-deploy</button>{{else if not .GitPolicy.Request}}<label><input type="checkbox" name="confirm" value="trusted" required> Authorize this Git branch to send exact commits and create or update this stack without individual review. The target evaluates trusted Pkl with agent privileges.</label><button name="mode" value="enable">Enable remote auto-deploy</button>{{end}}</form>
+<form method="post" action="/remote/deployment/git-config"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="stack" value="{{.Stack}}"><input type="hidden" name="source" value="{{.Source}}"><input type="hidden" name="target" value="{{.Target}}">{{if eq .GitPolicy.Reason "source-sync-unconfirmed"}}{{if eq .Target .GitPolicy.Target}}<input type="hidden" name="source_sync" value="{{.GitPolicy.SourceSync}}"><p>Source synchronization is uncertain. Inspect the working tree and revision. This acknowledgement does not declare the sync successful and cannot retry or deploy it.</p><label><input type="checkbox" name="confirm" value="inspected-source-disable" required> I inspected this source sync; disable automation without retrying it.</label><button name="mode" value="recover-source">Confirm source inspection</button>{{else}}<p>Source inspection requires the original target binding. This target was replaced; no acknowledgement is available here.</p>{{end}}{{else if .GitPolicy.Enabled}}<button name="mode" value="disable">Disable remote auto-deploy</button>{{else if not .GitPolicy.Request}}<label><input type="checkbox" name="confirm" value="trusted" required> Authorize this Git branch to send exact commits and create or update this stack without individual review. The target evaluates trusted Pkl with agent privileges.</label><button name="mode" value="enable">Enable remote auto-deploy</button>{{end}}</form>
 {{else if not .ID}}<form method="post" action="/remote/deployment/review"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Brine project name <input name="stack" required value="{{.Stack}}"></label><button>Review project files</button></form>
 <form method="post" action="/remote/deployment/remove-preview"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Managed stack name <input name="stack" required value="{{.Stack}}"></label><button>Preview removal</button></form>
 {{if .GitSettings}}<form method="post" action="/remote/deployment/git"><input type="hidden" name="_csrf" value="{{.CSRF}}"><input type="hidden" name="host" value="{{.Host}}"><label>Git-backed Brine project <input name="stack" required></label><button>Remote auto-deploy settings</button></form>{{end}}{{end}}

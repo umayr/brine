@@ -20,14 +20,15 @@ import (
 // Runner shells out to the dill binary for stack lifecycle operations.
 // Stack configuration and parsing remain dill's responsibility.
 type Runner struct {
-	Binary       string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
-	PklBinary    string // explicit operator-configured Pkl binary, if any
-	Profile      string // Alpha gates execution until Dill has a target/ownership contract
-	Engine       string
-	Socket       string
-	ResolveStack func(string) (string, error)
-	CheckSource  func(string) error
-	Variables    *configvars.Store // non-secret legacy evaluation variables
+	Binary           string // path to dill binary, e.g. "dill" or "/usr/local/bin/dill"
+	PklBinary        string // explicit operator-configured Pkl binary, if any
+	Profile          string // Alpha gates execution until Dill has a target/ownership contract
+	Engine           string
+	Socket           string
+	ResolveStack     func(string) (string, error)
+	CheckSource      func(string) error
+	Variables        *configvars.Store        // non-secret legacy evaluation variables
+	ObserveLifecycle LifecycleObserverFactory // optional startup-only durable event journal
 
 	// BeforeLegacyAction is configured at startup to prohibit downgrade of known secret deployments.
 	BeforeLegacyAction   func(context.Context, string) error
@@ -256,6 +257,9 @@ func (r *Runner) runLifecycle(ctx context.Context, w io.Writer, path string, arg
 	if err != nil {
 		return err
 	}
+	if err = markLifecycleStarted(ctx); err != nil {
+		return err
+	}
 	if err = r.run(ctx, w, argv...); err != nil {
 		if errors.Is(err, ErrProcessUnknown) {
 			return err
@@ -299,6 +303,9 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 	cmd.Args = append([]string{cmd.Path}, argv...)
 	cmd.Stdout = w
 	cmd.Stderr = w
+	if err = markLifecycleStarted(ctx); err != nil {
+		return err
+	}
 	if err = r.runTracked(ctx, cmd); err != nil {
 		if errors.Is(err, ErrProcessUnknown) {
 			return err
@@ -312,7 +319,12 @@ func (r *Runner) runLabelCleanup(ctx context.Context, w io.Writer, path, action 
 }
 
 // Up deploys a stack by running `dill -f <pklPath> up`, streaming output to w.
-func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
+func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "deploy")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.QualifiedOperation != nil {
 		defer r.lockPath(pklPath)()
 		_, err := r.operation(ctx, pklPath, "up", w)
@@ -337,7 +349,12 @@ func (r *Runner) Up(ctx context.Context, pklPath string, w io.Writer) error {
 }
 
 // Down stops and removes all containers in the stack.
-func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
+func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "down")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.Profile == "alpha" {
 		return ErrAlphaDisabled
 	}
@@ -351,7 +368,12 @@ func (r *Runner) Down(ctx context.Context, pklPath string, w io.Writer) error {
 }
 
 // Stop stops running containers without removing them.
-func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
+func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "stop")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.Profile == "alpha" {
 		return ErrAlphaDisabled
 	}
@@ -365,7 +387,12 @@ func (r *Runner) Stop(ctx context.Context, pklPath string, w io.Writer) error {
 }
 
 // Start starts previously stopped containers.
-func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
+func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "start")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.QualifiedOperation != nil {
 		defer r.lockPath(pklPath)()
 		_, err := r.operation(ctx, pklPath, "start", w)
@@ -390,7 +417,12 @@ func (r *Runner) Start(ctx context.Context, pklPath string, w io.Writer) error {
 }
 
 // Restart stops then starts all containers.
-func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error {
+func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "restart")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.QualifiedOperation != nil {
 		defer r.lockPath(pklPath)()
 		_, err := r.operation(ctx, pklPath, "restart", w)
@@ -416,7 +448,12 @@ func (r *Runner) Restart(ctx context.Context, pklPath string, w io.Writer) error
 
 // Teardown removes containers, images, volumes, and the stack network.
 // Pass force=true to force-remove images referenced by other containers.
-func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) error {
+func (r *Runner) Teardown(ctx context.Context, pklPath string, force bool, w io.Writer) (resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "teardown")
+	if beginErr != nil {
+		return beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.QualifiedOperation != nil {
 		return ErrOperationContract
 	}
@@ -460,7 +497,12 @@ func (r *Runner) PS(ctx context.Context, pklPath string) ([]PSContainer, error) 
 
 // Plan returns a structured diff of what `dill up` would change.
 // Exit 0 = no changes, exit 1 = has changes (not an error), exit 2 = error.
-func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) {
+func (r *Runner) Plan(ctx context.Context, pklPath string) (plan *PlanResult, resultErr error) {
+	ctx, finish, beginErr := r.observeLifecycle(ctx, pklPath, "plan")
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer func() { finish(resultErr) }()
 	if r.QualifiedOperation != nil {
 		return r.operationPlan(ctx, pklPath)
 	}
@@ -480,6 +522,9 @@ func (r *Runner) Plan(ctx context.Context, pklPath string) (*PlanResult, error) 
 	}
 	args, err := r.lifecycleArgs(pklPath, "plan", "--format", "json")
 	if err != nil {
+		return nil, err
+	}
+	if err = markLifecycleStarted(ctx); err != nil {
 		return nil, err
 	}
 	out, err := r.capture(ctx, args...)
