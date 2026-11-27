@@ -66,6 +66,9 @@ func (h *Deployment) LifecycleTargets(ctx context.Context, stack string) ([]Life
 	actions := []string{"git-sync"}
 	if slices.Contains(caps, "deployment.stage") && slices.Contains(caps, "deployment.manifest") && slices.Contains(caps, "deployment.preview") {
 		actions = append([]string{"plan"}, actions...)
+		if slices.Contains(caps, "deployment.checked-apply") {
+			actions = append(actions, "deploy")
+		}
 	}
 	for _, a := range []string{"start", "stop", "restart"} {
 		if slices.Contains(caps, "deployment."+a) && slices.Contains(caps, "deployment."+a+"-preview") {

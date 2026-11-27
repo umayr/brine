@@ -21,6 +21,10 @@ func TestRemoteLifecycleRecoveryFailureKeepsReportedOutcome(t *testing.T) {
 			t.Fatal(result)
 		}
 	}
+	denied, deniedKind, _, deniedEffects, _ := remoteLifecycleResult("incoming", remoteui.LifecycleResult{Submitted: true, Status: agentclient.DeploymentStatus{RequestID: "target-request", State: "not-admitted", Effects: "none"}}, nil)
+	if denied.Status != "rejected" || deniedKind != "operation.rejected" || deniedEffects != "none" {
+		t.Fatal("verified non-admission rewritten unknown")
+	}
 	r, kind, _, effects, _ := remoteLifecycleResult("incoming", remoteui.LifecycleResult{Submitted: true}, errors.New("transport"))
 	if r.Status != "unknown" || kind != "operation.outcome_unknown" || effects != "unknown" {
 		t.Fatal("transport error inferred result")

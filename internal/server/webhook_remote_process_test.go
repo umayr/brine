@@ -86,7 +86,7 @@ func TestSignedIncomingRemoteLifecycle(t *testing.T) {
 	reserve, _ := net.Listen("tcp", "127.0.0.1:0")
 	address := reserve.Addr().String()
 	args := []string{"--https-listen", address, "--https-dir", credentials, "--engine-socket", socket, "--engine-id", "11111111-1111-4111-8111-111111111111", "--generation", "1", "--daemon-id", info.ID, "--https-deploy-token-file", tokenFile, "--https-staging-root", filepath.Join(dir, "stages"), "--https-staging-catalog", filepath.Join(dir, "catalog"), "--https-preview-state", filepath.Join(dir, "coordination"), "--https-preview-pkl", pkl, "--https-apply-state", filepath.Join(dir, "history")}
-	for _, grant := range []string{"stage", "manifest", "preview", "journal", "journal-apply", "start-preview", "start", "stop-preview", "stop", "restart-preview", "restart", "status", "fence"} {
+	for _, grant := range []string{"stage", "manifest", "preview", "journal", "journal-apply", "checked-apply", "start-preview", "start", "stop-preview", "stop", "restart-preview", "restart", "status", "fence"} {
 		args = append(args, "--https-deploy-grant", grant)
 	}
 	raw, e := command(append(args, "--print-https-pairing")...).Output()
@@ -401,7 +401,7 @@ config {
 	gitRun(origin, "add", ".")
 	gitRun(origin, "commit", "-m", "synthetic upstream")
 	upstreamCommit := gitRun(origin, "rev-parse", "HEAD")
-	for i, action := range []string{"plan", "git-sync", "stop", "start", "restart"} {
+	for i, action := range []string{"plan", "git-sync", "deploy", "stop", "start", "restart"} {
 		beforeAction, _ := fs.Get(stack)
 		previousHead := beforeAction.RemoteGit.DeploymentRequest
 		if action == "stop" {
@@ -494,7 +494,16 @@ config {
 				t.Fatal("source-only action did not preserve/sync expected workspace", action, head)
 			}
 		}
-		if (action == "stop" && running) || (!sourceAction && action != "stop" && (!running || current == started)) {
+		if action == "deploy" {
+			if !running {
+				t.Fatal("deployment did not retain running target")
+			}
+			deployed, _ := fs.Get(stack)
+			if deployed.RemoteGit.Commit != upstreamCommit || deployed.RemoteGit.Request != "" {
+				t.Fatal("deploy did not finish exact captured Git revision")
+			}
+		}
+		if (action == "stop" && running) || (!sourceAction && action != "stop" && action != "deploy" && (!running || current == started)) {
 			t.Fatal("signed incoming did not produce actual runtime effect", action, running)
 		}
 		started = current
@@ -513,6 +522,45 @@ config {
 		rows, _ := svc.Requests(ctx, created.Trigger.ID)
 		if len(rows) != 1 {
 			t.Fatal("duplicate created new durable request")
+		}
+		if action == "deploy" {
+			gitRun(origin, "reset", "--hard", initialCommit)
+			seenBody := []byte(`{"id":"already-attempted-revision"}`)
+			ts := strconv.FormatInt(time.Now().Unix(), 10)
+			req, _ := http.NewRequestWithContext(ctx, "POST", httpServer.URL+"/hooks/"+created.Trigger.ID, bytes.NewReader(seenBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Brine-Timestamp", ts)
+			req.Header.Set("Brine-Signature", webhooks.Sign([]byte(created.Secret), ts, seenBody))
+			resp, e := http.DefaultClient.Do(req)
+			if e != nil {
+				t.Fatal(e)
+			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != 202 {
+				t.Fatal("seen revision ingress")
+			}
+			denied := false
+			limit := time.Now().Add(15 * time.Second)
+			for time.Now().Before(limit) {
+				requests, _ := svc.Requests(ctx, created.Trigger.ID)
+				for _, r := range requests {
+					if r.IdempotencyKey == "already-attempted-revision" && r.Status == "rejected" && r.Reason == "revision_previously_attempted" {
+						denied = true
+					}
+				}
+				if denied {
+					break
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			if !denied {
+				t.Fatal("seen revision falsely reported successful re-deploy")
+			}
+			fresh, _ := fs.Get(stack)
+			if fresh.RemoteGit.DeploymentRequest != head {
+				t.Fatal("seen revision re-executed")
+			}
 		}
 		t.Logf("signed %s completed; Settings session+CSRF, head, runtime and dedup verified", action)
 	}

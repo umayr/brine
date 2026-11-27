@@ -191,7 +191,26 @@ func (h *Deployment) pollGit(ctx context.Context) {
 	}
 }
 
+type GitDeploymentResult struct {
+	Submitted, Unchanged bool
+	Error                error
+	Status               agentclient.DeploymentStatus
+}
+type gitDeploymentGrant struct {
+	binding, request string
+	before           func() bool
+}
+
+func (h *Deployment) RunGitDeployment(ctx context.Context, name, binding, request string, before func() bool) GitDeploymentResult {
+	if h.git == nil || h.gitStore == nil || h.credentials == nil || h.history != nil || before == nil {
+		return GitDeploymentResult{}
+	}
+	return h.runGitStack(ctx, name, &gitDeploymentGrant{binding, request, before})
+}
 func (h *Deployment) pollGitStack(ctx context.Context, name string) {
+	_ = h.runGitStack(ctx, name, nil)
+}
+func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDeploymentGrant) (out GitDeploymentResult) {
 	if ctx.Err() != nil {
 		return
 	}
@@ -220,11 +239,19 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	}
 	defer lease.Close()
 	ctx = context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
+	revision := h.deploymentCredentialRevision(ctx, record)
+	if grant != nil && (!lifecycleSource(s) || revision == "" || lifecycleBinding(s, record, enrollment, revision) != grant.binding) {
+		return
+	}
 	if targetDigest(record) != p.Target {
 		h.noteGitUnavailable(s, p)
 		return
 	}
-	c, epoch, err := h.openDeploymentSession(ctx, record)
+	expected := []string{}
+	if grant != nil {
+		expected = append(expected, revision)
+	}
+	c, epoch, err := h.openDeploymentSession(ctx, record, expected...)
 	if err != nil {
 		h.noteGitUnavailable(s, p)
 		return
@@ -254,6 +281,7 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	}
 	seen := strings.Fields(p.Seen)
 	if slices.Contains(seen, commit) {
+		out.Unchanged = true
 		return
 	}
 	// Remember that staging was attempted, including any ambiguous upload.
@@ -267,6 +295,9 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	stage, manifest, plan, err := stageAndPreview(stageCtx, c, epoch, name, snap)
 	stopStage()
 	if err != nil || plan.SelectionDigest == nil || (plan.Mode != "create" && plan.Mode != "update") {
+		return
+	}
+	if grant != nil && (!qualifiedSourcePreview(plan, p) || h.deploymentCredentialRevision(ctx, record) != revision) {
 		return
 	}
 	if plan.JournalID == "" || plan.JournalCapacityLow {
@@ -284,13 +315,33 @@ func (h *Deployment) pollGitStack(ctx context.Context, name string) {
 	}
 	pending := staged
 	pending.Request, pending.Phase, pending.Journal, pending.Reason = hex.EncodeToString(request[:]), "pending", plan.JournalID, "awaiting-status"
+	if grant != nil {
+		pending.Request = grant.request
+	}
 	if h.gitStore.SwapRemoteGit(name, p.Source, &staged, &pending) != nil {
 		return
 	}
-	result, err := c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
-	if err == nil {
-		h.finishGit(s, &pending, result)
+	var result agentclient.DeploymentStatus
+	if grant != nil {
+		if !grant.before() {
+			unsent := pending
+			unsent.Request, unsent.Journal = "", ""
+			unsent.Enabled = false
+			unsent.Phase, unsent.Reason = "blocked", "not-admitted"
+			_ = h.gitStore.SwapRemoteGit(name, p.Source, &pending, &unsent)
+			return
+		}
+		out.Submitted = true
+		result, err = c.ApplyCheckedJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, p.DeploymentRequest, pending.Journal)
+	} else {
+		out.Submitted = true
+		result, err = c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
 	}
+	if err == nil {
+		out.Status = result
+		out.Error = h.finishGit(s, &pending, result)
+	}
+	return
 }
 
 func (h *Deployment) noteGitUnavailable(s *store.Stack, p *store.RemoteGitPolicy) {
@@ -328,9 +379,10 @@ func gitOutcome(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.Dep
 	return next
 }
 
-func (h *Deployment) finishGit(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.DeploymentStatus) {
+func (h *Deployment) finishGit(s *store.Stack, p *store.RemoteGitPolicy, result agentclient.DeploymentStatus) error {
 	next := gitOutcome(s, p, result)
 	if next != *p {
-		_ = h.gitStore.SwapRemoteGit(s.Name, p.Source, p, &next)
+		return h.gitStore.SwapRemoteGit(s.Name, p.Source, p, &next)
 	}
+	return nil
 }

@@ -26,7 +26,7 @@ func (d *webhookDispatcher) remoteOptions(ctx context.Context, stackID, stack st
 	return out
 }
 func (d *webhookDispatcher) validateRemote(ctx context.Context, t webhooks.Trigger) error {
-	if t.Action != "start" && t.Action != "stop" && t.Action != "restart" && t.Action != "plan" && t.Action != "git-sync" {
+	if t.Action != "start" && t.Action != "stop" && t.Action != "restart" && t.Action != "plan" && t.Action != "git-sync" && t.Action != "deploy" {
 		return webhooks.ErrUnsupported
 	}
 	s, e := d.findStack(ctx, t.StackID)
@@ -56,7 +56,22 @@ func (d *webhookDispatcher) executeRemote(ctx context.Context, t webhooks.Trigge
 		return d.executeRemoteSource(ctx, t, request, op, s.Name)
 	}
 	id := sha256.Sum256([]byte("brine-webhook-target/1\x00" + request.ID))
-	out, e := d.s.remoteDeploy.RunLifecycle(ctx, s.Name, t.TargetID, t.Action, fmt.Sprintf("%x", id[:16]), func() bool { return op.Started(ctx) == nil })
+	var out remoteui.LifecycleResult
+	if t.Action == "deploy" {
+		deployed := d.s.remoteDeploy.RunGitDeployment(ctx, s.Name, t.TargetID, fmt.Sprintf("%x", id[:16]), func() bool { return op.Started(ctx) == nil })
+		out = remoteui.LifecycleResult{Submitted: deployed.Submitted, Status: deployed.Status}
+		e = deployed.Error
+		if deployed.Unchanged {
+			save, stop := context.WithTimeout(context.Background(), 3*time.Second)
+			defer stop()
+			if op.Finish(save, "operation.rejected", "unavailable", "none", "revision_previously_attempted") != nil {
+				return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
+			}
+			return webhooks.TriggerResult{Status: "rejected", Outcome: "unavailable", Reason: "revision_previously_attempted", OperationID: request.ID}
+		}
+	} else {
+		out, e = d.s.remoteDeploy.RunLifecycle(ctx, s.Name, t.TargetID, t.Action, fmt.Sprintf("%x", id[:16]), func() bool { return op.Started(ctx) == nil })
+	}
 	result, kind, outcome, effects, reason := remoteLifecycleResult(request.ID, out, e)
 	save, stop := context.WithTimeout(context.Background(), 3*time.Second)
 	defer stop()
@@ -80,6 +95,9 @@ func remoteLifecycleResult(id string, out remoteui.LifecycleResult, e error) (we
 				result.Outcome = "success"
 				result.Reason = ""
 				kind, outcome, effects, reason = "operation.completed", "success", out.Status.Effects, ""
+			case "not-admitted":
+				result.Status, result.Outcome, result.Reason = "rejected", "unavailable", "target_not_admitted"
+				kind, outcome, effects, reason = "operation.rejected", "unavailable", "none", "target_not_admitted"
 			case "failed":
 				result.Status = "completed"
 				result.Outcome = "failure"

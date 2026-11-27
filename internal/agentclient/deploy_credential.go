@@ -48,7 +48,7 @@ func deploymentRoute(r *http.Request) bool {
 	path := r.URL.Path
 	if r.Method == http.MethodPost {
 		switch path {
-		case "/v1/snapshots", "/v1/deploy/preview", "/v1/deploy/apply", "/v1/deploy/journal-apply", "/v1/deploy/fence", "/v1/deploy/remove-preview", "/v1/deploy/remove", "/v1/deploy/start-preview", "/v1/deploy/start", "/v1/deploy/stop-preview", "/v1/deploy/stop", "/v1/deploy/restart-preview", "/v1/deploy/restart":
+		case "/v1/deploy/checked-apply", "/v1/snapshots", "/v1/deploy/preview", "/v1/deploy/apply", "/v1/deploy/journal-apply", "/v1/deploy/fence", "/v1/deploy/remove-preview", "/v1/deploy/remove", "/v1/deploy/start-preview", "/v1/deploy/start", "/v1/deploy/stop-preview", "/v1/deploy/stop", "/v1/deploy/restart-preview", "/v1/deploy/restart":
 			return true
 		}
 	}
