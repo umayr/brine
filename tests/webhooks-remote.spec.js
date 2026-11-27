@@ -40,4 +40,5 @@ test('Settings reviews a real capability-scoped remote lifecycle binding',async(
   await expect.poll(async()=>{const r=await context.request.get(root+'/__qualification/manual-phase');return (await r.json()).phase;},{timeout:45000}).toBe(mode==='create'?1:2);
  }
  expect(captured[0]).not.toEqual(captured[1]);expect(errors).toEqual([]);await context.close();
+ await require('./helpers/source-restore.cjs')(browser,root,access,actualStack+'-restore',test.info());
 });

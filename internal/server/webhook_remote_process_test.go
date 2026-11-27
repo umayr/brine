@@ -334,8 +334,13 @@ config {
 	var manualPhase atomic.Int32
 	var manualBrowserObserved atomic.Bool
 	var qualifyManual func()
+	var sourceProxy http.Handler
+	var qualifySource func()
+	var sourceObserved atomic.Bool
+	var sourceDeadline atomic.Int64
 	if browserFixture {
 		qualifyManual = setupManualBrowserQualification(t, server, fs, stack, compose, schemaBytes, engine, engineCall, &manualPhase, &manualBrowserObserved)
+		sourceProxy, qualifySource = setupSourceRestoreProcess(t, ctx, stack, socket, bin, compose, schemaBytes, &manualPhase, &sourceObserved, &sourceDeadline, engineCall)
 	}
 	operator := deployment.Protected()
 	access := os.Getenv("BRINE_QUAL_ACCESS")
@@ -358,10 +363,21 @@ config {
 		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/manual-phase" {
 			w.Header().Set("Content-Type", "application/json")
 			p := manualPhase.Load()
-			json.NewEncoder(w).Encode(map[string]int32{"phase": p})
+			remaining := sourceDeadline.Load() - time.Now().UnixMilli()
+			if remaining < 0 {
+				remaining = 0
+			}
+			json.NewEncoder(w).Encode(map[string]any{"phase": p, "remaining_ms": remaining})
 			if p == 2 {
 				manualBrowserObserved.Store(true)
 			}
+			if p == 4 && r.Header.Get("X-Brine-Source-Proof") == "done" {
+				sourceObserved.Store(true)
+			}
+			return
+		}
+		if browserFixture && r.Header.Get("X-Brine-Source-Process") == "1" {
+			sourceProxy.ServeHTTP(w, r)
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/remote/deployment") {
@@ -893,5 +909,6 @@ config {
 	t.Log("authenticated source inspection disables policy without replay or outcome fabrication")
 	if qualifyManual != nil {
 		qualifyManual()
+		qualifySource()
 	}
 }
