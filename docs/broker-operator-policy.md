@@ -1,7 +1,9 @@
 # Central broker operator policy (development)
 
-Released Brine still bundles Dill0.11.0: these unreleased broker paths are not
-release-qualified. No provider/engine runtime qualification has been run.
+The image bundles Dill v0.12.0 with Pkl 0.31.1. Broker execution is an explicit
+operator-provisioned path, not a fallback for ordinary or retired secret paths.
+See [runtime qualification](broker-runtime-qualification.md) for the exact tested
+profiles, released-asset CI and remaining coverage limits.
 
 ## Explicit provisioning and startup
 

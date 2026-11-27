@@ -1,6 +1,7 @@
-# Central broker development integration
+# Central broker integration
 
-Unreleased development integration; released Brine still bundles Dill 0.11.0.
+Brine's image bundles Dill v0.12.0 and Pkl 0.31.1. Broker execution requires
+explicit operator provisioning and the matching engine/executor filesystem view.
 Code/contract, synthetic browser checks and actual disposable-target evidence are
 reported separately in [runtime qualification](broker-runtime-qualification.md).
 
@@ -16,13 +17,14 @@ also passed real file acquisition and Docker consumption. Explicit empty-generat
 retirement and update/restart/reconciliation passed on the enumerated Docker,
 Podman and rootless runtime cases. A subsequent actual Infisical browser-to-container
 case passed using a separately hosted instance and a fresh sandbox. These scoped
-results do not claim released support or an exhaustive provider/profile matrix.
+results do not establish an exhaustive provider/profile matrix or automatically
+qualify every packaged deployment arrangement.
 
 - `internal/secrets`: operator-configured Vault KV v2, Infisical and allowlisted
   local files. Credentials stay in operator file references, never browser input.
 - `internal/secretbroker`: explicit private reference-only state and frozen
   in-memory preparations. Missing/unreadable state is not an unprotected stack.
-- `internal/brokerwire`: mirrored unpublished `dill.broker-secrets/1` contract.
+- `internal/brokerwire`: mirrored `dill.broker-secrets/1` contract in Dill v0.12.0.
   Only explicit Encode creates a transport payload; clear it after use. General
   marshaling/formatting refuses/redacts values. Requirements are metadata only.
 - `internal/agentclient.BrokerClient`: separate monitor proof and deploy
