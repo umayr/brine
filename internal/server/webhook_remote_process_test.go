@@ -284,7 +284,12 @@ config {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := targetregistry.Record{ID: "synthetic", Revision: 1, HTTPSAddress: address, HTTPSPairing: targetregistry.PairingSecret(raw)}
+	enrolledAddress := address
+	var responseLoss *responseLossRelay
+	if browserFixture {
+		enrolledAddress, responseLoss = newResponseLossRelay(t, credentials, address)
+	}
+	record := targetregistry.Record{ID: "synthetic", Revision: 1, HTTPSAddress: enrolledAddress, HTTPSPairing: targetregistry.PairingSecret(raw)}
 	if err = registry.AddContext(ctx, record, record); err != nil {
 		t.Fatal(err)
 	}
@@ -354,6 +359,11 @@ config {
 				http.Error(w, "isolated fixture access required", 403)
 				return
 			}
+		}
+		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/loss-phase" {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]int32{"phase": responseLoss.Phase.Load()})
+			return
 		}
 		if browserFixture && r.Method == "GET" && r.URL.Path == "/__qualification/git-source" {
 			w.Header().Set("Content-Type", "application/json")
@@ -686,6 +696,9 @@ config {
 			}
 		}
 		t.Logf("signed %s completed; Settings session+CSRF, head, runtime and dedup verified", action)
+	}
+	if responseLoss != nil {
+		qualifyUnknownRecovery(t, ctx, server, fs, svc, stack, httpServer.URL, csrf, browser, option, responseLoss, lastTrigger, lastSecret, inspect)
 	}
 	// Ordinary (non-incoming) automatic Git deployment uses the same producer.
 	incomingEvents := journalEvents(t, server)
