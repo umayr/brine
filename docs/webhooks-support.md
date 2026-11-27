@@ -1,7 +1,7 @@
 # Webhook source and execution boundaries
 
 This is an implementation and evidence matrix, **not a release verdict**. The
-Dockerfile still bundles Dill **0.11.0** with Pkl **0.31.1**. The new paired-agent
+Dockerfile still bundles Dill **0.12.0** with Pkl **0.31.1**. The new paired-agent
 protocol is on the integration branches and needs an actual Dill release, bundle
 pin and final qualification. Unrun cells remain release work, not phased support.
 

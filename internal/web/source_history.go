@@ -92,6 +92,8 @@ type sourceDiff struct {
 	Lines                     []sourceLine
 }
 type historyPage struct {
+	BrokerRows                                                       []brokerHistoryRow
+	BrokerError                                                      bool
 	Stack, CSRF, Message, Review, ID, Proof                          string
 	Rows                                                             []revisionRow
 	Requests                                                         []requestEvidence
@@ -167,6 +169,7 @@ func (h *Handler) stackHistory(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Stack history unavailable", 409)
 		return
 	}
+	p.BrokerRows, p.BrokerError = h.brokerHistory(name)
 	p.CSRF = h.auth.CSRFFor(r)
 	var pending bool
 	p.Requests, pending, e = h.manualRows(name)

@@ -65,6 +65,10 @@ func (h *Deployment) RunSourceAction(ctx context.Context, stack, binding, action
 		return out, ErrAutomationAdmission
 	}
 	defer release()
+	return automationUnprotected(h, ctx, stack, func() (SourceResult, error) { return h.runSourceAdmitted(ctx, stack, binding, action, beforeDispatch) })
+}
+func (h *Deployment) runSourceAdmitted(ctx context.Context, stack, binding, action string, beforeDispatch func() bool) (SourceResult, error) {
+	var out SourceResult
 	s, e := h.stacks.Get(stack)
 	if e != nil || !lifecycleSource(s) || !h.manualClear(stack) {
 		return out, ErrAutomationAdmission

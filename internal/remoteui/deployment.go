@@ -48,6 +48,7 @@ type Deployment struct {
 	git              *git.Runner
 	gitStore         store.RemoteGitStore
 	gitAdmission     deploymentAdmission
+	legacyGuard      func(context.Context, string, func()) error
 }
 
 type deploymentReview struct {
@@ -137,6 +138,12 @@ func (h *Deployment) serve(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid form", 400)
 		return
 	}
+	if h.guardOrdinary(w, r, lease, session, func(response http.ResponseWriter) { h.serveAdmitted(response, r, lease, session, csrf) }) {
+		return
+	}
+	h.serveAdmitted(w, r, lease, session, csrf)
+}
+func (h *Deployment) serveAdmitted(w http.ResponseWriter, r *http.Request, lease context.Context, session, csrf string) {
 	form := r.PostForm
 	p := deploymentPage{CSRF: csrf, Host: r.URL.Query().Get("host"), ID: r.URL.Query().Get("id")}
 	if r.Method == http.MethodPost {

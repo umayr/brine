@@ -45,7 +45,7 @@
     <!-- Primary action -->
     <button class="ui-button ui-button-primary ui-button-sm gap-1.5" data-stack-action id="deploy-button"
       onclick="runAction('up', '{{.Stack.Name}}')"
-      {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
+      {{if .Secrets.Scopes}}disabled title="Use Plan to review source and secret delivery before deploying"{{else if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before deploying"{{end}}
     >
       <i data-lucide="play" class="w-3.5 h-3.5"></i>
       Deploy
@@ -89,7 +89,7 @@
         hx-swap="innerHTML"
         hx-sync="this:replace"
         hx-request='{"timeout":30000}'
-        {{if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
+        {{if .Secrets.Scopes}}{{else if and (eq .Target.Profile "alpha") (not .QualifiedOperations)}}disabled title="Alpha: Dill target/ownership contract unavailable"{{else if .EngineAlignment.Blocked}}disabled title="Update config.engine before planning"{{end}}
       >
         <i data-lucide="file-diff" class="w-3.5 h-3.5"></i>
         Plan
@@ -399,6 +399,36 @@
       <div class="variables-panel-footer text-sm text-muted"><strong>Non-secret values only.</strong> Use <code>read("env:BRINE_VAR_APP_DOMAIN")</code> in Pkl. Changes apply on the next operation; re-plan before deploying. Values may appear in plans, logs and container inspection.</div>
     {{end}}
     </div>
+  </section>
+  <section class="ui-panel variables-panel" aria-labelledby="stack-secrets-title">
+    <div class="variables-panel-header"><div><h2 id="stack-secrets-title" class="font-semibold">Secrets</h2><p class="text-sm text-muted">Reference-only bindings. Values are never entered or revealed here.</p></div><a href="/settings/secrets" class="ui-button ui-button-ghost ui-button-sm">Provider connections</a></div>
+    {{if .Secrets.Unavailable}}<div class="variables-empty" role="alert">Secret bindings are unavailable. No empty configuration has been confirmed; existing protection remains.</div>
+    {{else if not .Secrets.Available}}<div class="variables-empty" role="status">Configure the private operator policy and protected state to use secrets.</div>
+    {{else}}
+      {{range .Secrets.Scopes}}{{$scope := .}}
+      <div class="p-5 space-y-3">
+        <h3 class="font-semibold">Target: {{.Scope.TargetRegistration}}</h3><p class="text-sm text-muted">Binding revision {{.Revision}} · Source and target are reviewed independently.</p>
+        {{range .Bindings}}<div class="variables-row"><div class="variables-name"><code>{{.Name}}</code><span class="text-sm">{{.ConnectionID}}</span></div><div class="text-sm break-all">{{if eq .Kind "vault"}}Vault · {{.Vault.Path}} / {{.Vault.Property}}{{if .Vault.Version}} · version {{.Vault.Version}}{{else}} · current at next Plan{{end}}{{else if eq .Kind "infisical"}}Infisical · {{.Infisical.Folder}} / {{.Infisical.Key}}{{if .Infisical.Version}} · version {{.Infisical.Version}}{{else}} · current at next Plan{{end}}{{else}}Local alias · {{.LocalAlias}}{{end}}</div><form method="post" action="/stacks/{{$.Stack.Name}}/secrets"><input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="registration" value="{{$scope.Scope.RegistrationID}}"><input type="hidden" name="revision" value="{{$scope.Revision}}"><input type="hidden" name="name" value="{{.Name}}"><button class="ui-button ui-button-ghost ui-button-sm" name="action" value="delete">Remove reference</button></form></div>
+        {{else}}<p class="text-sm text-muted">No references saved for this target. Registration and protection remain in place.</p>{{end}}
+        <details><summary class="ui-button ui-button-outline ui-button-sm">Add or update a reference</summary>
+          <form method="post" action="/stacks/{{$.Stack.Name}}/secrets" class="p-5 space-y-3">
+            <input type="hidden" name="_csrf" value="{{$.CSRF}}"><input type="hidden" name="registration" value="{{.Scope.RegistrationID}}"><input type="hidden" name="revision" value="{{.Revision}}">
+            <label class="ui-field"><span class="ui-label-text">Logical secret name</span><input class="ui-input font-mono" name="name" required maxlength="63" pattern="[a-z0-9][a-z0-9_.-]{0,62}" placeholder="database_password"></label>
+            <label class="ui-field"><span class="ui-label-text">Connection</span><select class="ui-input" name="connection" required>{{range .Connections}}<option value="{{.ID}}">{{.ID}} — {{.Kind}}</option>{{end}}</select></label>
+            <p class="text-sm text-muted">Fill the reference fields for the selected provider only. No credential or value field is accepted.</p>
+            <label class="ui-field"><span class="ui-label-text">Vault relative path</span><input class="ui-input font-mono" name="vaultPath" placeholder="app/database"></label>
+            <label class="ui-field"><span class="ui-label-text">Vault property</span><input class="ui-input font-mono" name="property" placeholder="password"></label>
+            <label class="ui-field"><span class="ui-label-text">Infisical folder</span><input class="ui-input font-mono" name="folder" placeholder="/production"></label>
+            <label class="ui-field"><span class="ui-label-text">Infisical key</span><input class="ui-input font-mono" name="key" placeholder="DATABASE_PASSWORD"></label>
+            <label class="ui-field"><span class="ui-label-text">Version pin (Vault / Infisical)</span><input class="ui-input font-mono" name="version" inputmode="numeric" pattern="[0-9]*" placeholder="Current at next Plan"></label>
+            <label class="ui-field"><span class="ui-label-text">Allowlisted local file alias</span><input class="ui-input font-mono" name="alias" placeholder="database-password"></label>
+            <button class="ui-button ui-button-primary" name="action" value="save">Save reference</button>
+          </form>
+        </details>
+      </div>
+      {{else}}<div class="variables-empty" role="status">No execution target is approved for secret bindings on this stack.</div>{{end}}
+      <div class="variables-panel-footer text-sm text-muted">Reference edits invalidate review and never change running containers. Run a fresh Plan before deployment. Removing a reference does not erase protection or restore secrets.</div>
+    {{end}}
   </section>
   </section>
   <section id="panel-History" role="tabpanel" aria-labelledby="tab-History" tabindex="0" class="space-y-4" hidden>

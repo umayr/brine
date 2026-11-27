@@ -16,6 +16,7 @@ import (
 
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/brokerapp"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/configvars"
 	"github.com/umayr/brine/internal/dill"
@@ -73,6 +74,8 @@ func run() error {
 	flag.StringVar(&cfg.CoordinationStateDir, "coordination-state-dir", "", "preexisting canonical shared owner-only0700 state outside Brine data (no automatic provisioning)")
 	flag.StringVar(&cfg.CoordinationLayout, "coordination-layout", "", "explicit operator assertion: native-local-docker-v1 only")
 	flag.StringVar(&cfg.CoordinationDaemonID, "coordination-daemon-id", "", "independently provisioned expected Docker daemon ID; never discovered from the selected socket")
+	flag.StringVar(&cfg.BrokerPolicy, "broker-policy", "", "absolute private central broker provider/scope policy; existing state required")
+	initBrokerState := flag.Bool("init-broker-state", false, "explicitly initialize a NEW data-dir/broker-state directory and exit; never recover/reset used state")
 	flag.StringVar(&cfg.SecretTarget, "secret-target", "", "operator-selected Alpha target ID (enables strict secret mode with --secret-policy)")
 	flag.StringVar(&cfg.SecretPolicy, "secret-policy", "", "absolute path to operator-controlled Alpha secret policy")
 	flag.StringVar(&cfg.SecretPkl, "secret-pkl", "", "optional absolute path to operator-installed Pkl for Alpha secret mode")
@@ -127,6 +130,15 @@ func run() error {
 			return err
 		}
 		return server.InitializeWebhooks(cfg)
+	}
+	if *initBrokerState {
+		if normalizeDataDir(cfg) != nil {
+			return brokerapp.ErrUnavailable
+		}
+		if cfg.NoAuth {
+			return brokerapp.ErrUnavailable
+		}
+		return brokerapp.Initialize(cfg.DataDir)
 	}
 	if *initSourceHistory {
 		if err := normalizeDataDir(cfg); err != nil {

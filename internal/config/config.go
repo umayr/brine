@@ -24,6 +24,7 @@ type Config struct {
 	StagingSocket        string // opt-in local dill-serve Unix socket
 	StagingIdentity      string // operator-asserted stable target identifier
 	SecretTarget         string // operator-selected target ID, enables strict secret mode with SecretPolicy
+	BrokerPolicy         string // optional central broker operator policy; fixed private state under data-dir
 	SecretPolicy         string // absolute operator-controlled policy path
 	SecretPkl            string // optional absolute operator-installed Pkl binary
 	SourceHistoryDir     string // existing separately initialized private source-revision archive
@@ -94,6 +95,9 @@ func Default() *Config {
 func (c *Config) Validate() error {
 	if err := c.validateWebhooks(); err != nil {
 		return err
+	}
+	if c.BrokerPolicy != "" && (c.NoAuth || !filepath.IsAbs(c.BrokerPolicy) || filepath.Clean(c.BrokerPolicy) != c.BrokerPolicy) {
+		return fmt.Errorf("central secret broker requires authentication and an absolute private operator policy")
 	}
 	validRevealPath := func(p string) bool {
 		return filepath.IsAbs(p) && filepath.Clean(p) == p && p != "/" && !strings.ContainsAny(p, "\x00\r\n")

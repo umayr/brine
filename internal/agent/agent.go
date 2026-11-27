@@ -63,6 +63,26 @@ func (a *LocalAgent) SetSecretRecordLookup(lookup func(string) (bool, error)) {
 	}
 }
 
+// AddSecretRecordLookup composes broker protection with retired-state denial.
+func (a *LocalAgent) AddSecretRecordLookup(lookup func(string) (bool, error)) {
+	eng := a.eng
+	if boundary, ok := eng.(*engine.AlphaReadOnly); ok {
+		eng = boundary.Engine
+	}
+	if guard, ok := eng.(*engine.LifecycleGuard); ok {
+		prior := guard.SecretEnabled
+		guard.SecretEnabled = func(stack string) (bool, error) {
+			enabled, err := lookup(stack)
+			if err != nil || enabled {
+				return enabled, err
+			}
+			if prior != nil {
+				return prior(stack)
+			}
+			return false, nil
+		}
+	}
+}
 func (a *LocalAgent) ID() string            { return a.id }
 func (a *LocalAgent) Name() string          { return a.name }
 func (a *LocalAgent) Engine() engine.Engine { return a.eng }

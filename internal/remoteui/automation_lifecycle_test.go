@@ -178,6 +178,45 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 		t.Fatal(e)
 	}
 	h.EnableGit(&gitpkg.Runner{Binary: gitBinary})
+	// Permanent broker registration (or unreadable broker state) must deny all
+	// unattended paths, including source-only work, before any target/Git call.
+	guardCalls := 0
+	h.SetLegacyGuard(func(context.Context, string, func()) error {
+		guardCalls++
+		return errors.New("broker protection unavailable")
+	})
+	if options, err := h.LifecycleTargets(ctx, "demo"); err == nil || len(options) != 0 {
+		t.Fatal("broker-protected automation advertised", options, err)
+	}
+	before := func() bool { t.Fatal("broker denial reached dispatch"); return false }
+	for _, action := range []string{"start", "stop", "restart"} {
+		out, err := h.RunLifecycle(ctx, "demo", "binding", action, strings.Repeat("e", 32), before)
+		if err == nil || out.Submitted {
+			t.Fatal("broker lifecycle bypass", action, out, err)
+		}
+	}
+	for _, action := range []string{"plan", "git-sync"} {
+		out, err := h.RunSourceAction(ctx, "demo", "binding", action, before)
+		if err == nil || out.Attempted {
+			t.Fatal("broker source bypass", action, out, err)
+		}
+	}
+	deniedDeploy := h.RunGitDeployment(ctx, "demo", "binding", strings.Repeat("e", 32), before)
+	if deniedDeploy.Submitted || deniedDeploy.Error == nil {
+		t.Fatal("broker incoming deploy bypass", deniedDeploy)
+	}
+	h.pollGitStack(ctx, "demo")
+	if guardCalls != 8 || calls != 0 || ownerPreviews != 0 {
+		t.Fatal("broker guard skipped", guardCalls, calls, ownerPreviews)
+	}
+	if _, err := os.Stat(gitMarker); !os.IsNotExist(err) {
+		t.Fatal("broker-protected Git invoked", err)
+	}
+	freshDenied, err := fs.Get("demo")
+	if err != nil || *freshDenied.RemoteGit != *p || !h.manualClear("demo") {
+		t.Fatal("broker denial changed source/recovery", freshDenied, err)
+	}
+	h.SetLegacyGuard(nil)
 	targets, e := h.LifecycleTargets(ctx, "demo")
 	if e != nil || len(targets) != 1 {
 		t.Fatal(targets, e)

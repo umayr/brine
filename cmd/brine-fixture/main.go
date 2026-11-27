@@ -24,12 +24,15 @@ import (
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/brokerapp"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/configvars"
 	"github.com/umayr/brine/internal/dill"
 	"github.com/umayr/brine/internal/engine"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
+	"github.com/umayr/brine/internal/secretbroker"
+	"github.com/umayr/brine/internal/secrets"
 	"github.com/umayr/brine/internal/store"
 	"github.com/umayr/brine/internal/web"
 )
@@ -39,12 +42,20 @@ func main() {
 	withAuth := flag.Bool("auth", false, "enable disposable admin login (fixture-only-not-a-secret)")
 	syntheticStaging := flag.Bool("synthetic-staging", false, "enable disposable fake local snapshot staging fixture")
 	syntheticWebhooks := flag.Bool("synthetic-webhooks", false, "enable disposable webhook management fixture; never sends HTTP or runs actions")
+	syntheticSecrets := flag.Bool("synthetic-secrets", false, "enable reference-only broker UI fixtures; requires --auth; never acquires values or deploys")
 	flag.Parse()
+	if *syntheticSecrets && !*withAuth {
+		log.Fatal("synthetic secrets requires --auth")
+	}
 	dir, err := os.MkdirTemp("", "brine-ui-fixture-")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
+	dir, err = filepath.EvalSymlinks(dir)
+	if err != nil {
+		log.Fatal(err)
+	}
 	st, err := store.NewFSStore(dir)
 	if err != nil {
 		log.Fatal(err)
@@ -153,7 +164,8 @@ printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id
 			loginOnly := *withAuth && r.Method == http.MethodPost && (r.URL.Path == "/login" || r.URL.Path == "/logout")
 			stagingOnly := *syntheticStaging && r.Method == http.MethodPost && (r.URL.Path == "/web/stacks/homepage/staging/prepare" || r.URL.Path == "/web/stacks/homepage/staging/confirm")
 			hooksOnly := *syntheticWebhooks && strings.HasPrefix(r.URL.Path, "/api/webhooks/")
-			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !stagingOnly && !hooksOnly {
+			referencesOnly := *syntheticSecrets && r.Method == http.MethodPost && r.URL.Path == "/stacks/homepage/secrets"
+			if r.Method != http.MethodGet && r.Method != http.MethodHead && !loginOnly && !stagingOnly && !referencesOnly && !hooksOnly {
 				http.Error(w, "fixture is read-only", http.StatusMethodNotAllowed)
 				return
 			}
@@ -174,6 +186,31 @@ printf '%s\n' '[{"id":"fixture-web","name":"fixture-web","state":"running"},{"id
 	r.Post("/logout", authn.HandleLogout)
 	timeouts := httpx.Timeouts{Default: 30 * time.Second, Lifecycle: 30 * time.Second}
 	webHandler := web.New(ag, fixtureStacks, rs, gr, "docker", true, authn, 30*time.Second)
+	if *syntheticSecrets {
+		if err := brokerapp.Initialize(dir); err != nil {
+			log.Fatal(err)
+		}
+		scope := secretbroker.Scope{RegistrationID: strings.Repeat("a", 32), StackName: "homepage", TargetRegistration: "local"}
+		policy := brokerapp.Policy{Version: 1, Providers: secrets.Config{Version: 1, Connections: map[string]secrets.ConnectionConfig{
+			"vault":     {Vault: &secrets.VaultConfig{Endpoint: "https://vault.example.invalid", Mount: "secret", PathPrefix: "apps", TokenFile: secrets.FileRef{Path: "/operator/private-vault-token"}}},
+			"infisical": {Infisical: &secrets.InfisicalConfig{Endpoint: "https://infisical.example.invalid", ProjectID: "demo", Environment: "production", Folder: "/apps", ClientIDFile: secrets.FileRef{Path: "/operator/private-client-id"}, ClientSecretFile: secrets.FileRef{Path: "/operator/private-client-secret"}}},
+			"files":     {Files: &secrets.FilesConfig{Sources: map[string]secrets.FileRef{"database-password": {Path: "/operator/private-file"}}}},
+		}}, Registrations: []brokerapp.Registration{{Scope: scope, Connections: []string{"vault", "infisical", "files"}}}}
+		raw, err := json.Marshal(policy)
+		if err != nil {
+			log.Fatal(err)
+		}
+		path := filepath.Join(dir, "broker-policy.json")
+		if os.WriteFile(path, raw, 0600) != nil {
+			log.Fatal("fixture policy unavailable")
+		}
+		service, err := brokerapp.Open(dir, path)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer service.Close()
+		webHandler.EnableBroker(service)
+	}
 	if *syntheticStaging {
 		cfg := config.Default()
 		cfg.StagingSocket = stagingSocket

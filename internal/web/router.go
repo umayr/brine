@@ -42,6 +42,9 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.Timeout(timeouts.Lifecycle))
 		r.Post("/web/stacks/{name}/git/pull", h.stackGitPull)
+		r.Post("/web/stacks/{name}/broker/prepare", h.brokerPrepare)
+		r.Post("/web/stacks/{name}/broker/confirm", h.brokerConfirmPlan)
+		r.Post("/web/stacks/{name}/broker/status", h.brokerReconcile)
 	})
 
 	// Git creation supplies its own bounded request-cancellable deadline.
@@ -54,6 +57,8 @@ func Mount(r chi.Router, h *Handler, timeouts httpx.Timeouts) {
 		// Full-page routes
 		r.Get("/", h.dashboard)
 		r.Get("/settings", h.settingsAppearance)
+		r.Get("/settings/secrets", h.brokerSettings)
+		r.Post("/stacks/{name}/secrets", h.saveSecretBinding)
 		r.Get("/settings/general", h.settingsGeneral)
 		r.Post("/settings/general", h.settingsCredentials)
 		r.Get("/settings/live-updates", h.settingsLiveUpdates)

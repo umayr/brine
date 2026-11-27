@@ -53,7 +53,13 @@ func (*OperatorDeployClient) MarshalJSON() ([]byte, error) { return nil, ErrProt
 // Dill decides current authorization per request. current must fail closed when
 // the caller's approved credential or policy generation is no longer current.
 func (p *Pairing) OpenOperatorDeploy(ctx context.Context, reviewed OperatorTarget, bearer string, grants LocalDeployGrants, current func(context.Context) bool) (*OperatorDeployClient, string, error) {
-	if ctx == nil || ctx.Err() != nil || !p.MatchesOperatorTarget(reviewed, reviewed.Address) || grants == 0 || grants & ^LocalNewAttended != 0 ||
+	if grants == 0 || grants & ^LocalNewAttended != 0 {
+		return nil, "", ErrProtocol
+	}
+	return p.openOperatorTransports(ctx, reviewed, bearer, current, func(r *http.Request) bool { return allowedLocalDeploy(r, grants) })
+}
+func (p *Pairing) openOperatorTransports(ctx context.Context, reviewed OperatorTarget, bearer string, current func(context.Context) bool, allow func(*http.Request) bool) (*OperatorDeployClient, string, error) {
+	if ctx == nil || ctx.Err() != nil || !p.MatchesOperatorTarget(reviewed, reviewed.Address) || allow == nil ||
 		current == nil || subtle.ConstantTimeCompare([]byte(bearer), []byte(p.token)) == 1 || !current(ctx) {
 		return nil, "", ErrProtocol
 	}
@@ -84,7 +90,7 @@ func (p *Pairing) OpenOperatorDeploy(ctx context.Context, reviewed OperatorTarge
 	deploy.requestGate = func(req *http.Request) bool {
 		return req.URL.Opaque == "" && req.URL.Scheme == "https" && req.URL.Host == strings.TrimPrefix(deploy.baseURL, "https://") && req.Host == req.URL.Host &&
 			req.URL.User == nil && req.URL.RawPath == "" && req.URL.RawQuery == "" && !req.URL.ForceQuery && req.URL.Fragment == "" &&
-			allowedLocalDeploy(req, grants) && proof.Err() == nil && req.Context().Err() == nil && current(req.Context()) && proof.Err() == nil
+			allow(req) && proof.Err() == nil && req.Context().Err() == nil && current(req.Context()) && proof.Err() == nil
 	}
 	return &OperatorDeployClient{monitor: monitor, deploy: deploy}, epoch, nil
 }

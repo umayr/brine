@@ -14,6 +14,7 @@ import (
 	"github.com/umayr/brine/internal/agent"
 	"github.com/umayr/brine/internal/api"
 	"github.com/umayr/brine/internal/auth"
+	"github.com/umayr/brine/internal/brokerapp"
 	"github.com/umayr/brine/internal/config"
 	"github.com/umayr/brine/internal/git"
 	"github.com/umayr/brine/internal/httpx"
@@ -94,6 +95,39 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 	if err := s.cfg.Validate(); err != nil {
 		return err
 	}
+	broker, err := brokerapp.Open(s.cfg.DataDir, s.cfg.BrokerPolicy)
+	if err != nil {
+		return brokerapp.ErrUnavailable
+	}
+	if broker != nil {
+		defer broker.Close()
+		s.web.EnableBroker(broker)
+		if local, ok := s.agent.(*agent.LocalAgent); ok {
+			local.AddSecretRecordLookup(broker.Protected)
+		}
+		runner := s.agent.Dill()
+		if runner != nil {
+			oldAction, oldValidate := runner.BeforeLegacyAction, runner.BeforeLegacyValidate
+			runner.BeforeLegacyAction = func(ctx context.Context, stack string) error {
+				if err := broker.RequireUnprotected(stack); err != nil {
+					return err
+				}
+				if oldAction != nil {
+					return oldAction(ctx, stack)
+				}
+				return nil
+			}
+			runner.BeforeLegacyValidate = func(ctx context.Context, stack string) error {
+				if err := broker.RequireUnprotected(stack); err != nil {
+					return err
+				}
+				if oldValidate != nil {
+					return oldValidate(ctx, stack)
+				}
+				return nil
+			}
+		}
+	}
 	if s.cfg.SourceHistoryDir != "" {
 		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir, s.cfg.SourceHistoryLimits)
 		if err != nil {
@@ -108,6 +142,9 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 		if err := s.prepareRemote(nil, nil); err != nil {
 			return err
 		}
+	}
+	if s.remoteDeploy != nil && broker != nil {
+		s.remoteDeploy.SetLegacyGuard(broker.WithUnprotected)
 	}
 	if s.remoteCancel != nil {
 		defer s.remoteCancel()

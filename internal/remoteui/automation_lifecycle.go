@@ -41,6 +41,9 @@ func lifecycleBinding(s *store.Stack, r targetregistry.Record, enrollment target
 func (h *Deployment) LifecycleTargets(ctx context.Context, stack string) ([]LifecycleTarget, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
+	return automationUnprotected(h, ctx, stack, func() ([]LifecycleTarget, error) { return h.lifecycleTargets(ctx, stack) })
+}
+func (h *Deployment) lifecycleTargets(ctx context.Context, stack string) ([]LifecycleTarget, error) {
 	s, e := h.stacks.Get(stack)
 	if e != nil || !lifecycleSource(s) || !h.manualClear(stack) || h.credentials == nil || h.gitStore == nil || h.history != nil {
 		return nil, ErrAutomationAdmission
@@ -101,6 +104,12 @@ func (h *Deployment) RunLifecycle(ctx context.Context, stack, binding, action, r
 		return out, ErrAutomationAdmission
 	}
 	defer release()
+	return automationUnprotected(h, ctx, stack, func() (LifecycleResult, error) {
+		return h.runLifecycleAdmitted(ctx, stack, binding, action, request, beforeDispatch)
+	})
+}
+func (h *Deployment) runLifecycleAdmitted(ctx context.Context, stack, binding, action, request string, beforeDispatch func() bool) (LifecycleResult, error) {
+	var out LifecycleResult
 	s, e := h.stacks.Get(stack)
 	if e != nil || !lifecycleSource(s) || !h.manualClear(stack) {
 		return out, ErrAutomationAdmission

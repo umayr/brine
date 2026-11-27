@@ -232,6 +232,16 @@ func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDep
 	if s.RemoteGitSource() != p.Source || (!p.Enabled && p.Request == "") || p.Phase == "blocked" {
 		return
 	}
+	if p.Request == "" && h.legacyGuard != nil {
+		err := h.legacyGuard(ctx, name, func() { out = h.runGitAdmitted(ctx, name, s, p, grant) })
+		if err != nil {
+			out.Error = err
+		}
+		return
+	}
+	return h.runGitAdmitted(ctx, name, s, p, grant)
+}
+func (h *Deployment) runGitAdmitted(ctx context.Context, name string, s *store.Stack, p *store.RemoteGitPolicy, grant *gitDeploymentGrant) (out GitDeploymentResult) {
 	record, enrollment, lease, err := h.acquireDeploymentTarget(ctx, p.Host, false)
 	if err != nil {
 		h.noteGitUnavailable(s, p)
@@ -328,7 +338,9 @@ func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDep
 			unsent.Request, unsent.Journal = "", ""
 			unsent.Enabled = false
 			unsent.Phase, unsent.Reason = "blocked", "not-admitted"
-			_ = h.gitStore.SwapRemoteGit(name, p.Source, &pending, &unsent)
+			if h.gitStore.SwapRemoteGit(name, p.Source, &pending, &unsent) != nil {
+				out.Error = ErrAutomationRecovery
+			}
 			return
 		}
 		out.Submitted = true
@@ -339,6 +351,7 @@ func (h *Deployment) runGitStack(ctx context.Context, name string, grant *gitDep
 			return c.ApplyJournalDeployment(ctx, epoch, stage, manifest, name, *plan.SelectionDigest, pending.Request, plan.Mode, pending.Journal)
 		})
 	}
+	out.Error = err
 	if err == nil {
 		out.Status = result
 		out.Error = h.finishGit(s, &pending, result)

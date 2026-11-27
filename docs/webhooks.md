@@ -1,6 +1,6 @@
 # Webhooks
 
-Brine owns event delivery and automation admission; Dill owns planning and execution. The current Dockerfile bundles Dill **0.11.0**. An accepted request, a delivered notification, and a successful execution are three independent facts.
+Brine owns event delivery and automation admission; Dill owns planning and execution. The current Dockerfile bundles Dill **0.12.0**. An accepted request, a delivered notification, and a successful execution are three independent facts.
 
 ## Enablement and key custody
 
@@ -63,7 +63,7 @@ Baselines and pending transition intents are bounded separately. Inactive unavai
 
 Remote observation uses the existing verified registry read-lease provider, never a local fallback. Two targets are attempted per pass in round-robin order, with bounded per-target contexts, complete bounded inventory, and coherent ID/stack/service/state inspections. Leases are released before event persistence. Runtime-only stacks have a separate target-namespaced `runtime-stack` identity, not a guessed Workspace/Git source. A registered Git source is attached only when its freshly read owner binding matches the exact verified leased HTTPS binding. Per-container inspection failures make health unavailable without discarding valid inventory siblings; failed inventory/session/cleanup invalidates previous readings.
 
-The new agent `GET /v1/capabilities` document separates monitor methods from configured deployment grants. Values are retained as a sorted JSON-array string with `monitor.` / `deployment.` prefixes. Advertised deployment entries do not authorize a monitor credential to execute. **Bundled Dill 0.11.0 does not expose this endpoint** and reports capability-unavailable; this implementation requires the authorized, separately qualified Dill contract update before the complete feature can be released. Legacy SSH sessions without the report remain unavailable, never an empty capability set. A newer bundle is not claimed until its release and paired qualification succeed.
+The new agent `GET /v1/capabilities` document separates monitor methods from configured deployment grants. Values are retained as a sorted JSON-array string with `monitor.` / `deployment.` prefixes. Advertised deployment entries do not authorize a monitor credential to execute. **Bundled Dill 0.12.0 does not expose this endpoint** and reports capability-unavailable; this implementation requires the authorized, separately qualified Dill contract update before the complete feature can be released. Legacy SSH sessions without the report remain unavailable, never an empty capability set. A newer bundle is not claimed until its release and paired qualification succeed.
 
 ## Separate remote deployment credentials
 
@@ -99,7 +99,7 @@ Settings → Webhooks manages endpoints and triggers, displays delivery/request 
 
 Configuration changes and secret display require a browser session and CSRF protection. Authenticated API reads do not expose signing keys. Keys are shown only once after creation/rebinding/rotation and are cleared from the page when dismissed. Worker liveness is reported separately; a stopped worker does not imply an empty queue or a failed deployment.
 
-### Remote lifecycle admission (new paired protocol; not bundled in Dill 0.11.0)
+### Remote lifecycle admission (new paired protocol; not bundled in Dill 0.12.0)
 
 Remote lifecycle bindings currently require an enabled, successfully deployed, reviewed remote Git owner, an exact active enrollment and separate deployment custody. Protected/attended-source workflows and unproven historical owners remain unavailable, not legacy fallbacks. Brine retains the last verified deployment request and journal in the Git policy; lifecycle preview must name that predecessor. A same-name deployment replaced outside Brine cannot inherit the trigger. Enrollment, credential or source changes invalidate the immutable ceiling. Trigger creation remains authenticated and CSRF-protected; execution creates no browser identity.
 
