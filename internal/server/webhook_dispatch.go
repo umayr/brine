@@ -85,7 +85,8 @@ func (d *webhookDispatcher) Validate(ctx context.Context, t webhooks.Trigger) er
 	if e != nil {
 		return e
 	}
-	if st.RemoteGit != nil && (st.RemoteGit.Enabled || st.RemoteGit.Request != "") {
+	// Disabling automation does not move its source to the local engine.
+	if st.RemoteGit != nil {
 		return webhooks.ErrUnsupported
 	}
 	if intents, ok := d.s.store.(store.ManualDeploymentStore); ok {
@@ -94,7 +95,9 @@ func (d *webhookDispatcher) Validate(ctx context.Context, t webhooks.Trigger) er
 			return webhooks.ErrUnsupported
 		}
 		for _, row := range rows {
-			if row.Stack == st.Name && !row.Resolved {
+			// Resolution acknowledges inspection, not local deployment authority.
+			// Retained remote request evidence has no safe implicit target handoff.
+			if row.Stack == st.Name {
 				return webhooks.ErrUnsupported
 			}
 		}

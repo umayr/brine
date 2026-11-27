@@ -117,4 +117,6 @@ History and deduplication are bounded by configured retention. Unresolved unknow
 
 ## Verification boundaries
 
+See [source/target support and evidence limits](webhooks-support.md). Retained remote ownership evidence stays excluded from local incoming execution after policy disable or request inspection; neither is an explicit local target handoff.
+
 The disposable `brine-fixture --synthetic-webhooks` mode exercises production management handlers and ephemeral storage. It deliberately does not start delivery workers, send network requests, or run Dill. Its pending test deliveries are real queue records, not fabricated receiver acknowledgements. Browser checks against that fixture are UI verification, not end-to-end execution qualification.
