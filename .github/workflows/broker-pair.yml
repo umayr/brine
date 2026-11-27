@@ -1,0 +1,73 @@
+name: Broker development pair
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  broker-pair:
+    name: Paired broker contracts and real Docker lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: brine
+      - name: Checkout exact reviewed Dill development dependency
+        uses: actions/checkout@v4
+        with:
+          repository: umayr/dill
+          ref: 9b3677ad4a031c8b18d981f66bedbe2d72bdd1e7
+          path: dill
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: brine/go.mod
+          cache-dependency-path: |
+            brine/go.sum
+            dill/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: brine/package-lock.json
+      - name: Install pinned Pkl and build reviewed Dill
+        working-directory: dill
+        run: |
+          python3 scripts/install-pkl.py "$RUNNER_TEMP/pkl"
+          make build
+      - name: Build web assets and browser tooling
+        working-directory: brine
+        run: |
+          npm ci
+          npm run build:web
+          npx playwright install --with-deps chromium
+      - name: Paired CLI contracts and authenticated synthetic browser flow
+        working-directory: brine
+        env:
+          BRINE_TEST_DILL_BROKER_BINARY: ${{ github.workspace }}/dill/bin/dill
+          BRINE_BROKER_BROWSER_MODULE: ${{ github.workspace }}/brine/node_modules/playwright
+          DILL_PKL_PATH: ${{ runner.temp }}/pkl
+        run: |
+          go test -race ./internal/brokerwire ./internal/dill ./internal/agentclient ./internal/brokerapp -count=1
+          go test -race ./internal/web -run '^TestBrokerAuthenticatedHTTPWorkflow$' -count=1 -v -timeout 180s
+      - name: Real disposable Docker broker lifecycle
+        working-directory: brine
+        run: |
+          # Explicit disposable-host grant; never target an operator service.
+          test "${RUNNER_ENVIRONMENT:-}" = github-hosted
+          test "$(uname -s)" = Linux
+          test ! -e /.dockerenv
+          sudo systemctl is-active --quiet docker
+          docker --host unix:///var/run/docker.sock pull nginx:alpine
+          fixture=$(sudo mktemp -d /srv/brine-broker-ci.XXXXXXXX)
+          sudo chmod 0700 "$fixture"
+          CGO_ENABLED=0 go test -c -o "$RUNNER_TEMP/brokerapp.test" ./internal/brokerapp
+          sudo install -m 0700 "$RUNNER_TEMP/brokerapp.test" "$fixture/brine-brokerapp.test"
+          sudo install -m 0700 "$GITHUB_WORKSPACE/dill/bin/dill" "$fixture/dill"
+          sudo install -m 0700 "$RUNNER_TEMP/pkl" "$fixture/pkl"
+          sudo install -m 0600 "$GITHUB_WORKSPACE/dill/dill.pkl" "$fixture/dill.pkl"
+          sudo env BRINE_BROKER_RUNTIME_TEST=1 BROKER_TEST_ROOT="$fixture" \
+            "$fixture/brine-brokerapp.test" -test.run '^TestBrokerRuntimeLocalFile$' -test.v -test.timeout 300s
