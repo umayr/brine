@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"github.com/umayr/brine/internal/secretbindings"
 	"github.com/umayr/brine/internal/snapshothistory"
 	"github.com/umayr/brine/internal/store"
 	"io"
@@ -32,6 +33,7 @@ func setupSourceRestoreProcess(t *testing.T, ctx context.Context, stack, socket,
 	if e != nil {
 		t.Fatal(e)
 	}
+	t.Cleanup(func() { os.RemoveAll(root) })
 	data, archive, keys := filepath.Join(root, "data"), filepath.Join(root, "archive"), filepath.Join(root, "keys")
 	for _, d := range []string{data, archive, keys} {
 		if e = os.Mkdir(d, 0700); e != nil {
@@ -66,6 +68,27 @@ func setupSourceRestoreProcess(t *testing.T, ctx context.Context, stack, socket,
 		t.Fatal(e)
 	}
 	if e = os.WriteFile(filepath.Join(filepath.Dir(st.PklPath), "dill.pkl"), schema, 0600); e != nil {
+		t.Fatal(e)
+	}
+	// Seed monotonic protection metadata offline with its production writer.
+	// This is a protected-state fixture, not a claimed secret-deployment flow.
+	protectedName := name + "-protected"
+	protected, e := fs.Create(protectedName, string(initial))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(filepath.Dir(protected.PklPath), "dill.pkl"), schema, 0600); e != nil {
+		t.Fatal(e)
+	}
+	state, e := secretbindings.Open(filepath.Join(data, "secret-state"), filepath.Join(data, "stacks"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = state.MarkSecretEnabled(secretbindings.DeploymentID(protectedName)); e != nil {
+		state.Close()
+		t.Fatal(e)
+	}
+	if e = state.Close(); e != nil {
 		t.Fatal(e)
 	}
 	binary := filepath.Join(root, "brine")
@@ -243,6 +266,34 @@ func setupSourceRestoreProcess(t *testing.T, ctx context.Context, stack, socket,
 			t.Fatal("authoritative source changed after acknowledgement", e)
 		}
 		verifyArchive()
+		protectedView, e := fs.ReviewSource(ctx, protectedName)
+		if e != nil || len(protectedView.Revisions) != 0 || !reflect.DeepEqual(protectedView.Files, map[string][]byte{"compose.pkl": initial, "dill.pkl": schema}) {
+			t.Fatal("protected source changed or entered archive", e)
+		}
+		// No process owns this state now. A missing authoritative protection root
+		// must refuse the real CLI startup, not recreate an empty allow-state.
+		protection := filepath.Join(data, "secret-state")
+		if e = os.Rename(protection, protection+"-retained"); e != nil {
+			t.Fatal(e)
+		}
+		restartCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		restart := exec.CommandContext(restartCtx, binary, args...)
+		restart.Env = process.Env
+		isolateFixtureProcess(restart)
+		restart.WaitDelay = time.Second
+		restart.Cancel = func() error { killFixtureGroup(restart); return nil }
+		out, restartErr := restart.CombinedOutput()
+		killFixtureGroup(restart) // stop descendants retaining output after parent exit
+		if restartCtx.Err() != nil || restartErr == nil || !bytes.Contains(out, []byte("source history requires the existing private protection-state directory")) {
+			t.Fatalf("missing protection root did not refuse startup: %v %s", restartErr, out)
+		}
+		if _, e = os.Lstat(protection); !os.IsNotExist(e) {
+			t.Fatal("startup recreated missing protection state", e)
+		}
+		if !bytes.Equal(baseline, runtimeProof()) {
+			t.Fatal("denied restart changed runtime")
+		}
 		db, e := sql.Open("sqlite", filepath.Join(data, "webhooks", "webhooks.db"))
 		if e != nil {
 			t.Fatal(e)
@@ -252,7 +303,7 @@ func setupSourceRestoreProcess(t *testing.T, ctx context.Context, stack, socket,
 		if e = db.QueryRow("SELECT COUNT(*) FROM lifecycle_records").Scan(&executions); e != nil || executions != 0 {
 			t.Fatal("Source Restore executed a runner operation", e, executions)
 		}
-		t.Log("production CLI source review/checkpoint/Restore appended preserved+restored revisions without execution")
+		t.Log("production CLI source review/checkpoint/Restore preserved revisions; protected source denied and lost protection root refused restart without execution")
 	}
 	return proxy, run
 }

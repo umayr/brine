@@ -32,6 +32,14 @@ attestation; root/same-UID/mount topology remain trusted.
   data restoration. Real CLI/Chrome qualification verifies checkpoint, retained
   previous files, a new restored revision, offline exact archive lineage and
   unchanged engine state; it does not qualify protected remote execution.
+- Protected local source: a real CLI/browser fixture provisions monotonic
+  protection metadata offline with the production writer, then proves history
+  controls unavailable, authenticated checkpoint review denied, and webhook
+  options exclude it while still including an eligible sibling. Source bytes,
+  zero retained revisions, unchanged runtime and zero lifecycle records are
+  checked. After shutdown, loss of the protection-state root refuses real CLI
+  startup without recreating it. This is denial/recovery-boundary evidence,
+  **not** a secret-deployment setup or protected execution qualification.
 - Lost successful HTTPS stop response: real target stopped, Brine records unknown,
   holds the binding and never replays. Exact target inspection advances verified
   lineage; a separate browser acknowledgement resolves the queue while preserving
