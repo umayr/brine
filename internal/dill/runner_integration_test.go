@@ -58,7 +58,7 @@ func TestResolveIntegrationPklRejectsNonPkl(t *testing.T) {
 
 // TestReleasedDill exercises Runner against the Dill release bundled with Brine.
 func TestReleasedDill(t *testing.T) {
-	const version = "v0.11.0"
+	const version = "v0.12.0"
 	binary := os.Getenv("BRINE_TEST_DILL")
 	if binary == "" {
 		t.Skip("set BRINE_TEST_DILL and BRINE_TEST_DILL_SCHEMA to opt in")

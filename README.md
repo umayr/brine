@@ -29,6 +29,7 @@ it talks to the container engine directly for container and image views.
 - **Recipes**: reusable Pkl snippets available in the editor.
 - **Appearance settings**: browser-local theme, accent and table density, with live previews
   and reset under Settings → Appearance (`/settings`). The sibling Live Updates tab sets visible stack inventory polling (on by default, every 5 seconds; 5/10/30/60 seconds or manual).
+- **Central secret broker**: operator-provisioned Vault KV v2, Infisical and allowlisted files, reference-only Variables, native reviewed Plan and shared History. Requires explicit private state and a matching engine/executor view; see [setup](docs/broker-secrets.md) and [scoped qualification](docs/broker-runtime-qualification.md).
 - **Auth**: single-admin login with sessions, CSRF protection, and a bearer token for API clients.
 - **Engine alignment**: refuses lifecycle actions when a stack declares a different engine
   than the one Brine is connected to.
@@ -50,8 +51,11 @@ local logLevel = read?("env:BRINE_VAR_LOG_LEVEL") ?? "info"
 // Example use: ["PUBLIC_URL"] = "https://\(domain)"
 ```
 
-Variables are passed only to stack-scoped legacy Dill invocations; they are not
-added to Brine's own environment. Saving
+Legacy invocations receive variables only in the stack-scoped Dill process, not
+Brine's own environment. Broker plans instead freeze bounded non-secret inputs;
+a later variable change invalidates the reviewed inputs. Secret references in
+Variables are separate from these configuration values and never become
+`BRINE_VAR_` secret material. Saving
 or deleting a variable does not redeploy: the next operation uses the current
 values. A change between plan and deploy can change the outcome; re-plan after
 any variable change. Global variables are visible to every legacy stack; they are
@@ -63,7 +67,7 @@ directory; cross-process variable writes are not coordinated.
 
 - Go 1.26+ to build from source
 - Node.js 22+ and npm to build the web assets (`make build` does this for you)
-- A `dill` binary (the image bundles v0.11.0) on `PATH`, or pass `--dill /path/to/dill`.
+- A `dill` binary (the image bundles v0.12.0) on `PATH`, or pass `--dill /path/to/dill`.
   Older binaries that cannot accept explicit stack/engine/socket flags are
   rejected for lifecycle and validation; Brine does not retry against defaults.
 - Pkl (Dill can download it with checksum verification, or set `DILL_PKL_PATH`)
@@ -98,10 +102,10 @@ rather than a floating `latest` tag. A new Brine image updates its bundled
 Dill CLI, not the Dill agents installed on remote hosts. See the
 [remote compatibility note](docs/remote-agent-https.md) before upgrading an agent.
 
-The image bundles Brine, Dill (v0.11.0), and Pkl (0.31.1). As with v0.8.1,
+The image bundles Brine, Dill (v0.12.0), and Pkl (0.31.1). As with v0.8.1,
 Dill can remove containers but retain a stack network and report an error on
 **Down** or **Teardown**. Inspect the target before retrying; see Dill’s
-[lifecycle failure guidance](https://github.com/umayr/dill/blob/v0.11.0/docs/lifecycle-failures.md).
+[lifecycle failure guidance](https://github.com/umayr/dill/blob/v0.12.0/docs/lifecycle-failures.md).
 
 ```sh
 docker build -t brine .
@@ -127,7 +131,7 @@ docker run -d --name brine \
   brine --bind 0.0.0.0 --engine podman --engine-socket unix:///run/podman/podman.sock
 ```
 
-Build args: `DILL_VERSION` (default `0.11.0`), `PKL_VERSION` (default `0.31.1`),
+Build args: `DILL_VERSION` (default `0.12.0`), `PKL_VERSION` (default `0.31.1`),
 `VERSION` (binary version string).
 
 The container runs as root because it needs the Docker socket. Treat access to the

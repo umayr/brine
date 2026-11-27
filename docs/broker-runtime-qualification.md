@@ -1,8 +1,15 @@
-# Broker runtime qualification — development pair
+# Broker runtime qualification
 
-This is **not released support**: Brine's released Dockerfile still bundles Dill
-0.11.0, which does not contain this development contract. Tests use the connected
-Brine/Dill development worktrees, Pkl **0.31.1**, Debian 13 / Linux 6.12.118 amd64,
+The Dockerfile bundles **Dill v0.12.0** with **Pkl 0.31.1**. The paired CI workflow
+verifies the released Dill binary/schema against pinned SHA-256 digests, exercises
+Brine's released runner and authenticated browser fixtures, and runs an actual
+native disposable Docker lifecycle. Image smoke tests verify packaged executable
+versions separately. Neither packaging nor this native test makes an arbitrary
+container a namespace-bound host executor; provisioning must satisfy the documented
+engine/executor namespace, root, ownership and filesystem-view checks.
+
+The historical matrix below used the connected Brine/Dill development worktrees,
+Pkl **0.31.1**, Debian 13 / Linux 6.12.118 amd64,
 Docker **26.1.5**, Podman **5.4.2** and RootlessKit **2.0.2** on a disposable target.
 No existing daemon configuration, Docker context, stack or persistent service was
 changed. Prerequisite package actions were separately authorized and audited via
