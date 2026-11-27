@@ -122,9 +122,14 @@ func lostReplyClient(t *testing.T, ctx context.Context, request, manifest string
 	pub := priv.Public().(ed25519.PublicKey)
 	const engine, socket, daemon = "11111111-1111-4111-8111-111111111111", "unix:///run/docker.sock", "synthetic"
 	token := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("t", 32)))
+	deployToken := base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("d", 32)))
 	calls := new(atomic.Int32)
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+token {
+		expected := deployToken
+		if r.URL.Path == "/v1/session" {
+			expected = token
+		}
+		if r.Method != http.MethodPost || r.Header.Get("Authorization") != "Bearer "+expected {
 			t.Error("unexpected method or credential in loopback fixture")
 			w.WriteHeader(http.StatusForbidden)
 			return
@@ -165,7 +170,7 @@ func lostReplyClient(t *testing.T, ctx context.Context, request, manifest string
 		}
 	}))
 	t.Cleanup(server.Close)
-	c, err := agentclient.NewHTTPS(ctx, strings.TrimPrefix(server.URL, "https://"), fmt.Sprintf("%x", sha256.Sum256(server.Certificate().Raw)), token,
+	c, err := agentclient.NewHTTPSWithDeploymentCredential(ctx, strings.TrimPrefix(server.URL, "https://"), fmt.Sprintf("%x", sha256.Sum256(server.Certificate().Raw)), token, deployToken,
 		agentclient.Binding{AgentPublicKey: pub, EngineID: engine, Generation: 1, EngineKind: "docker", EngineSocket: socket, DaemonID: daemon})
 	if err != nil {
 		t.Fatal(err)

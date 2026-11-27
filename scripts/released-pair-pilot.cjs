@@ -25,12 +25,13 @@ function docker(...args) {
   return execFileSync('docker', ['--context', 'default', ...args], { encoding: 'utf8' }).trim();
 }
 
+const pairOnly = process.argv[2] === '--pair-only';
 const afterRemoval = process.argv[2] === '--after-removal-restart';
 const afterRestart = process.argv[2] === '--after-restart' || afterRemoval;
 const checkpoint = process.env.PILOT_CHECKPOINT;
 
 async function run() {
-  if (!afterRestart) await createWorkspace();
+  if (!afterRestart && !pairOnly) await createWorkspace();
   const browser = await chromium.launch();
   try {
     await exercise(await browser.newPage());
@@ -59,7 +60,7 @@ async function exercise(page) {
     await page.locator('#user').fill('admin');
     await page.locator('#password').fill(process.env.BRINE_AUTH_PASSWORD);
     await page.locator('form[action="/login"] button').click();
-    if (!afterRestart) {
+    if (!afterRestart && (process.env.PILOT_CANDIDATE !== 'true' || pairOnly)) {
       await page.getByLabel('Target ID').fill('released-pilot');
       await page.getByLabel('Private IP and port').fill(process.env.PILOT_AGENT_ADDR);
       await page.getByLabel('Pairing bundle').fill(fs.readFileSync(process.env.PILOT_PAIRING, 'utf8'));
@@ -68,7 +69,8 @@ async function exercise(page) {
     const deploy = page.getByRole('link', { name: 'Deploy a project' });
     await deploy.waitFor();
     const deployURL = new URL(await deploy.getAttribute('href'), base).href;
-    if (!afterRestart) console.log('Authenticated Chromium paired released native Dill agent');
+    if (pairOnly) {console.log('Authenticated Chromium paired released native Dill agent');return;}
+    if (!afterRestart) console.log('Authenticated Chromium using enrolled released native Dill agent');
 
     async function recoverManual() {
       if (process.env.PILOT_CANDIDATE !== 'true') return;
