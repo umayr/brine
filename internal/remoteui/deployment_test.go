@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -98,6 +99,9 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 	var removePreviews, removeCalls, removeGETs atomic.Int32
 	var removalRequest atomic.Value
 	var calls atomic.Int32
+	var checkedMode atomic.Bool
+	var checkedCalls, checkedStatusCalls atomic.Int32
+	var checkedPrior atomic.Value
 	var manifest, catalogDigest atomic.Value
 	var differentManifest atomic.Bool
 	var catalogReads, previewCalls atomic.Int32
@@ -199,10 +203,31 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				t.Error("preview not bound to staged catalog")
 			}
 			w.Header().Set("X-Dill-Journal-Id", journal)
+			if checkedMode.Load() {
+				w.Header().Set("X-Dill-Deployment-Mode", "update")
+				w.Header().Set("X-Dill-Prior-Request", checkedPrior.Load().(string))
+			}
 			if enabled.Load() {
 				w.Header().Set("X-Dill-Create-Enabled", "1")
 			}
 			_, _ = w.Write(plan)
+		case "/v1/deploy/checked-apply":
+			checkedCalls.Add(1)
+			var f map[string]string
+			if !checkedMode.Load() || r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&f) != nil || len(f) != 7 || f["confirm"] != "update" || f["priorRequestId"] != checkedPrior.Load().(string) || f["stack"] != "synthetic" || f["stageId"] != stage || f["manifestSha256"] != catalogDigest.Load() || f["selectionDigest"] != previewResult.Selection || f["requestId"] != strings.Repeat("7", 32) || r.Header.Get("X-Dill-Journal-Id") != journal {
+				t.Error("checked update lost exact owner binding")
+			}
+			persisted, err := store.NewFSStore(data)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			s, err := persisted.Get("synthetic")
+			if err != nil || s.RemoteGit.Request != f["requestId"] || s.RemoteGit.Phase != "pending" || s.RemoteGit.Journal != journal {
+				t.Error("checked apply preceded durable pending intent")
+			}
+			// An HTTP error response is not a target receipt.
+			w.WriteHeader(http.StatusBadGateway)
 		case "/v1/deploy/apply", "/v1/deploy/journal-apply":
 			w.Header().Set("X-Dill-Journal-Id", journal)
 			calls.Add(1)
@@ -311,6 +336,12 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 				return
 			}
 			fmt.Fprintf(w, `{"requestId":%q,"stack":"synthetic","state":"not-admitted","effects":"none"}`, stranded)
+		case "/v1/deploy/operations/" + strings.Repeat("7", 32), "/v1/deploy/operations/" + strings.Repeat("8", 32):
+			checkedStatusCalls.Add(1)
+			if r.Method != http.MethodGet || r.Header.Get("X-Dill-Journal-Id") != journal {
+				t.Error("checked recovery status lost exact journal")
+			}
+			w.WriteHeader(http.StatusNotFound)
 		case "/v1/deploy/operations/" + stranded:
 			http.NotFound(w, r)
 		case "/v1/deploy/operations/" + unknown:
@@ -868,6 +899,73 @@ func TestRemoteDeploymentReviewStageCreateStatus(t *testing.T) {
 		restarted.pollGit(ctx)
 		if calls.Load() != 2 || fenceCalls.Load() != 4 {
 			t.Fatal("recovery caused an automatic submission")
+		}
+		for _, failRollback := range []bool{false, true} {
+			t.Run(fmt.Sprintf("checked dispatch recovery rollback=%v", failRollback), func(t *testing.T) {
+				run("commit", "--allow-empty", "-m", fmt.Sprintf("new reviewed revision %v", failRollback))
+				current, err := fs2.Get("synthetic")
+				if err != nil {
+					t.Fatal(err)
+				}
+				ready := *current.RemoteGit
+				ready.Enabled, ready.Phase, ready.Reason = true, "succeeded", ""
+				ready.Request, ready.Journal = "", ""
+				if ready.DeploymentRequest == "" || ready.DeploymentJournal != journal {
+					t.Fatal("missing real fixture predecessor")
+				}
+				if err := fs2.SwapRemoteGit("synthetic", ready.Source, current.RemoteGit, &ready); err != nil {
+					t.Fatal(err)
+				}
+				checkedPrior.Store(ready.DeploymentRequest)
+				checkedMode.Store(true)
+				defer checkedMode.Store(false)
+				rollback := &failedGitPreDispatchRollback{RemoteGitStore: fs2}
+				if failRollback {
+					restarted.gitStore = rollback
+				}
+				defer func() { restarted.gitStore = fs2 }()
+				record, enrollment, lease, err := restarted.acquireDeploymentTarget(ctx, ready.Host, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				boundCtx := context.WithValue(ctx, deploymentEnrollmentKey{}, enrollment)
+				fresh, _ := fs2.Get("synthetic")
+				binding := lifecycleBinding(fresh, record, enrollment, restarted.deploymentCredentialRevision(boundCtx, record))
+				lease.Close()
+				request := strings.Repeat("7", 32)
+				if failRollback {
+					request = strings.Repeat("8", 32)
+				}
+				beforeCalls, applies := 0, checkedCalls.Load()
+				result := restarted.RunGitDeployment(ctx, "synthetic", binding, request, func() bool { beforeCalls++; return !failRollback })
+				retained := readPolicy()
+				if beforeCalls != 1 || retained.Request != request || retained.Journal != journal || retained.Phase != "pending" || result.Error == nil {
+					t.Fatalf("lost recovery/error boundary: submitted=%v error=%v before=%d request=%q journal=%q phase=%q", result.Submitted, result.Error, beforeCalls, retained.Request, retained.Journal, retained.Phase)
+				}
+				if failRollback {
+					if result.Submitted || !errors.Is(result.Error, ErrAutomationRecovery) || checkedCalls.Load() != applies || rollback.calls != 1 || rollback.request != request || rollback.journal != journal || rollback.unsent == nil || rollback.unsent.Enabled || rollback.unsent.Phase != "blocked" || rollback.unsent.Reason != "not-admitted" {
+						t.Fatal("failed rollback treated as clean or sent", result)
+					}
+				} else if !result.Submitted || result.Status != (agentclient.DeploymentStatus{}) || checkedCalls.Load() != applies+1 {
+					t.Fatal("apply error lost or invented receipt", result)
+				}
+				_ = restarted.RunGitDeployment(ctx, "synthetic", binding, request, func() bool { t.Fatal("uncertain work redispatched"); return true })
+				wantApplies := applies
+				if !failRollback {
+					wantApplies++
+				}
+				if checkedCalls.Load() != wantApplies {
+					t.Fatal("pending checked apply replayed")
+				}
+				// Incoming grants cannot execute or reconcile a pending owner.
+				// Ordinary polling has separate, read-only recovery authority.
+				statusReads := checkedStatusCalls.Load()
+				restarted.pollGitStack(ctx, "synthetic")
+				stillPending := readPolicy()
+				if checkedStatusCalls.Load() != statusReads+1 || checkedCalls.Load() != wantApplies || stillPending.Request != request || stillPending.Journal != journal || stillPending.Phase != "pending" || stillPending.Reason != "status-unavailable" {
+					t.Fatal("pending request was not read-only and retained after unavailable status")
+				}
+			})
 		}
 	})
 }
