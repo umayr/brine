@@ -12,6 +12,7 @@ import (
 // durably before the first submission. An unresolved request is never cleared
 // by disabling automation, restarting Brine, or re-pairing the target.
 type RemoteGitPolicy struct {
+	SourceSync        string `json:"source_sync,omitempty"`
 	DeploymentRequest string `json:"deployment_request,omitempty"`
 	DeploymentJournal string `json:"deployment_journal,omitempty"`
 	Enabled           bool   `json:"enabled"`
@@ -78,6 +79,12 @@ func (p *RemoteGitPolicy) valid() bool {
 	if (p.DeploymentRequest != "" || p.DeploymentJournal != "") && (!remoteGitHex(p.DeploymentRequest, 16) || !remoteGitHex(p.DeploymentJournal, 16)) {
 		return false
 	}
+	if (p.SourceSync != "" && (!remoteGitHex(p.SourceSync, 16) || p.Phase != "blocked" || p.Reason != "source-sync-unconfirmed")) || (p.Reason == "source-sync-unconfirmed" && !remoteGitHex(p.SourceSync, 16)) {
+		return false
+	}
+	if p.Phase == "disabled" && p.Enabled {
+		return false
+	}
 	if p.Host == "" || len(p.Host) > 128 || !remoteGitHex(p.Target, 32) || !remoteGitHex(p.Source, 32) {
 		return false
 	}
@@ -105,10 +112,10 @@ func (p *RemoteGitPolicy) valid() bool {
 		return false
 	}
 	switch p.Phase {
-	case "ready", "succeeded":
+	case "ready", "succeeded", "disabled":
 		return p.Request == "" && p.Reason == ""
 	case "blocked":
-		return p.Request == "" && (p.Reason == "" || p.Reason == "staging-or-preview" || p.Reason == "no-journal" || p.Reason == "journal-capacity" || p.Reason == "not-admitted" || p.Reason == "failed")
+		return p.Request == "" && (p.Reason == "" || p.Reason == "staging-or-preview" || p.Reason == "source-sync-unconfirmed" || p.Reason == "no-journal" || p.Reason == "journal-capacity" || p.Reason == "not-admitted" || p.Reason == "failed")
 	case "pending":
 		return p.Request != "" && (p.Reason == "" || p.Reason == "awaiting-status" || p.Reason == "running" || p.Reason == "unknown" || p.Reason == "status-unavailable")
 	default:

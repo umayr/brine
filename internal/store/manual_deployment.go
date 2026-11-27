@@ -44,8 +44,10 @@ func (i ManualDeploymentIntent) valid() bool {
 		return false
 	}
 	switch i.Mode {
-	case "create", "update":
+	case "create":
 		return i.PriorRequest == "" && remoteGitHex(i.Stage, 16) && remoteGitHex(i.Manifest, 32)
+	case "update":
+		return (i.PriorRequest == "" || (remoteGitHex(i.PriorRequest, 16) && i.PriorRequest != i.Request)) && remoteGitHex(i.Stage, 16) && remoteGitHex(i.Manifest, 32)
 	case "remove", "start", "stop", "restart":
 		return remoteGitHex(i.PriorRequest, 16) && i.PriorRequest != i.Request && i.Stage == "" && i.Manifest == ""
 	}

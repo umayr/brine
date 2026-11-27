@@ -63,7 +63,10 @@ func (h *Deployment) LifecycleTargets(ctx context.Context, stack string) ([]Life
 	if e != nil || !slices.Contains(caps, "deployment.journal") {
 		return nil, ErrAutomationAdmission
 	}
-	actions := []string{}
+	actions := []string{"git-sync"}
+	if slices.Contains(caps, "deployment.stage") && slices.Contains(caps, "deployment.manifest") && slices.Contains(caps, "deployment.preview") {
+		actions = append([]string{"plan"}, actions...)
+	}
 	for _, a := range []string{"start", "stop", "restart"} {
 		if slices.Contains(caps, "deployment."+a) && slices.Contains(caps, "deployment."+a+"-preview") {
 			actions = append(actions, a)

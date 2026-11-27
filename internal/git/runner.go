@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -40,7 +42,34 @@ func (r *Runner) Clone(ctx context.Context, url, branch, destDir string) error {
 
 // Pull fetches from origin and fast-forwards the current branch.
 // Returns true if the local HEAD changed (i.e. there were upstream commits).
-func (r *Runner) Pull(ctx context.Context, repoDir string) (changed bool, resultErr error) {
+func (r *Runner) Pull(ctx context.Context, repoDir string) (bool, error) {
+	return r.pull(ctx, repoDir, nil)
+}
+
+type reviewedSourceContextKey struct{}
+
+// PullBranch uses the explicitly reviewed repository/branch, never mutable
+// origin/upstream configuration. It still rejects dirty or wrong-branch work.
+func (r *Runner) PullBranch(ctx context.Context, repoDir, remote, branch string) (bool, error) {
+	var err error
+	ctx, err = reviewedContext(ctx, repoDir)
+	if err != nil {
+		return false, err
+	}
+	if remote == "" || branch == "" || strings.HasPrefix(remote, "-") || strings.HasPrefix(branch, "-") {
+		return false, fmt.Errorf("invalid reviewed Git source")
+	}
+	effective, e := r.output(ctx, repoDir, "ls-remote", "--get-url", "--", remote)
+	if e != nil || strings.TrimSpace(effective) != remote {
+		return false, fmt.Errorf("reviewed Git URL was rewritten")
+	}
+	current, e := r.output(ctx, repoDir, "symbolic-ref", "--short", "HEAD")
+	if e != nil || strings.TrimSpace(current) != branch {
+		return false, fmt.Errorf("reviewed Git branch changed")
+	}
+	return r.pull(ctx, repoDir, []string{"--", remote, branch})
+}
+func (r *Runner) pull(ctx context.Context, repoDir string, source []string) (changed bool, resultErr error) {
 	observer, _ := ctx.Value(pullObserverContextKey{}).(PullObserver)
 	if observer == nil && r.ObservePull != nil {
 		var e error
@@ -68,7 +97,8 @@ func (r *Runner) Pull(ctx context.Context, repoDir string) (changed bool, result
 			return false, e
 		}
 	}
-	if err := r.run(ctx, repoDir, "pull", "--ff-only", "--quiet"); err != nil {
+	args := append([]string{"pull", "--ff-only", "--quiet"}, source...)
+	if err := r.run(ctx, repoDir, args...); err != nil {
 		return false, err
 	}
 	after, err := r.HeadRef(ctx, repoDir)
@@ -175,7 +205,12 @@ func (r *Runner) output(ctx context.Context, workDir string, args ...string) (st
 // template-installed hooks. Other configuration, including core.fsmonitor,
 // helpers and filters are still trusted and may execute.
 func (r *Runner) command(ctx context.Context, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, r.Binary, append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
+	cmd := exec.CommandContext(ctx, r.Binary, append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
+	if repo, _ := ctx.Value(reviewedSourceContextKey{}).(string); repo != "" {
+		cmd = exec.CommandContext(ctx, r.Binary, append([]string{"--git-dir=" + filepath.Join(repo, ".git"), "--work-tree=" + repo, "-c", "core.hooksPath=/dev/null"}, args...)...)
+		cmd.Env = captureEnvironment(os.Environ())
+	}
+	return cmd
 }
 
 // lockedWriter serializes stdout and stderr writes to the same output stream.

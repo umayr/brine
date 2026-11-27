@@ -240,9 +240,28 @@ config {
 	server := webhookServer(t)
 	fs := server.store.(*store.FSStore)
 	repo := filepath.Join(server.cfg.DataDir, "stacks", stack, "repo")
-	os.MkdirAll(repo, 0700)
-	os.WriteFile(filepath.Join(repo, "compose.pkl"), compose, 0600)
-	registered, err := fs.CreateFromGit(stack, &store.GitSource{URL: "https://example.invalid/synthetic.git", Branch: "main"}, "compose.pkl")
+	origin := filepath.Join(dir, "origin")
+	gitRun := func(where string, args ...string) string {
+		t.Helper()
+		command := exec.CommandContext(ctx, "git", append([]string{"-C", where}, args...)...)
+		b, e := command.CombinedOutput()
+		if e != nil {
+			t.Fatalf("synthetic Git command failed: %v %s", e, b)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	os.Mkdir(origin, 0700)
+	gitRun(origin, "init", "-b", "main")
+	gitRun(origin, "config", "user.email", "fixture@example.invalid")
+	gitRun(origin, "config", "user.name", "Synthetic fixture")
+	os.WriteFile(filepath.Join(origin, "compose.pkl"), compose, 0600)
+	os.WriteFile(filepath.Join(origin, "dill.pkl"), schemaBytes, 0600)
+	gitRun(origin, "add", ".")
+	gitRun(origin, "commit", "-m", "synthetic initial source")
+	initialCommit := gitRun(origin, "rev-parse", "HEAD")
+	os.MkdirAll(filepath.Dir(repo), 0700)
+	gitRun(dir, "clone", "--", origin, repo)
+	registered, err := fs.CreateFromGit(stack, &store.GitSource{URL: origin, Branch: "main"}, "compose.pkl")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +297,7 @@ config {
 	defer deployment.Close()
 	server.remoteDeploy = deployment
 	source := registered.RemoteGitSource()
-	policy := &store.RemoteGitPolicy{Enabled: true, Host: record.ID, Target: metadata["binding"], Source: source, Phase: "succeeded", Commit: fmt.Sprintf("%040x", 1), Seen: fmt.Sprintf("%040x", 1), DeploymentRequest: id, DeploymentJournal: preview.JournalID}
+	policy := &store.RemoteGitPolicy{Enabled: true, Host: record.ID, Target: metadata["binding"], Source: source, Phase: "succeeded", Commit: initialCommit, Seen: initialCommit, DeploymentRequest: id, DeploymentJournal: preview.JournalID}
 	if err = fs.SwapRemoteGit(stack, source, nil, policy); err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +313,15 @@ config {
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); svc.RunTriggers(workerCtx, server.webhookDispatcher) }()
 	defer func() { stopWorker(); <-workerDone }()
-	httpServer := httptest.NewUnstartedServer(server.router)
+	operator := deployment.Protected()
+	fixtureRouter := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/remote/deployment") {
+			operator.ServeHTTP(w, r)
+			return
+		}
+		server.router.ServeHTTP(w, r)
+	})
+	httpServer := httptest.NewUnstartedServer(fixtureRouter)
 	browserFixture := os.Getenv("BRINE_REMOTE_BROWSER_FIXTURE") == "1"
 	if browserFixture {
 		httpServer.Listener.Close()
@@ -368,7 +395,13 @@ config {
 	}
 	var lastTrigger webhooks.Trigger
 	var lastSecret string
-	for i, action := range []string{"stop", "start", "restart"} {
+	var syncTrigger webhooks.Trigger
+	var syncSecret string
+	os.WriteFile(filepath.Join(origin, "compose.pkl"), append(append([]byte{}, compose...), []byte("\n// synthetic upstream change\n")...), 0600)
+	gitRun(origin, "add", ".")
+	gitRun(origin, "commit", "-m", "synthetic upstream")
+	upstreamCommit := gitRun(origin, "rev-parse", "HEAD")
+	for i, action := range []string{"plan", "git-sync", "stop", "start", "restart"} {
 		beforeAction, _ := fs.Get(stack)
 		previousHead := beforeAction.RemoteGit.DeploymentRequest
 		if action == "stop" {
@@ -407,6 +440,9 @@ config {
 			t.Fatal("real session trigger creation failed", response.StatusCode)
 		}
 		lastTrigger, lastSecret = created.Trigger, created.Secret
+		if action == "git-sync" {
+			syncTrigger, syncSecret = created.Trigger, created.Secret
+		}
 		payload := fmt.Sprintf(`{"id":"synthetic-%d"}`, i)
 		send := func(signature bool) *http.Response {
 			timestamp := strconv.FormatInt(time.Now().Unix(), 10)
@@ -448,13 +484,23 @@ config {
 			time.Sleep(20 * time.Millisecond)
 		}
 		running, current := inspect()
-		if (action == "stop" && running) || (action != "stop" && (!running || current == started)) {
+		sourceAction := action == "plan" || action == "git-sync"
+		if sourceAction {
+			if !running || current != started {
+				t.Fatal("source action changed runtime", action)
+			}
+			head := gitRun(repo, "rev-parse", "HEAD")
+			if action == "plan" && head != initialCommit || action == "git-sync" && head != upstreamCommit {
+				t.Fatal("source-only action did not preserve/sync expected workspace", action, head)
+			}
+		}
+		if (action == "stop" && running) || (!sourceAction && action != "stop" && (!running || current == started)) {
 			t.Fatal("signed incoming did not produce actual runtime effect", action, running)
 		}
 		started = current
 		before, _ := fs.Get(stack)
 		head := before.RemoteGit.DeploymentRequest
-		if head == previousHead || head == "" {
+		if (sourceAction && head != previousHead) || (!sourceAction && (head == previousHead || head == "")) {
 			t.Fatal("successful incoming did not advance reviewed target head")
 		}
 		if send(true).StatusCode != 202 {
@@ -525,4 +571,117 @@ config {
 		t.Fatal("outside replacement inherited scoped execution")
 	}
 	t.Log("same-name outside deployment cannot inherit signed trigger")
+	// A fetch failing after the source mutation boundary remains unknown and
+	// blocks every remote action until explicitly inspected/reconfigured.
+	if e := os.Rename(origin, origin+"-offline"); e != nil {
+		t.Fatal(e)
+	}
+	failedPayload := []byte(`{"id":"upstream-unavailable"}`)
+	stamp := strconv.FormatInt(time.Now().Unix(), 10)
+	failedReq, _ := http.NewRequestWithContext(ctx, "POST", httpServer.URL+"/hooks/"+syncTrigger.ID, bytes.NewReader(failedPayload))
+	failedReq.Header.Set("Content-Type", "application/json")
+	failedReq.Header.Set("Brine-Timestamp", stamp)
+	failedReq.Header.Set("Brine-Signature", webhooks.Sign([]byte(syncSecret), stamp, failedPayload))
+	failedResponse, e := http.DefaultClient.Do(failedReq)
+	if e != nil {
+		t.Fatal(e)
+	}
+	io.Copy(io.Discard, failedResponse.Body)
+	failedResponse.Body.Close()
+	if failedResponse.StatusCode != 202 {
+		t.Fatal("source unknown fixture not admitted", failedResponse.StatusCode)
+	}
+	deadline = time.Now().Add(20 * time.Second)
+	uncertain := false
+	for time.Now().Before(deadline) {
+		rows, e := svc.Requests(ctx, syncTrigger.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, row := range rows {
+			if row.IdempotencyKey == "upstream-unavailable" && row.Status == "unknown" {
+				uncertain = true
+			}
+		}
+		if uncertain {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	blocked, _ := fs.Get(stack)
+	if !uncertain || blocked.RemoteGit.Phase != "blocked" || blocked.RemoteGit.Reason != "source-sync-unconfirmed" {
+		t.Fatal("uncertain source mutation did not persist shared block")
+	}
+	if server.webhookDispatcher.Validate(ctx, lastTrigger) == nil {
+		t.Fatal("source uncertainty did not block lifecycle")
+	}
+	_, afterFailedSource := inspect()
+	if afterFailedSource != afterStart {
+		t.Fatal("failed source sync changed runtime")
+	}
+	t.Log("uncertain source-only sync stays unknown and blocks remote lifecycle without deploying")
+	form := url.Values{"_csrf": {csrf}, "host": {record.ID}, "stack": {stack}, "source": {source}, "target": {metadata["binding"]}, "mode": {"disable"}}
+	ordinary, e := browser.PostForm(httpServer.URL+"/remote/deployment/git-config", form)
+	if e != nil {
+		t.Fatal(e)
+	}
+	io.Copy(io.Discard, ordinary.Body)
+	ordinary.Body.Close()
+	if ordinary.StatusCode != 409 {
+		t.Fatal("plain disable released uncertain source", ordinary.StatusCode)
+	}
+	form.Set("mode", "recover-source")
+	form.Set("confirm", "inspected-source-disable")
+	form.Set("source_sync", strings.Repeat("0", 32))
+	stale, e := browser.PostForm(httpServer.URL+"/remote/deployment/git-config", form)
+	if e != nil {
+		t.Fatal(e)
+	}
+	io.Copy(io.Discard, stale.Body)
+	stale.Body.Close()
+	if stale.StatusCode != 409 {
+		t.Fatal("stale source incident acknowledgement accepted", stale.StatusCode)
+	}
+	if browserFixture {
+		deadline = time.Now().Add(30 * time.Second)
+		for time.Now().Before(deadline) {
+			s, e := fs.Get(stack)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if !s.RemoteGit.Enabled && s.RemoteGit.Reason == "" {
+				break
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+	} else {
+		form.Set("mode", "recover-source")
+		form.Set("confirm", "inspected-source-disable")
+		form.Set("source_sync", blocked.RemoteGit.SourceSync)
+		inspection, e := browser.PostForm(httpServer.URL+"/remote/deployment/git-config", form)
+		if e != nil {
+			t.Fatal(e)
+		}
+		io.Copy(io.Discard, inspection.Body)
+		inspection.Body.Close()
+		if inspection.StatusCode != 200 {
+			t.Fatal("explicit source inspection failed", inspection.StatusCode)
+		}
+	}
+	inspected, _ := fs.Get(stack)
+	if inspected.RemoteGit.Enabled || inspected.RemoteGit.Reason != "" || inspected.RemoteGit.Phase != "disabled" || inspected.RemoteGit.SourceSync != "" {
+		t.Fatal("source inspection did not disable automation")
+	}
+	rows, _ := svc.Requests(ctx, syncTrigger.ID)
+	keptUnknown := false
+	for _, r := range rows {
+		if r.IdempotencyKey == "upstream-unavailable" && r.Status == "unknown" {
+			keptUnknown = true
+		}
+	}
+	_, afterInspection := inspect()
+	if !keptUnknown || afterInspection != afterFailedSource {
+		t.Fatal("source inspection rewrote history or executed runtime")
+	}
+	t.Log("authenticated source inspection disables policy without replay or outcome fabrication")
 }

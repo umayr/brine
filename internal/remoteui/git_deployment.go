@@ -82,7 +82,25 @@ func (h *Deployment) gitSettings(ctx context.Context, w http.ResponseWriter, r *
 				break
 			}
 			policy = &next
+		case "recover-source":
+			if policy == nil || policy.Host != p.Host || policy.Source != source || policy.Target != target || policy.Reason != "source-sync-unconfirmed" || policy.Request != "" || form.Get("source") != source || form.Get("target") != target || form.Get("confirm") != "inspected-source-disable" || form.Get("source_sync") != policy.SourceSync || policy.SourceSync == "" {
+				http.Error(w, "Explicit source inspection required; no operation retried", 409)
+				return
+			}
+			next := *policy
+			next.Enabled = false
+			next.Phase, next.Reason = "disabled", ""
+			next.SourceSync = ""
+			if h.gitStore.SwapRemoteGit(p.Stack, source, policy, &next) != nil {
+				http.Error(w, "Source state changed; inspect again", 409)
+				return
+			}
+			policy = &next
 		case "disable":
+			if policy != nil && policy.Reason == "source-sync-unconfirmed" {
+				http.Error(w, "Source sync outcome requires explicit inspection before disabling", 409)
+				return
+			}
 			if policy == nil || policy.Host != p.Host || !policy.Enabled {
 				http.Error(w, "Remote Git policy changed", 409)
 				return

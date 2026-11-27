@@ -87,7 +87,7 @@ func (c *Client) previewDeployment(ctx context.Context, epoch, stack, path, acti
 			return nil, ErrProtocol
 		}
 	} else {
-		if prior != "" || (mode != "" && mode != "create" && mode != "update") {
+		if (prior != "" && (mode != "update" || !canonicalHex(prior, 16))) || (mode != "" && mode != "create" && mode != "update") {
 			return nil, ErrProtocol
 		}
 		if mode == "" && resp.Header.Get("X-Dill-Create-Enabled") == "1" {

@@ -140,7 +140,7 @@ func TestAutomationLifecycleBindsReviewedHeadAndPreservesRecovery(t *testing.T) 
 	if e != nil || len(targets) != 1 {
 		t.Fatal(targets, e)
 	}
-	if len(targets[0].Actions) != 1 || targets[0].Actions[0] != "stop" {
+	if len(targets[0].Actions) != 2 || targets[0].Actions[0] != "git-sync" || targets[0].Actions[1] != "stop" {
 		t.Fatal("ungranted lifecycle action advertised")
 	}
 	capsUnavailable.Store(true)

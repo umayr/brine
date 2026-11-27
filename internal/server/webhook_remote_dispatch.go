@@ -26,7 +26,7 @@ func (d *webhookDispatcher) remoteOptions(ctx context.Context, stackID, stack st
 	return out
 }
 func (d *webhookDispatcher) validateRemote(ctx context.Context, t webhooks.Trigger) error {
-	if t.Action != "start" && t.Action != "stop" && t.Action != "restart" {
+	if t.Action != "start" && t.Action != "stop" && t.Action != "restart" && t.Action != "plan" && t.Action != "git-sync" {
 		return webhooks.ErrUnsupported
 	}
 	s, e := d.findStack(ctx, t.StackID)
@@ -46,12 +46,15 @@ func (d *webhookDispatcher) executeRemote(ctx context.Context, t webhooks.Trigge
 	if e != nil || d.validateRemote(ctx, t) != nil {
 		return result
 	}
-	op, e := d.s.webhooks.BeginOperation(ctx, webhooks.Event{ID: request.ID, Stack: webhooks.Resource{ID: t.StackID, Name: s.Name, Kind: "stack"}, Source: webhooks.Resource{Kind: "git"}, Target: webhooks.Resource{ID: t.TargetID, Kind: "remote"}, Action: t.Action})
+	op, e := d.s.webhooks.BeginOperation(ctx, webhooks.Event{ID: request.ID, Stack: webhooks.Resource{ID: t.StackID, Name: s.Name, Kind: "stack"}, Source: webhooks.Resource{Kind: "git"}, Target: remoteOperationTarget(t), Action: t.Action})
 	if e != nil {
 		return webhooks.TriggerResult{Status: "unknown", Outcome: "unknown", Reason: "operation_history_unavailable", OperationID: request.ID}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 6*time.Minute)
 	defer cancel()
+	if t.Action == "plan" || t.Action == "git-sync" {
+		return d.executeRemoteSource(ctx, t, request, op, s.Name)
+	}
 	id := sha256.Sum256([]byte("brine-webhook-target/1\x00" + request.ID))
 	out, e := d.s.remoteDeploy.RunLifecycle(ctx, s.Name, t.TargetID, t.Action, fmt.Sprintf("%x", id[:16]), func() bool { return op.Started(ctx) == nil })
 	result, kind, outcome, effects, reason := remoteLifecycleResult(request.ID, out, e)
