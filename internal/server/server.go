@@ -105,28 +105,7 @@ func (s *Server) Run(ctx context.Context) (runErr error) {
 		if local, ok := s.agent.(*agent.LocalAgent); ok {
 			local.AddSecretRecordLookup(broker.Protected)
 		}
-		runner := s.agent.Dill()
-		if runner != nil {
-			oldAction, oldValidate := runner.BeforeLegacyAction, runner.BeforeLegacyValidate
-			runner.BeforeLegacyAction = func(ctx context.Context, stack string) error {
-				if err := broker.RequireUnprotected(stack); err != nil {
-					return err
-				}
-				if oldAction != nil {
-					return oldAction(ctx, stack)
-				}
-				return nil
-			}
-			runner.BeforeLegacyValidate = func(ctx context.Context, stack string) error {
-				if err := broker.RequireUnprotected(stack); err != nil {
-					return err
-				}
-				if oldValidate != nil {
-					return oldValidate(ctx, stack)
-				}
-				return nil
-			}
-		}
+		installBrokerLegacyGates(s.agent.Dill(), broker)
 	}
 	if s.cfg.SourceHistoryDir != "" {
 		archive, err := snapshothistory.OpenSourceArchive(s.cfg.SourceHistoryDir, s.cfg.SourceHistoryKey, s.cfg.DataDir, s.cfg.SourceHistoryLimits)

@@ -1,6 +1,6 @@
 # Broker runtime qualification
 
-The Dockerfile now bundles **Dill v0.13.0** with **Pkl 0.31.1**. The earlier broker-runtime baseline below used 0.12.0; it is not evidence that the new broker notification boundary has been qualified on 0.13.0. The paired CI workflow
+The Dockerfile now bundles **Dill v0.13.0** with **Pkl 0.31.1**. The earlier broker-runtime baseline below used 0.12.0. Separately, `TestBrokerWebhookProductionBrowser` now qualifies the real file-provider/local-Docker operator path through the production CLI on published 0.13.0, including signed HTTPS notifications and protected-source denials; it does not claim every earlier backend/provider combination has been rerun. The paired CI workflow
 verifies the released Dill binary/schema against pinned SHA-256 digests, exercises
 Brine's released runner and authenticated browser fixtures, and runs an actual
 native disposable Docker lifecycle. Image smoke tests verify packaged executable

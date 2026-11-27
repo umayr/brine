@@ -3,8 +3,9 @@
 This is an implementation and evidence matrix, **not a release verdict**. The
 Dockerfile bundles released Dill **0.13.0** with Pkl **0.31.1**. Verified published
 binaries/schema pass managed Linux Docker, HTTPS SDK and the signed all-six-action
-browser flow. Protected broker producer/operator qualification, final review and
-Brine CI/merge remain release work, not phased support.
+browser flow. The protected file-provider operator flow also produces matching signed HTTPS
+notifications. Final whole integration review and Brine CI/merge remain release
+work, not phased support.
 
 ## Incoming actions
 
@@ -24,6 +25,23 @@ Brine CI/merge remain release work, not phased support.
 under the actual operation's admission boundary. Unsupported/unavailable is not
 an empty successful target response. Local socket identity is not physical
 attestation; root/same-UID/mount topology remain trusted.
+
+## Protected operator producer qualification
+
+`TestBrokerWebhookProductionBrowser` runs the actual Brine CLI/Server on the
+published 0.13.0 pair. A real browser logs in, saves a file-provider reference,
+reviews native Plan and explicitly confirms apply. Before confirmation neither
+owned container nor network exists; afterward the running workload consumes the
+exact provider bytes, checked privately. Plan/deploy durable facts match actual
+HMAC-verified private HTTPS deliveries and durable delivery acknowledgements.
+Provider values/references are excluded from payloads, including checked streams.
+Repeated authenticated status reads preserve container ID/start time and native
+history. Protected checkpoint review and all six enabled trigger-creation attempts
+are denied; an unprotected sibling can create (but does not invoke) a trigger.
+Source protection comes from the real broker registration/deployment, not seeded
+secret flags. This qualifies the file-provider/local-Docker path and the shared
+observer boundary, not every Vault/Infisical/Podman combination. Those existing
+provider contracts retain their separate component and baseline runtime evidence.
 
 ## Outgoing transport qualification
 
