@@ -24,6 +24,18 @@ under the actual operation's admission boundary. Unsupported/unavailable is not
 an empty successful target response. Local socket identity is not physical
 attestation; root/same-UID/mount topology remain trusted.
 
+## Outgoing transport qualification
+
+`TestRealHTTPSDeliveryPreservesUnknownAndHistory` is an opt-in disposable Linux
+check using production service initialization and sender workers against a generated
+TLS receiver on a private, non-loopback interface. Default trust rejects the
+untrusted certificate before HTTP; fixture-only trust then permits HMAC-verified
+delivery and explicit redelivery through the unchanged destination policy. Three
+attempts and stable delivery identity persist, the reported operation remains
+unknown, and receiver response bodies are not retained. It needs neither an engine
+socket nor published host ports. This is transport evidence, not a substitute for
+producer/catalog and operator qualification.
+
 ## Restore and uncertainty
 
 - Source Restore is a separate authenticated browser-only, private local archive
